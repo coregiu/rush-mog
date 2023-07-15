@@ -28,7 +28,7 @@ Ago是语音控制万向轮小车，车载视频自动识别机械臂。
 
 #### 软件设计
 
-![](software/class_design.png)
+![](software/archetecture.png)
 
 详细参照：[软件设计说明和代码](software/README.md)
 
@@ -56,7 +56,7 @@ Ago是语音控制万向轮小车，车载视频自动识别机械臂。
 | 关闭摄像头   | 关闭摄像头                       | F     |         |
 
 详细参照下图：
-![](software/vedio_control/ago-command.png)
+![](software/audio_control/ago-command.png)
 
 ## 成品效果
 
