@@ -147,10 +147,14 @@ $ st-flash --version
 
 安装python serial: https://www.geeksforgeeks.org/how-to-install-python-serial-package-on-linux/
 
-如果执行: stcflash报错： usr/bin/env: ‘python’: No such file or directory
+如果执行报错： usr/bin/env: ‘python’: No such file or directory
 
 执行以下命令解决： sudo ln -s /usr/bin/python3 /usr/bin/python
 
 - 串口调试工具： comtool
 
 安装： sudo pipe3 install comtool
+
+
+# 参考
+https://github.com/larriti/stm32f10x-template
