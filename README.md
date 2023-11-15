@@ -121,7 +121,7 @@ https://b23.tv/4TEsZSw
 
 ubuntu下安装： apt install arm-none-eabi-gcc
 
-- 烧录软件stlink
+- 烧录软件1: stlink
 ```shell
 # 安装依赖
 $ sudo apt-get install libusb-1.0
@@ -135,13 +135,31 @@ $ cmake
 $ make
 $ cd bin
 $ sudo cp st-* /usr/local/bin
+$ sudo cp -r ../../config/chips /usr/local/share/stlink
 $ cd ../lib
 $ sudo cp *.so* /lib32
 $ cd ../..
 $ sudo cp config/udev/rules.d/49-stlinkv* /etc/udev/rules.d/
+$ sudo apt install stlink-tools
+$ sudo apt install stlink-gui
+
+
 $ st-flash --version
         v1.7.0
+
+# 安装JLink
+$ sudo apt install libreadline-dev
+
+# 烧录软件
+$ st-flash write STM32F10x-Template.bin 0x8000000
 ```
+- 烧录软件2：flymcu的stm32flash
+```shell
+# 安装软件
+$ sudo apt-get install stm32flash
+$ sudo stm32flash -w STM32F10x-Template.hex -v -g 0x0 /dev/ttyUSB0
+```
+
 
 - 依赖： python3, python-pip3, python serial
 
