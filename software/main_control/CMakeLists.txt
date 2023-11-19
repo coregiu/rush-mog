@@ -2,7 +2,7 @@
 cmake_minimum_required (VERSION 3.1)
 
 # Project Infomation
-project( STM32F10x-Template )
+project( ago-main-ctrl )
 enable_language(ASM)
 
 # Reset output path
