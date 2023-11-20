@@ -11,12 +11,12 @@
 	LED_Init();		  	//初始化与LED连接的硬件接口
 	while(1)
 	{
-		GPIO_ResetBits(GPIOA,GPIO_Pin_8); //LED0输出低
-		GPIO_SetBits(GPIOD,GPIO_Pin_2);//LED1输出高
-		delay_ms(300);
-		GPIO_SetBits(GPIOA,GPIO_Pin_8);//LED0输出高
-		GPIO_ResetBits(GPIOD,GPIO_Pin_2);//LED1输出低
-		delay_ms(300);
+		LED0=0;
+		LED1=1;
+		delay_ms(300);	 //延时300ms
+		LED0=1;
+		LED1=0;
+		delay_ms(300);	//延时300ms
 	}
  }
 
