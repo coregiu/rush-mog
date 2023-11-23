@@ -82,3 +82,11 @@ IO口分配如下：
 #### 树莓派
 <img src="modules/raspberry.jpg" />
 树莓派4B+摄像头进行图像识别处理。
+
+#### 电源及电压转换板
+小车上有12V，5V， 3.3V三种电压，最好用12V供电电源，并用电压转换板转换一下。
+<img src="modules/power_module.jpg" />
+
+#### 音频放大器
+如果嫌声音小，可以这个放大器进一步放大音量。
+<img src="modules/upper.jpg" />
