@@ -85,7 +85,7 @@ https://b23.tv/4TEsZSw
 
 | 模块          | 说明                                                         | 价格(元) |
 | ------------- | ------------------------------------------------------------ | -------- |
-| stm32f103     | 控制单板，作为控制中心。                                        | 110       |
+| stm32f103C8T6     | 控制单板，作为控制中心。                                        | 15       |
 | 小车底盘       | 金属底盘，JGB 37 520电机带霍尔效应编码器，麦克纳姆万向轮             | 350       |
 | L298N四驱板    | 四驱的L298N电机驱动                                           | 28       |
 | 语音控制模块    | ASR PRO语音控制板                                             | 25       |
@@ -96,89 +96,3 @@ https://b23.tv/4TEsZSw
 | 树莓派4B       | 树莓派4B用于图像识别和人工智能计算                                | 600       |
 
 小车底盘、机械臂可以分开买，拼多多也有组装好的套件，组装好的套件贵一些，分开买便宜。
-
-
-
-## 使用的相关工具软件：
-
-#### OS： Ubuntu 20.04
-
-
-
-#### 硬件设计工具KiCAD
-
-安装：https://docs.kicad.org/5.1/zh/getting_started_in_kicad/getting_started_in_kicad.html
-
-
-
-#### 软件设计开发工具:
-
-- 软件设计工具： StarUML  https://staruml.io/download
-
-- 开发IDE： VSCODE
-
-- 编译软件： arm-none-eabi-gcc, cmake
-
-ubuntu下安装： apt install arm-none-eabi-gcc
-
-- 烧录软件1: stlink
-```shell
-# 安装依赖
-$ sudo apt-get install libusb-1.0
-$ sudo apt-get install cmake
-$ sudo apt-get install libgtk-3-dev
-
-# 安装
-$ git clone https://github.com/stlink-org/stlink
-$ cd stlink
-$ cmake
-$ make
-$ cd bin
-$ sudo cp st-* /usr/local/bin
-$ sudo cp -r ../../config/chips /usr/local/share/stlink
-$ cd ../lib
-$ sudo cp *.so* /lib32
-$ cd ../..
-$ sudo cp config/udev/rules.d/49-stlinkv* /etc/udev/rules.d/
-$ sudo apt install stlink-tools
-$ sudo apt install stlink-gui
-
-
-$ st-flash --version
-        v1.7.0
-
-# 安装JLink
-$ sudo apt install libreadline-dev
-
-# 烧录软件
-$ st-flash write STM32F10x-Template.bin 0x8000000
-```
-- 烧录软件2：flymcu的stm32flash
-```shell
-# 安装软件
-$ sudo apt-get install stm32flash
-$ sudo stm32flash -w STM32F10x-Template.hex -v -g 0x0 /dev/ttyUSB0
-
-# 安装软件
-$ sudo apt-get install ninja-build
-
-# 下载安装stm32cubemx，官网地址：
-https://www.st.com/en/development-tools/stm32cubemx.html
-```
-
-
-- 依赖： python3, python-pip3, python serial
-
-安装python serial: https://www.geeksforgeeks.org/how-to-install-python-serial-package-on-linux/
-
-如果执行报错： usr/bin/env: ‘python’: No such file or directory
-
-执行以下命令解决： sudo ln -s /usr/bin/python3 /usr/bin/python
-
-- 串口调试工具： comtool
-
-安装： sudo pipe3 install comtool
-
-
-# 参考
-https://github.com/larriti/stm32f10x-template

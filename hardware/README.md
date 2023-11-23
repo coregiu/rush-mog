@@ -90,3 +90,7 @@ IO口分配如下：
 #### 音频放大器
 如果嫌声音小，可以这个放大器进一步放大音量。
 <img src="modules/upper.jpg" />
+
+## 硬件设计工具KiCAD
+
+安装：https://docs.kicad.org/5.1/zh/getting_started_in_kicad/getting_started_in_kicad.html
