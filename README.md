@@ -158,6 +158,12 @@ $ st-flash write STM32F10x-Template.bin 0x8000000
 # 安装软件
 $ sudo apt-get install stm32flash
 $ sudo stm32flash -w STM32F10x-Template.hex -v -g 0x0 /dev/ttyUSB0
+
+# 安装软件
+$ sudo apt-get install ninja-build
+
+# 下载安装stm32cubemx，官网地址：
+https://www.st.com/en/development-tools/stm32cubemx.html
 ```
 
 
