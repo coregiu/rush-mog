@@ -27,7 +27,7 @@ Ago智能系统包括语音控制系统，主控制系统（包括机械臂控�
 | 关闭摄像头   | 关闭摄像头                       | F     |         |
 
 使用天问Block软件进行界面化编辑，如下图：
-![](audio_control/ago-command.png)
+![](vedio_control/ago-command.png)
 
 使用串口2向主控板通信，TX针脚：PA_5， RX针脚：PA_6，波特率： 9600
 
