@@ -22,7 +22,8 @@ static void clock_init(void)
     /* Reset the RCC clock configuration to the default reset state. */
     /* HSI ON, PLL OFF, HSE OFF, system clock = 72 MHz, cpu_clock = 72 MHz */
     RCC_DeInit();
-    SystemCoreClockUpdate(); /* BluePill board runs at 72 MHz */
+    /* BluePill board runs at 72 MHz */
+    SystemCoreClockUpdate();
 
     if (SysTick_Config(SystemCoreClock / 1000))
     {

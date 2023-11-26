@@ -1,7 +1,7 @@
-# Ago
-Ago: AI gogo, the artificial intelligence universal wheel trolley, voice control, on-board video recognition robotic arm.
+# AGO
+AGO: AI GOGO, the artificial intelligence universal wheel trolley, voice control, on-board video recognition， and auto controlled robotic arm.
 
-Ago是语音控制万向轮小车，车载视频自动识别机械臂。
+AGO是语音控制万向轮小车，车载视频自动智能识别系统，自动控制机械臂。
 
 ## 功能说明
 ### 语音控制小车行驶
@@ -59,7 +59,7 @@ Ago是语音控制万向轮小车，车载视频自动识别机械臂。
 | 关闭智能模式 | 关闭智能模式                      | I     |         |
 
 详细参照下图：
-![](software/vedio_control/ago-command.png)
+![](software/audio_control/ago-command.png)
 
 ## 成品效果
 
@@ -88,11 +88,11 @@ https://b23.tv/4TEsZSw
 
 | 模块          | 说明                                                         | 价格(元) |
 | ------------- | ------------------------------------------------------------ | -------- |
-| stm32f103C8T6     | 控制单板，作为控制中心。                                        | 15       |
+| STM32f103C8T6 | 控制单板，作为控制中心。                                        | 15       |
 | 小车底盘       | 金属底盘，JGB 37 520电机带霍尔效应编码器，麦克纳姆万向轮             | 350       |
 | L298N四驱板    | 四驱的L298N电机驱动                                           | 28       |
 | 语音控制模块    | ASR PRO语音控制板                                             | 25       |
-| 电源          | 12V电源，DC接口                                               | 25       |
+| 电源及转换板    | 12V电源，DC接口。 12V转5V和3.3V转换板。                         | 40       |
 | 摄像头         | OV7725摄像头模块                                               | 10       |
 | 机械臂         | 机械臂器件带舵机                                               | 200       |
 | 舵机驱动       | PCA9685 16路舵机驱动                                          | 16       |
