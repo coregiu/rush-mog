@@ -18,7 +18,7 @@
 #include "log.h"
 
 // define the single light
-#define LED PCout(13)	//PC13
+#define LED PCout(13)	//PC13 0-light up; 1-turn off.
 
 #define COMMANDS_LENGTH 20
 

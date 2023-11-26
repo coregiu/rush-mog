@@ -39,15 +39,16 @@ void init_modules()
 {
     init_command_led();
 
-    // audio_receiver.init();
+    audio_receiver.init();
     vehicle_executor.init();
 }
 
 /**
  * receive commands from clients.
  */
-char *receive_commands()
+char* receive_commands()
 {
+    return audio_receiver.receive_commands();
 }
 
 /**

@@ -10,35 +10,12 @@
 
 #include <controller.h>
 
-// static volatile uint32_t s_tick_count = 0;
+static volatile uint32_t s_tick_count = 0;
 
-// #define LED_PIN GPIO_Pin_13
-// #define LED0 PCout(13)	// PC13
-
-// void SysTick_Handler(void)
-// {
-//     s_tick_count++;
-// }
-
-// static void led_init(void)
-// {
-//     // RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOC, ENABLE);
-//     // GPIO_InitTypeDef gpio_out = {
-//     //     .GPIO_Pin = LED_PIN,
-//     //     .GPIO_Mode = GPIO_Mode_Out_PP,
-//     //     .GPIO_Speed = GPIO_Speed_2MHz,
-//     // };
-//     // GPIO_Init(GPIOC, &gpio_out);
-//     GPIO_InitTypeDef GPIO_InitStructure;
-
-//     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOC | RCC_APB2Periph_GPIOD, ENABLE); //使能PA,PD端口时钟
-
-//     GPIO_InitStructure.GPIO_Pin = GPIO_Pin_13;        //LED0-->PA.8 端口配置
-//     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_Out_PP;  //推挽输出
-//     GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz; //IO口速度为50MHz
-//     GPIO_Init(GPIOC, &GPIO_InitStructure);            //根据设定参数初始化GPIOA.8
-//     GPIO_SetBits(GPIOC, GPIO_Pin_13);                 //PC.13 输出高
-// }
+void SysTick_Handler(void)
+{
+    s_tick_count++;
+}
 
 static void clock_init(void)
 {
@@ -63,7 +40,13 @@ int main(void)
 
 	while(1)
 	{
-		LED=~LED;
+		// GPIO_WriteBit(GPIOC, GPIO_Pin_13, Bit_RESET);
+		// delay_ms(2000);
+        // GPIO_WriteBit(GPIOC, GPIO_Pin_13, Bit_SET);
+		// delay_ms(2000);
+        LED = 0;
+		delay_ms(2000);
+        LED = 1;
 		delay_ms(2000);
         execute_commands("1C");
 		delay_ms(2000);
