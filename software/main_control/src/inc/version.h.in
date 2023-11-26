@@ -1,0 +1,8 @@
+#ifndef _VERSION_H_
+#define _VERSION_H_
+
+#define     VER_MAJOR          ${PROJECT_VERSION_MAJOR}
+#define     VER_MINOR          ${PROJECT_VERSION_MINOR}
+#define     VER_DEBUG          ${PROJECT_VERSION_PATCH}
+
+#endif /* _VERSION_H_ */

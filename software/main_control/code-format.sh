@@ -1,0 +1,1 @@
+./tools/format.sh --recursive "src/src/*.c" "src/inc/*.h" "src/src/*.cpp" "src/src/*.hpp"

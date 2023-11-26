@@ -1,0 +1,6 @@
+find_program(OPENOCD_EXECUTABLE "openocd" PATHS /opt/xpack-openocd-0.11.0-1/bin/)
+if (NOT OPENOCD_EXECUTABLE)
+    message(WARNING "openocd not found!")
+else()
+    message(STATUS "The openocd found in " ${OPENOCD_EXECUTABLE})
+endif()
