@@ -45,6 +45,7 @@ IO口分配如下：
 <img src="modules/board.jpg" style="zoom:60%;" />
 <img src="modules/motor.jpg" style="zoom:60%;" />
 <img src="modules/wheel.jpg" style="zoom:60%;" />
+<img src="modules/vehicle_method.jpg" style="zoom:60%;" />
 
 #### 电机驱动模块
 <img src="modules/l298n.jpg" style="zoom:60%;" />

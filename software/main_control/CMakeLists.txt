@@ -5,7 +5,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 set (ENV{MCPU} cortex-m3)
 
 # set the build type
-if(NOT CMAKE_BUILD_TYPE) 
+if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif(NOT CMAKE_BUILD_TYPE)
 
@@ -22,12 +22,12 @@ set(CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/CMake/Modules)
 find_package(Openocd)
 
 # Project specific settings
-set(application_name "stm32f103-base")
+set(application_name "ago_maincontrol")
 
 cmake_policy(SET CMP0048 NEW)
 project (${application_name} VERSION 1.2.3 LANGUAGES C CXX ASM)
 
-configure_file(${CMAKE_SOURCE_DIR}/src/inc/version.h.in 
+configure_file(${CMAKE_SOURCE_DIR}/src/inc/version.h.in
   ${CMAKE_SOURCE_DIR}/src/inc/version.h)
 
 # platform-specific configurations

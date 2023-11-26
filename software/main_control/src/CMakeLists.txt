@@ -1,8 +1,9 @@
 # add the sources here
-set(sources
-    src/main.c
-    src/stm32f10x_it.c
-)
+#set(sources
+#    src/main.c
+#    src/stm32f10x_it.c
+#)
+aux_source_directory(src sources)
 
 # GCC optimization level: use -O0 in debug build, otherwise -O2
 if(CMAKE_BUILD_TYPE MATCHES Debug)

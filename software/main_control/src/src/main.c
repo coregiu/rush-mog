@@ -1,64 +1,92 @@
-#include <stdlib.h>
-#include "stm32f10x.h"
+/**
+  ******************************************************************************
+  *
+  * The main function of ago.
+  * author: coregiu
+  *
+  *
+  ******************************************************************************
+**/
 
-static volatile uint32_t s_tick_count = 0;
+#include <controller.h>
 
-#define LED_PIN         GPIO_Pin_13
+// static volatile uint32_t s_tick_count = 0;
 
-void SysTick_Handler(void)
-{
-    s_tick_count++;
-}
+// #define LED_PIN GPIO_Pin_13
+// #define LED0 PCout(13)	// PC13
 
-static void led_init(void)
-{
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOC, ENABLE);
-    GPIO_InitTypeDef gpio_out = {
-        .GPIO_Pin = LED_PIN,
-        .GPIO_Mode = GPIO_Mode_Out_PP,
-        .GPIO_Speed = GPIO_Speed_2MHz,
-    };
-    GPIO_Init(GPIOC, &gpio_out);
-}
+// void SysTick_Handler(void)
+// {
+//     s_tick_count++;
+// }
+
+// static void led_init(void)
+// {
+//     // RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOC, ENABLE);
+//     // GPIO_InitTypeDef gpio_out = {
+//     //     .GPIO_Pin = LED_PIN,
+//     //     .GPIO_Mode = GPIO_Mode_Out_PP,
+//     //     .GPIO_Speed = GPIO_Speed_2MHz,
+//     // };
+//     // GPIO_Init(GPIOC, &gpio_out);
+//     GPIO_InitTypeDef GPIO_InitStructure;
+
+//     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOC | RCC_APB2Periph_GPIOD, ENABLE); //使能PA,PD端口时钟
+
+//     GPIO_InitStructure.GPIO_Pin = GPIO_Pin_13;        //LED0-->PA.8 端口配置
+//     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_Out_PP;  //推挽输出
+//     GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz; //IO口速度为50MHz
+//     GPIO_Init(GPIOC, &GPIO_InitStructure);            //根据设定参数初始化GPIOA.8
+//     GPIO_SetBits(GPIOC, GPIO_Pin_13);                 //PC.13 输出高
+// }
 
 static void clock_init(void)
 {
     /* Reset the RCC clock configuration to the default reset state. */
     /* HSI ON, PLL OFF, HSE OFF, system clock = 72 MHz, cpu_clock = 72 MHz */
     RCC_DeInit();
-    SystemCoreClockUpdate();  /* BluePill board runs at 72 MHz */
+    SystemCoreClockUpdate(); /* BluePill board runs at 72 MHz */
 
-    if (SysTick_Config(SystemCoreClock / 1000)) {
+    if (SysTick_Config(SystemCoreClock / 1000))
+    {
         /* Capture error */
-        while (1);
-    }
-}
-
-static void delay_us(int32_t us)
-{
-    // Each loop takes very roughly one microsecond on a Blue Pill.
-    volatile int32_t count = us;
-    for (; count > 0; --count)
-        ;
-}
-
-void delay_ms(uint32_t ms)
-{
-    uint32_t end_tick = s_tick_count + ms;
-    while (s_tick_count < end_tick) {
-        __WFE();
+        while (1)
+            ;
     }
 }
 
 int main(void)
 {
     clock_init();
-    led_init();
+    init_modules();
+    delay_init();
 
-    while (1) {
-        GPIO_WriteBit(GPIOC, GPIO_Pin_13, Bit_RESET);
-        delay_ms(250);
-        GPIO_WriteBit(GPIOC, GPIO_Pin_13, Bit_SET);
-        delay_us(500000);
-    }
+	while(1)
+	{
+		LED=~LED;
+		delay_ms(2000);
+        execute_commands("1C");
+		delay_ms(2000);
+        execute_commands("2C");
+		delay_ms(2000);
+        execute_commands("3C");
+		delay_ms(2000);
+        execute_commands("4C");
+		delay_ms(2000);
+        execute_commands("5C");
+		delay_ms(2000);
+        execute_commands("6C");
+		delay_ms(2000);
+        execute_commands("7C");
+		delay_ms(2000);
+        execute_commands("8C");
+		delay_ms(2000);
+        execute_commands("9C");
+		delay_ms(2000);
+        execute_commands("AC");
+		delay_ms(2000);
+        execute_commands("BC");
+		delay_ms(2000);
+        execute_commands("0C");
+	}
 }
