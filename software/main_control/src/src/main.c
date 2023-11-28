@@ -39,38 +39,13 @@ int main(void)
     init_modules();
     delay_init();
 
+    uart_log_start_info();
 	while(1)
 	{
-		// GPIO_WriteBit(GPIOC, GPIO_Pin_13, Bit_RESET);
-		// delay_ms(2000);
-        // GPIO_WriteBit(GPIOC, GPIO_Pin_13, Bit_SET);
-		// delay_ms(2000);
-        LED = 0;
+        LED = ~LED;
 		delay_ms(2000);
-        LED = 1;
-		delay_ms(2000);
-        execute_commands("1C");
-		delay_ms(2000);
-        execute_commands("2C");
-		delay_ms(2000);
-        execute_commands("3C");
-		delay_ms(2000);
-        execute_commands("4C");
-		delay_ms(2000);
-        execute_commands("5C");
-		delay_ms(2000);
-        execute_commands("6C");
-		delay_ms(2000);
-        execute_commands("7C");
-		delay_ms(2000);
-        execute_commands("8C");
-		delay_ms(2000);
-        execute_commands("9C");
-		delay_ms(2000);
-        execute_commands("AC");
-		delay_ms(2000);
-        execute_commands("BC");
-		delay_ms(2000);
-        execute_commands("0C");
+        LED = ~LED;
+		char* commands = audio_receiver.receive_commands();
+        execute_commands(commands);
 	}
 }
