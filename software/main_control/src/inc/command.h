@@ -11,8 +11,6 @@
 #ifndef COMMAND_DEFINE_H
 #define COMMAND_DEFINE_H
 
-#include <stdlib.h>
-#include "stm32f10x.h"
 #include "delay.h"
 #include "sys.h"
 #include "log.h"
@@ -21,6 +19,8 @@
 #define LED PCout(13)	//PC13 0-light up; 1-turn off.
 
 #define COMMANDS_LENGTH 20
+
+#define DEFAULT_BOUND_RATE 9600
 
 // define commands id
 enum commands_def

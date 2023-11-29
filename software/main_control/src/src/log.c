@@ -18,6 +18,8 @@
 void uart_log_data(uint16_t log_data)
 {
     USART_SendData(USART2, log_data);
+    while(USART_GetFlagStatus(USART2, USART_FLAG_TC) == 0);
+    USART_ClearFlag(USART2, USART_FLAG_TC);
 }
 
 void uart_log_string_data(uint16_t *log_data)
