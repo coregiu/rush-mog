@@ -41,13 +41,14 @@ int main(void)
 
     uart_log_start_info();
 
-	while(1)
-	{
-        LED = 1;
-		delay_ms(2000);
+    LED = 0;
+    delay_ms(1000);
+    LED = 1;
+    delay_ms(1000);
 
-		char* commands = audio_receiver.receive_commands();
+    while (1)
+    {
+        char *commands = audio_receiver.receive_commands();
         execute_commands(commands);
-        delay_ms(2000);
-	}
+    }
 }
