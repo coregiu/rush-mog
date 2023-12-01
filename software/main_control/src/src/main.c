@@ -48,7 +48,7 @@ int main(void)
 
     while (1)
     {
-        char *commands = audio_receiver.receive_commands();
-        execute_commands(commands);
+        // char *commands = audio_receiver.receive_commands();
+        // execute_commands(commands);
     }
 }

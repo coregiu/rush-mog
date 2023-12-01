@@ -97,4 +97,34 @@ char *receive_audio_command()
     return "1C";
 }
 
+
+extern char usart2Buf[64];
+extern char usart2Len;
+/*
+************************************************************
+*	函数名称：	USART2_IRQHandler
+*
+*	函数功能：	串口2收发中断
+*
+*	入口参数：	无
+*
+*	返回参数：	无
+*
+*	说明：
+************************************************************
+*/
+void USART2_IRQHandler(void)
+{
+
+	if(USART_GetITStatus(USART2, USART_IT_RXNE) != RESET)	//接收中断
+	{
+        LED = 0;
+		// if(usart2Len >= 64)									//防止数据过多，导致内存溢出
+		// 	usart2Len = 0;
+		// usart2Buf[usart2Len++] = USART2->DR;
+
+		USART_ClearFlag(USART2, USART_FLAG_RXNE);
+	}
+}
+
 const struct module_command_receiver audio_receiver = {init_audio_state, receive_audio_command};
