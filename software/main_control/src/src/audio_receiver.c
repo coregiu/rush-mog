@@ -9,8 +9,7 @@
 **/
 
 #include <audio_receiver.h>
-
-static uint DEFAULT_BUFFER_SIZE = 64;
+#include "controller.h"
 
 void init_audio_state()
 {
@@ -57,49 +56,11 @@ void init_audio_state()
 
 char *receive_audio_command()
 {
-    // uart_log_data('1');
-    uint16_t rxbuf[DEFAULT_BUFFER_SIZE];
-    int rxbuf_pos = 0;
-    int i;
-
-    // uart_log_data('2');
-    while (1)
-    {
-        // uart_log_data('3');
-        /* Wait until there's data in the receive data register */
-        while (USART_GetFlagStatus(USART2, USART_FLAG_RXNE) == RESET);
-        // while (USART_GetITStatus(USART2, USART_IT_RXNE) == RESET)
-            ;
-        LED = 0;
-        // uart_log_data('4');
-        /* Read a byte */
-        rxbuf[rxbuf_pos] = USART_ReceiveData(USART2);
-        // uart_log_data('5');
-        // uart_log_data(rxbuf[rxbuf_pos]);
-        rxbuf_pos++;
-
-        /* Check if the previous byte was a newline */
-        if (rxbuf[rxbuf_pos - 1] == '\n' || rxbuf[rxbuf_pos - 1] == '\r' || rxbuf_pos >= DEFAULT_BUFFER_SIZE - 1)
-        {
-            // uart_log_data('7');
-            /* Send the line back */
-            for (i = 0; i < rxbuf_pos; i++)
-            {
-                // uart_log_data('8');
-                // uart_log_data(rxbuf[i]);
-            }
-            // uart_log_data('9');
-            rxbuf_pos = 0;
-        }
-        // uart_log_data('A');
-    }
-
-    return "1C";
+    return "0";
 }
 
-
-extern char usart2Buf[64];
-extern char usart2Len;
+char uart2_receive_data[DEFAULT_BUFFER_SIZE] = {0};
+int data_position = 0;
 /*
 ************************************************************
 *	函数名称：	USART2_IRQHandler
@@ -115,16 +76,30 @@ extern char usart2Len;
 */
 void USART2_IRQHandler(void)
 {
+    if (USART_GetITStatus(USART2, USART_IT_RXNE) != RESET) //接收中断
+    {
+        if (data_position >= DEFAULT_BUFFER_SIZE) //防止数据过多，导致内存溢出
+        {
+            data_position = 0;
+        }
+        uart2_receive_data[data_position] = USART_ReceiveData(USART2);
+        data_position++;
 
-	if(USART_GetITStatus(USART2, USART_IT_RXNE) != RESET)	//接收中断
-	{
-        LED = 0;
-		// if(usart2Len >= 64)									//防止数据过多，导致内存溢出
-		// 	usart2Len = 0;
-		// usart2Buf[usart2Len++] = USART2->DR;
+        /* Check if the previous byte was a newline */
+        if (uart2_receive_data[data_position - 1] == '\n' || uart2_receive_data[data_position - 1] == '\r')
+        {
+            LED = ~LED;
+            /* Send the line back */
+            for (uint i = 0; i < data_position; i++)
+            {
+                uart_log_data(uart2_receive_data[i]);
+            }
+            execute_commands(uart2_receive_data);
+            data_position = 0;
+        }
 
-		USART_ClearFlag(USART2, USART_FLAG_RXNE);
-	}
+        USART_ClearFlag(USART2, USART_FLAG_RXNE);
+    }
 }
 
 const struct module_command_receiver audio_receiver = {init_audio_state, receive_audio_command};

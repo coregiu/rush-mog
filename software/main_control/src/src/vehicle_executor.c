@@ -43,14 +43,31 @@ void exec_vehicle_state_update(enum vehicle_state run_state)
 {
     if (current_car_status != run_state)
     {
+        uart_log_enter_char();
+        uart_log_data(VEHICLE_STATE_LIST[run_state][LEFT_FRONT_1_POSITION] + 48);
         IN1  = VEHICLE_STATE_LIST[run_state][LEFT_FRONT_1_POSITION];
+
+        uart_log_data(VEHICLE_STATE_LIST[run_state][LEFT_FRONT_2_POSITION] + 48);
         IN2  = VEHICLE_STATE_LIST[run_state][LEFT_FRONT_2_POSITION];
+
+        uart_log_data(VEHICLE_STATE_LIST[run_state][LEFT_BACK_1_POSITION] + 48);
         IN3  = VEHICLE_STATE_LIST[run_state][LEFT_BACK_1_POSITION];
+
+        uart_log_data(VEHICLE_STATE_LIST[run_state][LEFT_BACK_2_POSITION] + 48);
         IN4  = VEHICLE_STATE_LIST[run_state][LEFT_BACK_2_POSITION];
+
+        uart_log_data(VEHICLE_STATE_LIST[run_state][RIGHT_FRONT_1_POSITION] + 48);
         IN5  = VEHICLE_STATE_LIST[run_state][RIGHT_FRONT_1_POSITION];
+
+        uart_log_data(VEHICLE_STATE_LIST[run_state][RIGHT_FRONT_2_POSITION] + 48);
         IN6  = VEHICLE_STATE_LIST[run_state][RIGHT_FRONT_2_POSITION];
+
+        uart_log_data(VEHICLE_STATE_LIST[run_state][RIGHT_BACK_1_POSITION] + 48);
         IN7  = VEHICLE_STATE_LIST[run_state][RIGHT_BACK_1_POSITION];
+
+        uart_log_data(VEHICLE_STATE_LIST[run_state][RIGHT_BACK_2_POSITION] + 48);
         IN8  = VEHICLE_STATE_LIST[run_state][RIGHT_BACK_2_POSITION];
+
         current_car_status = run_state;
     }
 }
@@ -98,42 +115,35 @@ void init_vehicle_state()
 
 void update_vehicle_state(char command)
 {
+    uart_log_data('V');
+    uart_log_enter_char();
     switch (command)
         {
         case COMMAND_STOP:
-            // uart_log_string_data("e:1"); // send 1
             exec_vehicle_state_update(STOP);
             break;
         case COMMAND_RUN:
-            // uart_log_string_data("e:2"); // send 2
             exec_vehicle_state_update(MOVE);
             break;
         case COMMAND_BACK:
-            // uart_log_string_data("e:3"); // send 3
             exec_vehicle_state_update(BACK);
             break;
         case COMMAND_LEFT_RUN:
-            // uart_log_string_data("e:4"); // send 4
             exec_vehicle_state_update(LEFT);
             break;
         case COMMAND_RIGHT_RUN:
-            // uart_log_string_data("e:4"); // send 4
             exec_vehicle_state_update(RIGHT);
             break;
         case COMMAND_LEFT_FRONT:
-            // uart_log_string_data("e:1"); // send 5
             exec_vehicle_state_update(LEFT_FRONT);
             break;
         case COMMAND_RIGHT_FRONT:
-            // uart_log_string_data("e:2"); // send 6
             exec_vehicle_state_update(RIGHT_FRONT);
             break;
         case COMMAND_LEFT_BACK:
-            // uart_log_string_data("e:3"); // send 7
             exec_vehicle_state_update(LEFT_BACK);
             break;
         case COMMAND_RIGHT_BACK:
-            // uart_log_string_data("e:4"); // send 8
             exec_vehicle_state_update(RIGHT_BACK);
             break;
         case COMMAND_LEFT_TURN:
@@ -141,19 +151,15 @@ void update_vehicle_state(char command)
             // stop();
             break;
         case COMMAND_RIGHT_TURN:
-            // uart_log_string_data("e:2"); // send A
             exec_vehicle_state_update(RIGHT_TURN);
             break;
         case COMMAND_GO_BACK:
-            // uart_log_string_data("e:3"); // send B
             // exec_vehicle_state_update(LEFT);
             break;
         case COMMAND_TURN_OUT:
-            // uart_log_string_data("e:4"); // send C
             exec_vehicle_state_update(TURN_OVER);
             break;
         case COMMAND_TEST_VEHICLE:
-            // uart_log_string_data("e:4"); // send D
             break;
         default:
             break;
