@@ -17,7 +17,7 @@ set(sources
     src/stm32f10x_rtc.c
     #src/stm32f10x_sdio.c
     #src/stm32f10x_spi.c
-    #src/stm32f10x_tim.c
+    src/stm32f10x_tim.c
     src/stm32f10x_usart.c
     #src/stm32f10x_wwdg.c
 )
