@@ -11,6 +11,7 @@
 #ifndef COMMAND_DEFINE_H
 #define COMMAND_DEFINE_H
 
+#include "stm32f10x_conf.h"
 #include "delay.h"
 #include "sys.h"
 #include "log.h"
