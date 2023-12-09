@@ -1,6 +1,6 @@
 #include "timer_executor.h"
 
-void TIM1_Configuration()
+void tim1_configuration()
 {
     TIM_TimeBaseInitTypeDef TIM_TimeBaseStructure;
     NVIC_InitTypeDef NVIC_InitStructure;
@@ -41,4 +41,4 @@ void TIM1_UP_IRQHandler(void)
     }
 }
 
-const struct module_command_executor timer_executor = {TIM1_Configuration, update_timer_state};
+const struct module_command_executor timer_executor = {tim1_configuration, update_timer_state};

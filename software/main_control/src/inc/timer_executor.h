@@ -2,7 +2,7 @@
 #define __TIMER_H
 #include "command.h"
 
-void TIM1_Configuration();
+void tim1_configuration();
 
 void update_timer_state(char command);
 
