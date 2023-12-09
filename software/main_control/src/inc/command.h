@@ -88,11 +88,8 @@ struct module_command_executor
 	void (*update_state)(char command);
 };
 
-// init command led
-void init_command_led();
-
-// init operation system
-void init_freertos();
+// init command
+void init_command_module();
 
 // convert command to the array sequence of command_module_map.
 uint convert_command_seq(char command);

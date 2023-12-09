@@ -46,3 +46,9 @@ void init_freertos()
 {
     command_queue = xQueueCreate(MAX_COMMAND_QUEUE_SIZE, sizeof(struct command_des));
 }
+
+void init_command_module()
+{
+    init_command_led();
+    void init_freertos();
+}

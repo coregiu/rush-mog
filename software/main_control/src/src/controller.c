@@ -37,11 +37,11 @@ const char command_module_map[COMMANDS_LENGTH][2] = {{COMMAND_STOP, MODULE_VEHIC
  */
 void init_modules()
 {
-    init_command_led();
+    init_command_module();
 
     audio_receiver.init();
     vehicle_executor.init();
-    timer_executor.init();
+    // timer_executor.init();
 }
 
 /**

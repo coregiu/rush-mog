@@ -106,6 +106,13 @@ void goback()
     }
 }
 
+void put_test_commands()
+{
+    const TickType_t xTicksToWait = (BaseType_t)pdMS_TO_TICKS(1000);
+    struct command_des move_des = {1000, '1'};
+    xQueueSendFromISR(command_queue, &move_des, xTicksToWait);
+}
+
 void init_vehicle_state()
 {
     GPIO_InitTypeDef GPIO_InitStructure;
@@ -189,10 +196,11 @@ void update_vehicle_state(char command)
     case COMMAND_TURN_OUT:
         exec_vehicle_state_update(TURN_OVER);
         break;
-    case COMMAND_TEST_VEHICLE:
-        break;
     case COMMAND_GO_BACK:
         goback();
+        break;
+    case COMMAND_TEST_VEHICLE:
+        put_test_commands();
         break;
     default:
         break;
