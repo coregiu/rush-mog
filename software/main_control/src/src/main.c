@@ -10,13 +10,6 @@
 
 #include <controller.h>
 
-static volatile uint32_t s_tick_count = 0;
-
-void SysTick_Handler(void)
-{
-    s_tick_count++;
-}
-
 static void clock_init(void)
 {
     /* Reset the RCC clock configuration to the default reset state. */
