@@ -79,3 +79,8 @@ IO口分配如下：
 ## 硬件设计工具KiCAD
 
 安装：https://docs.kicad.org/5.1/zh/getting_started_in_kicad/getting_started_in_kicad.html
+
+## 组装注意事项
+- 1 电机驱动与IO口连接及小车方向提前规划好，不要连错口了。
+- 2 机械臂组装前一定要调试舵机，使该臂摆动范围在舵机控制范围内。
+- 3 asrpro板子比较脆弱，供电不能用12V锂电池转的电压，最好用STM32出口的3.3V电压。
