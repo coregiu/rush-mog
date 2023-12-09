@@ -15,6 +15,8 @@
 #include "delay.h"
 #include "sys.h"
 #include "log.h"
+#include "FreeRTOS.h"
+#include "queue.h"
 
 // define the single light
 #define LED PCout(13)	//PC13 0-light up; 1-turn off.
@@ -22,6 +24,19 @@
 #define COMMANDS_LENGTH 20
 
 #define DEFAULT_BOUND_RATE 9600
+
+#define MAX_COMMAND_QUEUE_SIZE 1000
+
+
+// 命令处理队列，用于任务间通信
+extern QueueHandle_t command_queue;
+
+// 放入队列的元素。一个是命令，一个是命令执行后挂起时长。
+struct command_des
+{
+    uint16_t time_sleep_milsec;
+    char command;
+};
 
 // define commands id
 enum commands_def
@@ -75,6 +90,9 @@ struct module_command_executor
 
 // init command led
 void init_command_led();
+
+// init operation system
+void init_freertos();
 
 // convert command to the array sequence of command_module_map.
 uint convert_command_seq(char command);
