@@ -63,6 +63,7 @@ void execute_commands(char *commands)
     uint cmd_seq = convert_command_seq(commands[0]);
     if (cmd_seq >= 0 && cmd_seq < COMMANDS_LENGTH)
     {
+        LED = ~LED;
         notify_all(command_module_map[cmd_seq][1], commands[0]);
     }
 }
