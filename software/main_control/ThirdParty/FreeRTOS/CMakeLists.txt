@@ -4,6 +4,7 @@ cmake_minimum_required (VERSION 3.1)
 # Set include path
 include_directories(Include)
 
+
 # The need build source path and build all files
 aux_source_directory (Source DIR_STM32F10x_FreeRTOS_SRCS)
 
@@ -16,3 +17,4 @@ set(CMAKE_C_FLAGS "-g -mthumb -fno-builtin -mcpu=$ENV{MCPU} -Wall -std=gnu99 -ff
 
 # Generate the target to static linker library
 add_library (STM32F10x_FreeRTOS ${DIR_STM32F10x_FreeRTOS_SRCS})
+target_include_directories(STM32F10x_FreeRTOS PUBLIC Include)

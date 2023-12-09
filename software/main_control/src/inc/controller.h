@@ -18,8 +18,13 @@
 #include "timer_executor.h"
 #include "audio_receiver.h"
 #include "vedio_receiver.h"
+#include "FreeRTOS.h"
+#include "queue.h"
 
 extern const char command_module_map[COMMANDS_LENGTH][2];
+
+// 命令处理队列，用于任务间通信
+extern QueueHandle_t command_queue;
 
 /**
  * init uart and all receive and executor modules
