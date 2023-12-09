@@ -110,7 +110,8 @@ void goback()
 
 void send_to_queue(struct command_des *command)
 {
-    BaseType_t xStatus = xQueueSendFromISR(command_queue, command, xTicksToWait);
+    // BaseType_t xStatus = xQueueSendFromISR(command_queue, command, xTicksToWait);
+    BaseType_t xStatus = xQueueSend(command_queue, command, xTicksToWait);
     if( xStatus != pdPASS )
     {
         uart_log_data('F');//如果发送数据失败在这里进行错误处理
@@ -120,7 +121,11 @@ void send_to_queue(struct command_des *command)
 void put_test_commands()
 {
     struct command_des command_des = {1000, '1'};
+    uart_log_data('X');
+    uart_log_enter_char();
     send_to_queue(&command_des);
+    uart_log_data('Y');
+    uart_log_enter_char();
     command_des.command = '2';
     send_to_queue(&command_des);
     command_des.command = '3';
@@ -141,6 +146,8 @@ void put_test_commands()
     send_to_queue(&command_des);
     command_des.command = 'B';
     send_to_queue(&command_des);
+    uart_log_data('Z');
+    uart_log_enter_char();
 }
 
 void init_vehicle_state()
