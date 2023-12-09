@@ -9,7 +9,7 @@
   ******************************************************************************
 **/
 
-#include <log.h>
+#include <uart_log.h>
 
 /**
  * send origin debug data to serial port

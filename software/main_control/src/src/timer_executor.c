@@ -37,7 +37,7 @@ void TIM1_UP_IRQHandler(void)
     {
         TIM_ClearITPendingBit(TIM1, TIM_IT_Update); // 清除TIM1溢出中断标志位
         // TODO: 在此处添加中断处理代码
-        // uart_log_data('T');
+        uart_log_data('T');
     }
 }
 

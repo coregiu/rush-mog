@@ -14,7 +14,7 @@
 #include "stm32f10x_conf.h"
 #include "delay.h"
 #include "sys.h"
-#include "log.h"
+#include "uart_log.h"
 #include "FreeRTOS.h"
 #include "queue.h"
 
