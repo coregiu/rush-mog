@@ -24,15 +24,11 @@ AGO是语音控制万向轮小车，车载视频自动智能识别系统，自�
 
 详细参照：[硬件设计说明](hardware/README.md)
 
-
-
 #### 软件架构设计
 
 ![](software/archetecture.png)
 
 详细参照：[软件设计说明和代码](software/README.md)
-
-
 
 ## 语音控制指令
 
@@ -57,9 +53,6 @@ AGO是语音控制万向轮小车，车载视频自动智能识别系统，自�
 | 关闭摄像头   | 关闭摄像头                       | G     |         |
 | 启动智能模式 | 启动智能模式                      | H     |         |
 | 关闭智能模式 | 关闭智能模式                      | I     |         |
-
-详细参照下图：
-![](software/audio_control/ago-command.png)
 
 ## 成品效果
 
