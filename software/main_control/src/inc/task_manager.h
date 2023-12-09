@@ -13,8 +13,7 @@
 
 #include "command.h"
 
+// init tasks
 void init_tasks();
-
-void schedule_tasks();
 
 #endif

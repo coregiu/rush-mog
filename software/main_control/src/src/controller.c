@@ -42,6 +42,8 @@ void init_modules()
     audio_receiver.init();
     vehicle_executor.init();
     // timer_executor.init();
+
+    init_tasks();
 }
 
 /**

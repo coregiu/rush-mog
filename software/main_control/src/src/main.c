@@ -46,6 +46,7 @@ int main(void)
     LED = 1;
     delay_ms(1000);
 
+    vTaskStartScheduler();
     while (1)
     {
 

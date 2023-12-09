@@ -9,6 +9,8 @@
 **/
 #include <vehicle_executor.h>
 
+static const TickType_t xTicksToWait = (BaseType_t)pdMS_TO_TICKS(1000);
+
 // the position of gpio in CAR_STATE_LIST array.
 enum gpio_position
 {
@@ -106,11 +108,39 @@ void goback()
     }
 }
 
+void send_to_queue(struct command_des *command)
+{
+    BaseType_t xStatus = xQueueSendFromISR(command_queue, command, xTicksToWait);
+    if( xStatus != pdPASS )
+    {
+        uart_log_data('F');//如果发送数据失败在这里进行错误处理
+    }
+}
+
 void put_test_commands()
 {
-    const TickType_t xTicksToWait = (BaseType_t)pdMS_TO_TICKS(1000);
-    struct command_des move_des = {1000, '1'};
-    xQueueSendFromISR(command_queue, &move_des, xTicksToWait);
+    struct command_des command_des = {1000, '1'};
+    send_to_queue(&command_des);
+    command_des.command = '2';
+    send_to_queue(&command_des);
+    command_des.command = '3';
+    send_to_queue(&command_des);
+    command_des.command = '4';
+    send_to_queue(&command_des);
+    command_des.command = '5';
+    send_to_queue(&command_des);
+    command_des.command = '6';
+    send_to_queue(&command_des);
+    command_des.command = '7';
+    send_to_queue(&command_des);
+    command_des.command = '8';
+    send_to_queue(&command_des);
+    command_des.command = '9';
+    send_to_queue(&command_des);
+    command_des.command = 'A';
+    send_to_queue(&command_des);
+    command_des.command = 'B';
+    send_to_queue(&command_des);
 }
 
 void init_vehicle_state()
