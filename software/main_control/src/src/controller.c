@@ -9,6 +9,7 @@
 **/
 
 #include <controller.h>
+#include "task_manager.h"
 // the map of command to module
 const char command_module_map[COMMANDS_LENGTH][2] = {{COMMAND_STOP, MODULE_VEHICLE},
                                                       {COMMAND_RUN, MODULE_VEHICLE},
@@ -39,11 +40,11 @@ void init_modules()
 {
     init_command_module();
 
+    init_tasks();
+
     audio_receiver.init();
     vehicle_executor.init();
     // timer_executor.init();
-
-    init_tasks();
 }
 
 /**
