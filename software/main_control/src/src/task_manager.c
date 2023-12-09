@@ -21,6 +21,7 @@ void exe_task_from_queue(void const * argument)
     	BaseType_t xStatus = xQueueReceive(command_queue, &received_command, xTicksToWait);
     	if(xStatus == pdPASS )
     	{
+            LED = ~LED;
             execute_commands(&received_command.command);
             if (received_command.time_sleep_milsec > 0)
             {
