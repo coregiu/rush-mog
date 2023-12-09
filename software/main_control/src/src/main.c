@@ -10,12 +10,12 @@
 
 #include <controller.h>
 
-static volatile uint32_t s_tick_count = 0;
+// static volatile uint32_t s_tick_count = 0;
 
-void SysTick_Handler(void)
-{
-    s_tick_count++;
-}
+// void SysTick_Handler(void)
+// {
+//     s_tick_count++;
+// }
 
 static void clock_init(void)
 {

@@ -17,10 +17,13 @@ void exe_task_from_queue(void *argument)
 
     for (;;)
     {
+        uart_log_data('R');
         //通过接收函数从xTemperatureQueue队列中获取温度数据
         BaseType_t xStatus = xQueueReceive(command_queue, &received_command, xTicksToWait);
+        uart_log_data('S');
         if (xStatus == pdPASS)
         {
+            uart_log_data('T');
             execute_commands(&received_command.command);
             if (received_command.time_sleep_milsec > 0)
             {

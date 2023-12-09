@@ -88,7 +88,6 @@ void USART2_IRQHandler(void)
         /* Check if the previous byte was a newline */
         if (uart2_receive_data[data_position - 1] == '\n' || uart2_receive_data[data_position - 1] == '\r')
         {
-            LED = ~LED;
             /* Send the line back */
             for (uint i = 0; i < data_position; i++)
             {
