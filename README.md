@@ -70,6 +70,7 @@ AGO是语音控制万向轮小车，车载视频自动智能识别系统，自�
 ## 成品效果
 
 ##### 视频
+[https://www.bilibili.com/video/BV1Db4y1V7Ny](https://www.bilibili.com/video/BV1Db4y1V7Ny)
 
 ##### 左视
 ![](images/AGO.png)
