@@ -9,7 +9,7 @@
 **/
 #include <vehicle_executor.h>
 
-static BaseType_t priority = 6;
+static BaseType_t priority = 1;
 static BaseType_t *const pxHigherPriorityTaskWoken = &priority;
 
 // the position of gpio in CAR_STATE_LIST array.
@@ -111,23 +111,28 @@ void goback()
 
 void send_to_queue(struct command_des *command)
 {
-    // BaseType_t xStatus = xQueueSend(command_queue, command, xTicksToWait);
+    if (command_queue == NULL)
+    {
+        uart_log_string_data("command queue is null");
+        return;
+    }
+    // BaseType_t xStatus = xQueueSend(command_queue, command, pdMS_TO_TICKS(100));
     // BaseType_t xStatus = xQueueSendFromISR(command_queue, &(command->command), xTicksToWait);
     BaseType_t xStatus = xQueueSendFromISR(command_queue, command, pxHigherPriorityTaskWoken);
     if (xStatus != pdPASS)
     {
-        uart_log_data('F'); //如果发送数据失败在这里进行错误处理
+        uart_log_start_info("failed to send data"); //如果发送数据失败在这里进行错误处理
+    }
+    else
+    {
+        uart_log_data(command->command);
     }
 }
 
 void put_test_commands()
 {
     struct command_des command_des = {1000, '1'};
-    uart_log_data('X');
-    uart_log_enter_char();
     send_to_queue(&command_des);
-    uart_log_data('Y');
-    uart_log_enter_char();
     command_des.command = '2';
     send_to_queue(&command_des);
     command_des.command = '3';
@@ -148,8 +153,6 @@ void put_test_commands()
     send_to_queue(&command_des);
     command_des.command = 'B';
     send_to_queue(&command_des);
-    uart_log_data('Z');
-    uart_log_enter_char();
 }
 
 void init_vehicle_state()

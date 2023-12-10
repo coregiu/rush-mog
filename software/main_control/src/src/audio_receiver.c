@@ -34,8 +34,8 @@ void init_audio_state()
 
     /* Usart2 NVIC 配置 */
     NVIC_InitStructure.NVIC_IRQChannel = USART2_IRQn;
-    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 9; /* 抢占优先级9 */
-    NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0;        /* 子优先级0 */
+    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 6; /* 抢占优先级6 */
+    NVIC_InitStructure.NVIC_IRQChannelSubPriority = 6;        /* 子优先级0 */
     NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;           /* IRQ通道使能 */
     NVIC_Init(&NVIC_InitStructure);                           /* 根据指定的参数初始化VIC寄存器 */
 
