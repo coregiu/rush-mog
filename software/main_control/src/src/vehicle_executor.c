@@ -9,7 +9,9 @@
 **/
 #include <vehicle_executor.h>
 
-static const TickType_t xTicksToWait = (BaseType_t)pdMS_TO_TICKS(1000);
+// static const TickType_t xTicksToWait = (BaseType_t)pdMS_TO_TICKS(1000);
+static BaseType_t priority = 3;
+static BaseType_t *const pxHigherPriorityTaskWoken = &priority;
 
 // the position of gpio in CAR_STATE_LIST array.
 enum gpio_position
@@ -110,8 +112,9 @@ void goback()
 
 void send_to_queue(struct command_des *command)
 {
-    // BaseType_t xStatus = xQueueSendFromISR(command_queue, command, xTicksToWait);
-    BaseType_t xStatus = xQueueSend(command_queue, command, xTicksToWait);
+    // BaseType_t xStatus = xQueueSend(command_queue, command, xTicksToWait);
+    // BaseType_t xStatus = xQueueSendFromISR(command_queue, &(command->command), xTicksToWait);
+    BaseType_t xStatus = xQueueSendFromISR(command_queue, command, pxHigherPriorityTaskWoken);
     if( xStatus != pdPASS )
     {
         uart_log_data('F');//如果发送数据失败在这里进行错误处理
