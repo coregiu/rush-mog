@@ -1,7 +1,9 @@
 # AGO
-AGO: AI GOGO, the artificial intelligence universal wheel trolley, voice control, on-board video recognition， and auto controlled robotic arm.
+AGO: AI GOGO
 
-AGO是语音控制万向轮小车，车载视频自动智能识别系统，自动控制机械臂。
+AGO is a voice controlled universal wheel car, and with a video automatic intelligent recognition system, which automatically controls the operation of the car and robotic arm. Also can be controlled using a mobile app.
+
+AGO是语音控制万向轮小车，车载视频自动智能识别系统，自动控制机械臂工作，同时可以使用手机端APP进行控制。
 
 ## 功能说明
 #### （1）语音控制小车行驶
