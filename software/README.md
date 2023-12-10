@@ -123,6 +123,11 @@ $ sudo stm32flash -w STM32F10x-Template.hex -v -g 0x0 /dev/ttyUSB0
 
 安装： sudo pipe3 install comtool
 
+# 问题与注意事项
+- 1 中控的中断优先级一定要设置正确，否则有诡异问题。UART2的中断优先级要低于configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY配置（即数字比这个大）。另外一定要加这句：
+```C
+NVIC_PriorityGroupConfig(NVIC_PriorityGroup_4);           /* 设置优先级分组为4组，即抢占优先级范围为0-15 */
+```
 
 # 参考
 https://github.com/larriti/stm32f10x-template
