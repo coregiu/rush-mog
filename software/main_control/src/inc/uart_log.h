@@ -26,7 +26,7 @@ void uart_log_data(uint16_t log_data);
 /**
  * log string
  */
-void uart_log_string_data(uint16_t *log_data);
+void uart_log_string_data(char *log_data);
 
 /**
  * send enter key to serial port
@@ -41,6 +41,6 @@ void uart_log_start_info();
 /**
  * count length of string array.
  */
-uint16_t count_str(uint16_t *str);
+uint16_t count_str(char *str);
 
 #endif

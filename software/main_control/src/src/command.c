@@ -29,7 +29,7 @@ uint convert_command_seq(char command)
     }
 }
 
-void init_command_led()
+void init_command_module()
 {
     GPIO_InitTypeDef GPIO_InitStructure;
 
@@ -40,15 +40,4 @@ void init_command_led()
     GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz; //IO口速度为50MHz
     GPIO_Init(GPIOC, &GPIO_InitStructure);            //根据设定参数初始化GPIOC.13
     GPIO_SetBits(GPIOC, GPIO_Pin_13);                 //PC.13 输出高
-}
-
-void init_freertos()
-{
-    command_queue = xQueueCreate(MAX_COMMAND_QUEUE_SIZE, sizeof(struct command_des));
-}
-
-void init_command_module()
-{
-    init_command_led();
-    void init_freertos();
 }

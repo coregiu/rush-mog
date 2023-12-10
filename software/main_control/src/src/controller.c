@@ -40,11 +40,11 @@ void init_modules()
 {
     init_command_module();
 
-    init_tasks();
-
     audio_receiver.init();
     vehicle_executor.init();
     // timer_executor.init();
+
+    init_freertos();
 }
 
 /**

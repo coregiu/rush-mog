@@ -22,7 +22,7 @@ void uart_log_data(uint16_t log_data)
     USART_ClearFlag(USART2, USART_FLAG_TC);
 }
 
-void uart_log_string_data(uint16_t *log_data)
+void uart_log_string_data(char *log_data)
 {
     uint16_t size = count_str(log_data);
     for (uint16_t i = 0; i < size; i++)
@@ -78,7 +78,7 @@ void uart_log_start_info()
     }
 }
 
-uint16_t count_str(uint16_t *str)
+uint16_t count_str(char *str)
 {
     int i = 0;
     while (str[i++] != '\0')
