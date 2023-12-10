@@ -10,13 +10,6 @@
 
 #include <controller.h>
 
-// static volatile uint32_t s_tick_count = 0;
-
-// void SysTick_Handler(void)
-// {
-//     s_tick_count++;
-// }
-
 static void clock_init(void)
 {
     /* Reset the RCC clock configuration to the default reset state. */
@@ -42,9 +35,9 @@ int main(void)
     uart_log_start_info();
 
     LED = 0;
-    delay_ms(1000);
+    delay_ms(500);
     LED = 1;
-    delay_ms(1000);
+    delay_ms(500);
 
     vTaskStartScheduler();
     while (1)
