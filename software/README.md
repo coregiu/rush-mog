@@ -128,6 +128,7 @@ $ sudo stm32flash -w STM32F10x-Template.hex -v -g 0x0 /dev/ttyUSB0
 ```C
 NVIC_PriorityGroupConfig(NVIC_PriorityGroup_4);           /* 设置优先级分组为4组，即抢占优先级范围为0-15 */
 ```
+- 2 使用串口工具进行命令下发调试时，注意一定要在命令后面带上换行符，因为命令接收以换行符为结束标识，没有换行符会一直收集命令。
 
 # 参考
 https://github.com/larriti/stm32f10x-template
