@@ -36,14 +36,6 @@ char* receive_commands();
  * execute commands;
  *
  */
-void execute_commands(char *commands);
-
-/**
- * notify modules to execute the commands.
- * car_module: the module of car, such as motor, music, led
- * command: the command
- *
- */
-void notify_all(enum module_def module, char command);
+void execute_commands(char *commands, enum command_type type);
 
 #endif

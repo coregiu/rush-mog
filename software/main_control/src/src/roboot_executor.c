@@ -13,7 +13,7 @@ void init_roboot_state()
 
 }
 
-void update_roboot_state(char command)
+void update_roboot_state(char command, enum command_type type)
 {
     switch (command)
         {

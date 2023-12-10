@@ -15,21 +15,28 @@ void exe_task_from_queue(void *argument)
 {
     uart_log_string_data("Begin exe task...");
     const TickType_t xTicksToWait = pdMS_TO_TICKS(100);
-    struct command_des received_command = {0, '0'};
+    struct command_des received_command = {0, DELAY_BEFOR_EXE, '0'};
 
     for (;;)
     {
         //通过接收函数从xTemperatureQueue队列中获取温度数据
         BaseType_t xStatus = xQueueReceive(command_queue, &received_command, xTicksToWait);
-        if (xStatus == pdPASS)
+        if (xStatus != pdPASS)
         {
-            uart_log_data(received_command.command);
-            execute_commands(&received_command.command);
-            if (received_command.time_sleep_milsec > 0)
-            {
-                TickType_t xTicksToDelay = pdMS_TO_TICKS(received_command.time_sleep_milsec);
-                vTaskDelay(xTicksToDelay);
-            }
+            continue;
+        }
+        if (received_command.delay_type == DELAY_BEFOR_EXE && received_command.time_sleep_milsec > 0)
+        {
+            TickType_t xTicksToDelay = pdMS_TO_TICKS(received_command.time_sleep_milsec);
+            vTaskDelay(xTicksToDelay);
+        }
+        // uart_log_data(received_command.command);
+        execute_commands(&received_command.command, COMMAND_TYPE_AUTO);
+
+        if (received_command.delay_type == DELAY_AFTER_EXE && received_command.time_sleep_milsec > 0)
+        {
+            TickType_t xTicksToDelay = pdMS_TO_TICKS(received_command.time_sleep_milsec);
+            vTaskDelay(xTicksToDelay);
         }
     }
 }

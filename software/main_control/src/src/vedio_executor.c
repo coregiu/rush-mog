@@ -13,7 +13,7 @@ void init_vedio_state()
 
 }
 
-void update_vedio_state(char command)
+void update_vedio_state(char command, enum command_type type)
 {
     switch (command)
         {

@@ -26,7 +26,7 @@ void tim1_configuration()
     TIM_Cmd(TIM1, ENABLE); // TIM1Ê¹ÄÜ
 }
 
-void update_timer_state(char command)
+void update_timer_state(char command, enum command_type type)
 {
 
 }

@@ -56,40 +56,40 @@ char* receive_commands()
 }
 
 /**
- * execute commands;
- *
- */
-void execute_commands(char *commands)
-{
-    uint cmd_seq = convert_command_seq(commands[0]);
-    if (cmd_seq >= 0 && cmd_seq < COMMANDS_LENGTH)
-    {
-        LED = ~LED;
-        notify_all(command_module_map[cmd_seq][1], commands[0]);
-    }
-}
-
-/**
  * notify modules to execute the commands.
  * car_module: the module of car, such as motor, music, led
  * command: the command
  *
  */
-void notify_all(enum module_def module, char command)
+void notify_all(enum module_def module, char command, enum command_type type)
 {
     switch (module)
     {
     case MODULE_VEHICLE:
-        vehicle_executor.update_state(command);
+        vehicle_executor.update_state(command, type);
         break;
     case MODULE_VEDIO:
-        vedio_executor.update_state(command);
+        vedio_executor.update_state(command, type);
         break;
     case MODULE_ROBOOT:
-        roboot_executor.update_state(command);
+        roboot_executor.update_state(command, type);
         break;
 
     default:
         break;
+    }
+}
+
+/**
+ * execute commands;
+ *
+ */
+void execute_commands(char *commands, enum command_type type)
+{
+    uint cmd_seq = convert_command_seq(commands[0]);
+    if (cmd_seq >= 0 && cmd_seq < COMMANDS_LENGTH)
+    {
+        LED = ~LED;
+        notify_all(command_module_map[cmd_seq][1], commands[0], type);
     }
 }

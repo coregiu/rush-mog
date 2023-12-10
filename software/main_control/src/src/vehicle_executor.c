@@ -43,72 +43,6 @@ const char VEHICLE_STATE_LIST[12][8] = {
 
 enum vehicle_state current_car_status = STOP;
 
-void exec_vehicle_state_update(enum vehicle_state run_state)
-{
-    if (current_car_status != run_state)
-    {
-        // uart_log_enter_char();
-        // uart_log_data(VEHICLE_STATE_LIST[run_state][LEFT_FRONT_1_POSITION] + 48);
-        IN1 = VEHICLE_STATE_LIST[run_state][LEFT_FRONT_1_POSITION];
-
-        // uart_log_data(VEHICLE_STATE_LIST[run_state][LEFT_FRONT_2_POSITION] + 48);
-        IN2 = VEHICLE_STATE_LIST[run_state][LEFT_FRONT_2_POSITION];
-
-        // uart_log_data(VEHICLE_STATE_LIST[run_state][LEFT_BACK_1_POSITION] + 48);
-        IN3 = VEHICLE_STATE_LIST[run_state][LEFT_BACK_1_POSITION];
-
-        // uart_log_data(VEHICLE_STATE_LIST[run_state][LEFT_BACK_2_POSITION] + 48);
-        IN4 = VEHICLE_STATE_LIST[run_state][LEFT_BACK_2_POSITION];
-
-        // uart_log_data(VEHICLE_STATE_LIST[run_state][RIGHT_FRONT_1_POSITION] + 48);
-        IN5 = VEHICLE_STATE_LIST[run_state][RIGHT_FRONT_1_POSITION];
-
-        // uart_log_data(VEHICLE_STATE_LIST[run_state][RIGHT_FRONT_2_POSITION] + 48);
-        IN6 = VEHICLE_STATE_LIST[run_state][RIGHT_FRONT_2_POSITION];
-
-        // uart_log_data(VEHICLE_STATE_LIST[run_state][RIGHT_BACK_1_POSITION] + 48);
-        IN7 = VEHICLE_STATE_LIST[run_state][RIGHT_BACK_1_POSITION];
-
-        // uart_log_data(VEHICLE_STATE_LIST[run_state][RIGHT_BACK_2_POSITION] + 48);
-        IN8 = VEHICLE_STATE_LIST[run_state][RIGHT_BACK_2_POSITION];
-
-        current_car_status = run_state;
-    }
-}
-
-void goback()
-{
-    switch (current_car_status)
-    {
-    case MOVE:
-        exec_vehicle_state_update(BACK);
-        break;
-    case BACK:
-        exec_vehicle_state_update(MOVE);
-        break;
-    case LEFT:
-        exec_vehicle_state_update(RIGHT);
-        break;
-    case RIGHT:
-        exec_vehicle_state_update(LEFT);
-        break;
-    case LEFT_FRONT:
-        exec_vehicle_state_update(RIGHT_BACK);
-        break;
-    case RIGHT_BACK:
-        exec_vehicle_state_update(LEFT_FRONT);
-        break;
-    case RIGHT_FRONT:
-        exec_vehicle_state_update(LEFT_BACK);
-        break;
-    case LEFT_BACK:
-        exec_vehicle_state_update(RIGHT_FRONT);
-        break;
-    default:
-        break;
-    }
-}
-
 void send_to_queue(struct command_des *command)
 {
     if (command_queue == NULL)
@@ -123,15 +57,97 @@ void send_to_queue(struct command_des *command)
     {
         uart_log_start_info("failed to send data"); //如果发送数据失败在这里进行错误处理
     }
+}
+
+void exec_vehicle_state_update(enum vehicle_state run_state, enum command_type type)
+{
+    if (current_car_status == run_state)
+    {
+        return;
+    }
+    // uart_log_enter_char();
+    // uart_log_data(VEHICLE_STATE_LIST[run_state][LEFT_FRONT_1_POSITION] + 48);
+    IN1 = VEHICLE_STATE_LIST[run_state][LEFT_FRONT_1_POSITION];
+
+    // uart_log_data(VEHICLE_STATE_LIST[run_state][LEFT_FRONT_2_POSITION] + 48);
+    IN2 = VEHICLE_STATE_LIST[run_state][LEFT_FRONT_2_POSITION];
+
+    // uart_log_data(VEHICLE_STATE_LIST[run_state][LEFT_BACK_1_POSITION] + 48);
+    IN3 = VEHICLE_STATE_LIST[run_state][LEFT_BACK_1_POSITION];
+
+    // uart_log_data(VEHICLE_STATE_LIST[run_state][LEFT_BACK_2_POSITION] + 48);
+    IN4 = VEHICLE_STATE_LIST[run_state][LEFT_BACK_2_POSITION];
+
+    // uart_log_data(VEHICLE_STATE_LIST[run_state][RIGHT_FRONT_1_POSITION] + 48);
+    IN5 = VEHICLE_STATE_LIST[run_state][RIGHT_FRONT_1_POSITION];
+
+    // uart_log_data(VEHICLE_STATE_LIST[run_state][RIGHT_FRONT_2_POSITION] + 48);
+    IN6 = VEHICLE_STATE_LIST[run_state][RIGHT_FRONT_2_POSITION];
+
+    // uart_log_data(VEHICLE_STATE_LIST[run_state][RIGHT_BACK_1_POSITION] + 48);
+    IN7 = VEHICLE_STATE_LIST[run_state][RIGHT_BACK_1_POSITION];
+
+    // uart_log_data(VEHICLE_STATE_LIST[run_state][RIGHT_BACK_2_POSITION] + 48);
+    IN8 = VEHICLE_STATE_LIST[run_state][RIGHT_BACK_2_POSITION];
+
+    current_car_status = run_state;
+
+    if (type == COMMAND_TYPE_AUTO)
+    {
+        return;
+    }
+
+    if (run_state == STOP)
+    {
+        BaseType_t result = xQueueReset(command_queue);
+        if (result != pdPASS)
+        {
+            uart_log_start_info("failed to send stop command");
+        }
+    }
     else
     {
-        uart_log_data(command->command);
+        struct command_des stop_cmd = {2000, DELAY_BEFOR_EXE, '0'};
+        send_to_queue(&stop_cmd);
+    }
+}
+
+void goback()
+{
+    switch (current_car_status)
+    {
+    case MOVE:
+        exec_vehicle_state_update(BACK, COMMAND_TYPE_MANUAL);
+        break;
+    case BACK:
+        exec_vehicle_state_update(MOVE, COMMAND_TYPE_MANUAL);
+        break;
+    case LEFT:
+        exec_vehicle_state_update(RIGHT, COMMAND_TYPE_MANUAL);
+        break;
+    case RIGHT:
+        exec_vehicle_state_update(LEFT, COMMAND_TYPE_MANUAL);
+        break;
+    case LEFT_FRONT:
+        exec_vehicle_state_update(RIGHT_BACK, COMMAND_TYPE_MANUAL);
+        break;
+    case RIGHT_BACK:
+        exec_vehicle_state_update(LEFT_FRONT, COMMAND_TYPE_MANUAL);
+        break;
+    case RIGHT_FRONT:
+        exec_vehicle_state_update(LEFT_BACK, COMMAND_TYPE_MANUAL);
+        break;
+    case LEFT_BACK:
+        exec_vehicle_state_update(RIGHT_FRONT, COMMAND_TYPE_MANUAL);
+        break;
+    default:
+        break;
     }
 }
 
 void put_test_commands()
 {
-    struct command_des command_des = {1000, '1'};
+    struct command_des command_des = {2000, DELAY_AFTER_EXE, '1'};
     send_to_queue(&command_des);
     command_des.command = '2';
     send_to_queue(&command_des);
@@ -152,6 +168,8 @@ void put_test_commands()
     command_des.command = 'A';
     send_to_queue(&command_des);
     command_des.command = 'B';
+    send_to_queue(&command_des);
+    command_des.command = '0';
     send_to_queue(&command_des);
 }
 
@@ -196,47 +214,47 @@ void init_vehicle_state()
     IN8 = 0;
 }
 
-void update_vehicle_state(char command)
+void update_vehicle_state(char command, enum command_type type)
 {
-    uart_log_data('V');
+    uart_log_data(command);
     uart_log_enter_char();
     switch (command)
     {
     case COMMAND_STOP:
-        exec_vehicle_state_update(STOP);
+        exec_vehicle_state_update(STOP, type);
         break;
     case COMMAND_RUN:
-        exec_vehicle_state_update(MOVE);
+        exec_vehicle_state_update(MOVE, type);
         break;
     case COMMAND_BACK:
-        exec_vehicle_state_update(BACK);
+        exec_vehicle_state_update(BACK, type);
         break;
     case COMMAND_LEFT_RUN:
-        exec_vehicle_state_update(LEFT);
+        exec_vehicle_state_update(LEFT, type);
         break;
     case COMMAND_RIGHT_RUN:
-        exec_vehicle_state_update(RIGHT);
+        exec_vehicle_state_update(RIGHT, type);
         break;
     case COMMAND_LEFT_FRONT:
-        exec_vehicle_state_update(LEFT_FRONT);
+        exec_vehicle_state_update(LEFT_FRONT, type);
         break;
     case COMMAND_RIGHT_FRONT:
-        exec_vehicle_state_update(RIGHT_FRONT);
+        exec_vehicle_state_update(RIGHT_FRONT, type);
         break;
     case COMMAND_LEFT_BACK:
-        exec_vehicle_state_update(LEFT_BACK);
+        exec_vehicle_state_update(LEFT_BACK, type);
         break;
     case COMMAND_RIGHT_BACK:
-        exec_vehicle_state_update(RIGHT_BACK);
+        exec_vehicle_state_update(RIGHT_BACK, type);
         break;
     case COMMAND_LEFT_TURN:
-        exec_vehicle_state_update(LEFT_TURN);
+        exec_vehicle_state_update(LEFT_TURN, type);
         break;
     case COMMAND_RIGHT_TURN:
-        exec_vehicle_state_update(RIGHT_TURN);
+        exec_vehicle_state_update(RIGHT_TURN, type);
         break;
     case COMMAND_TURN_OUT:
-        exec_vehicle_state_update(TURN_OVER);
+        exec_vehicle_state_update(TURN_OVER, type);
         break;
     case COMMAND_GO_BACK:
         goback();
