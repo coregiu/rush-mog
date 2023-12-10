@@ -10,7 +10,7 @@
 #include <vehicle_executor.h>
 
 // static const TickType_t xTicksToWait = (BaseType_t)pdMS_TO_TICKS(1000);
-static BaseType_t priority = 3;
+static BaseType_t priority = 6;
 static BaseType_t *const pxHigherPriorityTaskWoken = &priority;
 
 // the position of gpio in CAR_STATE_LIST array.
