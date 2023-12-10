@@ -29,6 +29,7 @@ void uart_log_string_data(char *log_data)
     {
         uart_log_data(log_data[i]);
     }
+    uart_log_enter_char();
 }
 
 /**
@@ -76,6 +77,7 @@ void uart_log_start_info()
     {
         uart_log_data('-');
     }
+    uart_log_enter_char();
 }
 
 uint16_t count_str(char *str)

@@ -13,16 +13,14 @@
 
 void exe_task_from_queue(void *argument)
 {
-    uart_log_data('T');
+    uart_log_string_data("Begin exe task...");
     const TickType_t xTicksToWait = pdMS_TO_TICKS(100);
     struct command_des received_command = {0, '0'};
 
     for (;;)
     {
         //通过接收函数从xTemperatureQueue队列中获取温度数据
-        uart_log_data('S');
         BaseType_t xStatus = xQueueReceive(command_queue, &received_command, xTicksToWait);
-        uart_log_data('R');
         if (xStatus == pdPASS)
         {
             uart_log_data(received_command.command);
@@ -42,10 +40,8 @@ void init_freertos()
     if (command_queue == NULL)
     {
         uart_log_string_data("failed to create command queue");
-        uart_log_enter_char();
         return;
     }
-    xTaskCreate(exe_task_from_queue, "CONSUMER_TASK", 200, NULL, 1, NULL);
+    xTaskCreate(exe_task_from_queue, "CONSUMER_TASK", 200, NULL, 2, NULL);
     uart_log_string_data("finish init freertos");
-    uart_log_enter_char();
 }

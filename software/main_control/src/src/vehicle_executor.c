@@ -9,7 +9,7 @@
 **/
 #include <vehicle_executor.h>
 
-static BaseType_t priority = 1;
+static BaseType_t priority = 2;
 static BaseType_t *const pxHigherPriorityTaskWoken = &priority;
 
 // the position of gpio in CAR_STATE_LIST array.

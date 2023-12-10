@@ -34,9 +34,10 @@ void init_audio_state()
 
     /* Usart2 NVIC 配置 */
     NVIC_InitStructure.NVIC_IRQChannel = USART2_IRQn;
-    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 6; /* 抢占优先级6 */
-    NVIC_InitStructure.NVIC_IRQChannelSubPriority = 6;        /* 子优先级0 */
+    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 3; /* 抢占优先级3 */
+    NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0;        /* 子优先级0 */
     NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;           /* IRQ通道使能 */
+    NVIC_PriorityGroupConfig(NVIC_PriorityGroup_4);           /* 设置优先级分组为4组，即抢占优先级范围为0-15 */
     NVIC_Init(&NVIC_InitStructure);                           /* 根据指定的参数初始化VIC寄存器 */
 
     /* USART 初始化设置 */
@@ -49,7 +50,6 @@ void init_audio_state()
     USART_Init(USART2, &USART_InitStructure);                                       /* 初始化串口2 */
 
     USART_ITConfig(USART2, USART_IT_RXNE, ENABLE); /* 开启串口接受中断 */
-    USART_ITConfig(USART2, USART_IT_IDLE, ENABLE);
     USART_Cmd(USART2, ENABLE); /* 使能串口 2 */
     USART_ClearFlag(USART2, USART_FLAG_TC);
 }
