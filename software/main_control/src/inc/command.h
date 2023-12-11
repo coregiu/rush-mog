@@ -34,15 +34,23 @@ extern QueueHandle_t command_queue;
 
 enum delay_type
 {
-    DELAY_BEFOR_EXE = 0,
-    DELAY_AFTER_EXE = 1
+    DELAY_BEFOR_EXE = '0',
+    DELAY_AFTER_EXE = '1'
+};
+
+// define command type
+enum command_type
+{
+    COMMAND_TYPE_MANUAL  = '0',
+    COMMAND_TYPE_AUTO    = '1'
 };
 
 // 放入队列的元素。一个是命令，一个是命令执行后挂起时长。
-struct command_des
+struct command_context
 {
     uint16_t time_sleep_milsec;
     enum delay_type delay_type;
+    enum command_type command_type;
     char command;
 };
 
@@ -80,13 +88,6 @@ enum module_def
     MODULE_UNKNOWN   = '9'
 };
 
-// define command type
-enum command_type
-{
-    COMMAND_TYPE_MANUAL  = '0',
-    COMMAND_TYPE_AUTO    = '1'
-};
-
 // define command receiver such as audio receiver and vedio receiver
 struct module_command_receiver
 {
@@ -98,7 +99,7 @@ struct module_command_receiver
 struct module_command_executor
 {
 	void (*init)();
-	void (*update_state)(char command, enum command_type type);
+	void (*update_state)(struct command_context *command_context);
 };
 
 // init command

@@ -63,16 +63,17 @@ char* receive_commands()
  */
 void notify_all(enum module_def module, char command, enum command_type type)
 {
+    struct command_context command_context = {0, DELAY_AFTER_EXE, type, command};
     switch (module)
     {
     case MODULE_VEHICLE:
-        vehicle_executor.update_state(command, type);
+        vehicle_executor.update_state(&command_context);
         break;
     case MODULE_VEDIO:
-        vedio_executor.update_state(command, type);
+        vedio_executor.update_state(&command_context);
         break;
     case MODULE_ROBOOT:
-        roboot_executor.update_state(command, type);
+        roboot_executor.update_state(&command_context);
         break;
 
     default:

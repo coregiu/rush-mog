@@ -13,9 +13,9 @@ void init_vedio_state()
 
 }
 
-void update_vedio_state(char command, enum command_type type)
+void update_vedio_state(struct command_context *command_context)
 {
-    switch (command)
+    switch (command_context->command)
         {
         case COMMAND_STOP:
             // uart_log_string_data("e:1"); // send 1

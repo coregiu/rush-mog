@@ -43,7 +43,7 @@ const char VEHICLE_STATE_LIST[12][8] = {
 
 enum vehicle_state current_car_status = STOP;
 
-void send_to_queue(struct command_des *command)
+void send_to_queue(struct command_context *command)
 {
     if (command_queue == NULL)
     {
@@ -107,7 +107,7 @@ void exec_vehicle_state_update(enum vehicle_state run_state, enum command_type t
     }
     else
     {
-        struct command_des stop_cmd = {2000, DELAY_BEFOR_EXE, '0'};
+        struct command_context stop_cmd = {2000, DELAY_BEFOR_EXE, COMMAND_TYPE_AUTO, '0'};
         send_to_queue(&stop_cmd);
     }
 }
@@ -147,30 +147,30 @@ void goback()
 
 void put_test_commands()
 {
-    struct command_des command_des = {2000, DELAY_AFTER_EXE, '1'};
-    send_to_queue(&command_des);
-    command_des.command = '2';
-    send_to_queue(&command_des);
-    command_des.command = '3';
-    send_to_queue(&command_des);
-    command_des.command = '4';
-    send_to_queue(&command_des);
-    command_des.command = '5';
-    send_to_queue(&command_des);
-    command_des.command = '6';
-    send_to_queue(&command_des);
-    command_des.command = '7';
-    send_to_queue(&command_des);
-    command_des.command = '8';
-    send_to_queue(&command_des);
-    command_des.command = '9';
-    send_to_queue(&command_des);
-    command_des.command = 'A';
-    send_to_queue(&command_des);
-    command_des.command = 'B';
-    send_to_queue(&command_des);
-    command_des.command = '0';
-    send_to_queue(&command_des);
+    struct command_context command_context = {2000, DELAY_AFTER_EXE, COMMAND_TYPE_AUTO, '1'};
+    send_to_queue(&command_context);
+    command_context.command = '2';
+    send_to_queue(&command_context);
+    command_context.command = '3';
+    send_to_queue(&command_context);
+    command_context.command = '4';
+    send_to_queue(&command_context);
+    command_context.command = '5';
+    send_to_queue(&command_context);
+    command_context.command = '6';
+    send_to_queue(&command_context);
+    command_context.command = '7';
+    send_to_queue(&command_context);
+    command_context.command = '8';
+    send_to_queue(&command_context);
+    command_context.command = '9';
+    send_to_queue(&command_context);
+    command_context.command = 'A';
+    send_to_queue(&command_context);
+    command_context.command = 'B';
+    send_to_queue(&command_context);
+    command_context.command = '0';
+    send_to_queue(&command_context);
 }
 
 void init_vehicle_state()
@@ -214,47 +214,47 @@ void init_vehicle_state()
     IN8 = 0;
 }
 
-void update_vehicle_state(char command, enum command_type type)
+void update_vehicle_state(struct command_context *command_context)
 {
-    uart_log_data(command);
+    uart_log_data(command_context->command);
     uart_log_enter_char();
-    switch (command)
+    switch (command_context->command)
     {
     case COMMAND_STOP:
-        exec_vehicle_state_update(STOP, type);
+        exec_vehicle_state_update(STOP, command_context->command_type);
         break;
     case COMMAND_RUN:
-        exec_vehicle_state_update(MOVE, type);
+        exec_vehicle_state_update(MOVE, command_context->command_type);
         break;
     case COMMAND_BACK:
-        exec_vehicle_state_update(BACK, type);
+        exec_vehicle_state_update(BACK, command_context->command_type);
         break;
     case COMMAND_LEFT_RUN:
-        exec_vehicle_state_update(LEFT, type);
+        exec_vehicle_state_update(LEFT, command_context->command_type);
         break;
     case COMMAND_RIGHT_RUN:
-        exec_vehicle_state_update(RIGHT, type);
+        exec_vehicle_state_update(RIGHT, command_context->command_type);
         break;
     case COMMAND_LEFT_FRONT:
-        exec_vehicle_state_update(LEFT_FRONT, type);
+        exec_vehicle_state_update(LEFT_FRONT, command_context->command_type);
         break;
     case COMMAND_RIGHT_FRONT:
-        exec_vehicle_state_update(RIGHT_FRONT, type);
+        exec_vehicle_state_update(RIGHT_FRONT, command_context->command_type);
         break;
     case COMMAND_LEFT_BACK:
-        exec_vehicle_state_update(LEFT_BACK, type);
+        exec_vehicle_state_update(LEFT_BACK, command_context->command_type);
         break;
     case COMMAND_RIGHT_BACK:
-        exec_vehicle_state_update(RIGHT_BACK, type);
+        exec_vehicle_state_update(RIGHT_BACK, command_context->command_type);
         break;
     case COMMAND_LEFT_TURN:
-        exec_vehicle_state_update(LEFT_TURN, type);
+        exec_vehicle_state_update(LEFT_TURN, command_context->command_type);
         break;
     case COMMAND_RIGHT_TURN:
-        exec_vehicle_state_update(RIGHT_TURN, type);
+        exec_vehicle_state_update(RIGHT_TURN, command_context->command_type);
         break;
     case COMMAND_TURN_OUT:
-        exec_vehicle_state_update(TURN_OVER, type);
+        exec_vehicle_state_update(TURN_OVER, command_context->command_type);
         break;
     case COMMAND_GO_BACK:
         goback();

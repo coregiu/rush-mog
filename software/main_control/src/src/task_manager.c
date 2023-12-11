@@ -15,7 +15,7 @@ void exe_task_from_queue(void *argument)
 {
     uart_log_string_data("Begin exe task...");
     const TickType_t xTicksToWait = pdMS_TO_TICKS(100);
-    struct command_des received_command = {0, DELAY_BEFOR_EXE, '0'};
+    struct command_context received_command = {0, DELAY_BEFOR_EXE, '0'};
 
     for (;;)
     {
@@ -43,7 +43,7 @@ void exe_task_from_queue(void *argument)
 
 void init_freertos()
 {
-    command_queue = xQueueCreate(MAX_COMMAND_QUEUE_SIZE, sizeof(struct command_des));
+    command_queue = xQueueCreate(MAX_COMMAND_QUEUE_SIZE, sizeof(struct command_context));
     if (command_queue == NULL)
     {
         uart_log_string_data("failed to create command queue");
