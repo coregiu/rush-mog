@@ -13,11 +13,11 @@
 
 #include "command.h"
 #include "vehicle_executor.h"
-#include "vedio_executor.h"
+#include "video_executor.h"
 #include "roboot_executor.h"
 #include "timer_executor.h"
 #include "audio_receiver.h"
-#include "vedio_receiver.h"
+#include "video_receiver.h"
 
 extern const char command_module_map[COMMANDS_LENGTH][2];
 

@@ -88,7 +88,7 @@ enum module_def
     MODULE_UNKNOWN   = '9'
 };
 
-// define command receiver such as audio receiver and vedio receiver
+// define command receiver such as audio receiver and video receiver
 struct module_command_receiver
 {
 	void (*init)();

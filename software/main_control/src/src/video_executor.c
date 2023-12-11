@@ -1,19 +1,19 @@
 /**
   ******************************************************************************
   *
-  * Implement of vedio executor.
+  * Implement of video_executor.
   * author: coregiu
   *
   *
   ******************************************************************************
 **/
-#include <vedio_executor.h>
-void init_vedio_state()
+#include <video_executor.h>
+void init_video_state()
 {
 
 }
 
-void update_vedio_state(struct command_context *command_context)
+void update_video_state(struct command_context *command_context)
 {
     switch (command_context->command)
         {
@@ -28,4 +28,4 @@ void update_vedio_state(struct command_context *command_context)
         }
 }
 
-const struct module_command_executor vedio_executor = {init_vedio_state, update_vedio_state};
+const struct module_command_executor video_executor = {init_video_state, update_video_state};

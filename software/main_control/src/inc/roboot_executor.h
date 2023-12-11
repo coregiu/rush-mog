@@ -1,7 +1,7 @@
 /**
   ******************************************************************************
   *
-  * Define of vedio executor.
+  * Define of video executor.
   * author: coregiu
   *
   *
