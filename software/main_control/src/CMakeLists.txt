@@ -1,9 +1,12 @@
+#set(CMAKE_C_FLAGS "-g -lm")
+
 # add the sources here
 #set(sources
 #    src/main.c
 #    src/stm32f10x_it.c
 #)
 aux_source_directory(src sources)
+aux_source_directory(src/driver sources)
 
 # GCC optimization level: use -O0 in debug build, otherwise -O2
 if(CMAKE_BUILD_TYPE MATCHES Debug)
@@ -22,7 +25,7 @@ set(lss_file ${application_name}.lss)
 # add sources to elf file
 add_executable(${elf_file} ${sources})
 
-target_include_directories(${elf_file} PUBLIC inc)
+target_include_directories(${elf_file} PUBLIC inc inc/driver)
 
 # link libraries to project
 target_link_libraries(${elf_file} PUBLIC stm32f10x core STM32F10x_FreeRTOS)
