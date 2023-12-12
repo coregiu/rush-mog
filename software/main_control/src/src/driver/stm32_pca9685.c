@@ -56,7 +56,7 @@ void pca_setfreq(float freq) //设置PWM频率
     prescaleval /= 4096;
     prescaleval /= freq;
     prescaleval -= 1;
-    prescale = (int)(prescaleval + 0.5f); //floor(prescaleval + 0.5f); 向上取整函數
+    prescale = (u8)(prescaleval + 0.5f); //floor(prescaleval + 0.5f); 向下取整函數。 因为是正数，所以直接换成U8类型强转
 
     oldmode = pca_read(pca_mode1);
 
