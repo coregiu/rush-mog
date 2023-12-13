@@ -31,38 +31,39 @@ static void clock_init(void)
 int main(void)
 {
     clock_init();
-    init_modules();
+    // init_modules();
     delay_init();
 
     uart_log_start_info();
 
-    delay_init();//延时函数初始化
-	PCA_MG9XX_Init(60,90);//初始化舵机驱动
-
-	delay_ms(1000);
-	delay_ms(1000);
-
-
-	for(int i=0;i<25;i++)
-	{
-
-		//PCA_MG9XX(1,0,180,2,5+5*i); //通道1，慢慢的转
-		//PCA_MG9XX(2,0,180,2,5+5*i); //通道2，慢慢的转
-
-		PCA_MG9XX(1,0,180,1,10); //通道1 从0度转到180度
-		PCA_MG9XX(2,0,180,1,10); //通道2 从0度转到180度
-		PCA_MG9XX(1,180,0,1,10); //通道1 从180度转到0度
-		PCA_MG9XX(2,180,0,1,10); //通道2 从180度转到0度
-	}
-
     LED = 0;
-    delay_ms(500);
+	PCA9685_Init(60,180);//初始化舵机驱动
+	delay_ms(1000);
     LED = 1;
-    delay_ms(500);
+	delay_ms(1000);
 
-    vTaskStartScheduler();
+	// for(int i=0;i<25;i++)
+	// {
+
+	// 	//PCA_MG9XX(1,0,180,2,5+5*i); //通道1，慢慢的转
+	// 	//PCA_MG9XX(2,0,180,2,5+5*i); //通道2，慢慢的转
+
+    //     LED = ~LED;
+	// 	PCA_MG9XX(1,0,180,1,10); //通道1 从0度转到180度
+	// 	// PCA_MG9XX(2,0,180,1,10); //通道2 从0度转到180度
+	// 	// PCA_MG9XX(1,180,0,1,10); //通道1 从180度转到0度
+	// 	// PCA_MG9XX(2,180,0,1,10); //通道2 从180度转到0度
+	// }
+
+    // LED = 0;
+    // delay_ms(500);
+    // LED = 1;
+    // delay_ms(500);
+
+    // vTaskStartScheduler();
     while (1)
     {
-
+        PCA9685_setPWM(0,0,2048);
+		delay_ms(500);
     }
 }
