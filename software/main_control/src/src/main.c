@@ -37,7 +37,7 @@ int main(void)
     uart_log_start_info();
 
     LED = 0;
-	PCA_MG9XX_Init(60,90);//初始化舵机驱动
+	pca_servo_init(1, 60,90);//初始化舵机驱动
 	delay_ms(1000);
     LED = 1;
 	delay_ms(1000);
@@ -49,7 +49,7 @@ int main(void)
 		//PCA_MG9XX(2,0,180,2,5+5*i); //通道2，慢慢的转
 
         LED = ~LED;
-		PCA_MG9XX(1,0,180,1,10); //通道1 从0度转到180度
+		pca_mg9xx(1,0,180,1,10); //通道1 从0度转到180度
 		// PCA_MG9XX(2,0,180,1,10); //通道2 从0度转到180度
 		// PCA_MG9XX(1,180,0,1,10); //通道1 从180度转到0度
 		// PCA_MG9XX(2,180,0,1,10); //通道2 从180度转到0度
