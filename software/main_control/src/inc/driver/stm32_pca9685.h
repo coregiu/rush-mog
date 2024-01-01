@@ -14,6 +14,9 @@
 
 #include "stm32f10x.h"
 
+#include "sys.h"
+#include "delay.h"
+
 #define pca_adrr 0x80
 
 #define pca_mode1 0x0

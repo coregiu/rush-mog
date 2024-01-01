@@ -14,10 +14,10 @@
 #include "command.h"
 #include "vehicle_executor.h"
 #include "video_executor.h"
-#include "roboot_executor.h"
 #include "timer_executor.h"
 #include "audio_receiver.h"
 #include "video_receiver.h"
+#include "arm_roboot_executor.h"
 
 extern const char command_module_map[COMMANDS_LENGTH][2];
 

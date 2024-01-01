@@ -8,12 +8,10 @@
   ******************************************************************************
 **/
 #include "stm32_pca9685.h"
-#include "delay.h"
 
 void pca_write(u8 adrr, u8 data) //向PCA写数据,adrrd地址,data数据
 {
     IIC_Start();
-
     IIC_Send_Byte(pca_adrr);
     IIC_Wait_Ack();
 
@@ -130,7 +128,6 @@ void pca_servo_init(u8 num, float hz, u8 angle)
     pca_setfreq(hz); //设置PWM频率
     off = (u32)(145 + angle * 2.4);
     pca_setpwm(num, 0, off);
-    delay_ms(500);
 }
 
 /*
@@ -202,8 +199,9 @@ void IIC_Init(void)
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_Out_PP; //推挽输出
     GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
     GPIO_Init(GPIOB, &GPIO_InitStructure);
-    GPIO_SetBits(GPIOB, GPIO_Pin_8 | GPIO_Pin_9); //PB6,PB7 输出高
+    GPIO_SetBits(GPIOB, GPIO_Pin_6 | GPIO_Pin_7); //PB6,PB7 输出高
 }
+
 //产生IIC起始信号
 void IIC_Start(void)
 {
