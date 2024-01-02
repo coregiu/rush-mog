@@ -20,6 +20,11 @@
 #define SERVO_5 8
 #define SERVO_6 11
 
+// ---------------servo define----------------
+#define SERVO_1_RIGHT   1
+#define SERVO_1_MIDDLE  90
+#define SERVO_1_LEFT    179
+
 extern const struct module_command_executor arm_roboot_executor;
 
 #endif
