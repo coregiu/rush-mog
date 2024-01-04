@@ -33,15 +33,15 @@
 #define SERVO_3_MIDDLE  90
 #define SERVO_3_FRONT   179
 
-#define SERVO_3_BACK    1
-#define SERVO_3_MIDDLE  90
-#define SERVO_3_FRONT   179
+#define SERVO_4_BACK    1
+#define SERVO_4_MIDDLE  90
+#define SERVO_5_FRONT   179
 
 #define SERVO_5_HOR     90
 #define SERVO_5_VER     179
 
-#define SERVO_6_OPEN    90
-#define SERVO_6_CLOSE   179
+#define SERVO_6_OPEN    179
+#define SERVO_6_CLOSE   120
 
 extern const struct module_command_executor arm_roboot_executor;
 
