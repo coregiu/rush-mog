@@ -18,7 +18,7 @@ void init_roboot_state()
     pca_servo_init(SERVO_3, 60, 90);
     pca_servo_init(SERVO_4, 60, 90);
     pca_servo_init(SERVO_5, 60, 90);
-    pca_servo_init(SERVO_6, 60, 0);
+    pca_servo_init(SERVO_6, 60, 160);
 }
 
 void update_roboot_state(struct command_context *command_context)
