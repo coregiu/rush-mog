@@ -86,46 +86,22 @@ off/4096的值就是PWM的占空比。*/
 /*
 	函数作用：初始化舵机驱动板
 	参数：1.PWM频率
-		  2.初始化舵机角度
 */
-void pca_mg9xx_init(float hz, u8 angle)
+void pca_init(float hz)
 {
-    u32 off = 0;
     IIC_Init();
     pca_write(pca_mode1, 0x0);
     pca_setfreq(hz); //设置PWM频率
-    off = (u32)(145 + angle * 2.4);
-    pca_setpwm(0, 0, off);
-    pca_setpwm(1, 0, off);
-    pca_setpwm(2, 0, off);
-    pca_setpwm(3, 0, off);
-    pca_setpwm(4, 0, off);
-    pca_setpwm(5, 0, off);
-    pca_setpwm(6, 0, off);
-    pca_setpwm(7, 0, off);
-    pca_setpwm(8, 0, off);
-    pca_setpwm(9, 0, off);
-    pca_setpwm(10, 0, off);
-    pca_setpwm(11, 0, off);
-    pca_setpwm(12, 0, off);
-    pca_setpwm(13, 0, off);
-    pca_setpwm(14, 0, off);
-    pca_setpwm(15, 0, off);
-    delay_ms(500);
 }
 
 /*
 	函数作用：初始化舵机驱动板
 	参数： 1.舵机编号
-          2.PWM频率
-		  3.初始化舵机角度
+		  2.初始化舵机角度
 */
-void pca_servo_init(u8 num, float hz, u8 angle)
+void servo_init(u8 num, u8 angle)
 {
     u32 off = 0;
-    IIC_Init();
-    pca_write(pca_mode1, 0x0);
-    pca_setfreq(hz); //设置PWM频率
     off = (u32)(145 + angle * 2.4);
     pca_setpwm(num, 0, off);
 }

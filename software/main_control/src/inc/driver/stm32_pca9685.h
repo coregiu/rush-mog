@@ -50,10 +50,11 @@
 #define IIC_SDA PBout(7) //SDA
 #define READ_SDA PBin(7) //输入SDA
 
+void pca_init(float hz);
+void servo_init(u8 num, u8 angle);
+
 void pca_write(u8 adrr, u8 data);
 u8 pca_read(u8 adrr);
-void pca_mg9xx_init(float hz, u8 angle);
-void pca_servo_init(u8 num, float hz, u8 angle);
 void pca_setfreq(float freq);
 void pca_setpwm(u8 num, u32 on, u32 off);
 void pca_mg9xx(u8 num, u8 start_angle, u8 end_angle, u8 mode, u8 speed);
