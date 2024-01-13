@@ -71,6 +71,10 @@ void pca_setfreq(float freq) //设置PWM频率
     pca_write(pca_mode1, oldmode | 0xa1);
 }
 
+/*num:舵机PWM输出引脚0~15，on:PWM上升计数值0~4096,off:PWM下降计数值0~4096
+一个PWM周期分成4096份，由0开始+1计数，计到on时跳变为高电平，继续计数到off时
+跳变为低电平，直到计满4096重新开始。所以当on不等于0时可作延时,当on等于0时，
+off/4096的值就是PWM的占空比。*/
 void pca_setpwm(u8 num, u32 on, u32 off)
 {
     pca_write(LED0_ON_L + 4 * num, on);
@@ -78,10 +82,6 @@ void pca_setpwm(u8 num, u32 on, u32 off)
     pca_write(LED0_OFF_L + 4 * num, off);
     pca_write(LED0_OFF_H + 4 * num, off >> 8);
 }
-/*num:舵机PWM输出引脚0~15，on:PWM上升计数值0~4096,off:PWM下降计数值0~4096
-一个PWM周期分成4096份，由0开始+1计数，计到on时跳变为高电平，继续计数到off时
-跳变为低电平，直到计满4096重新开始。所以当on不等于0时可作延时,当on等于0时，
-off/4096的值就是PWM的占空比。*/
 
 /*
 	函数作用：初始化舵机驱动板
