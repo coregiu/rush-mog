@@ -79,13 +79,15 @@ void notify_all(enum module_def module, char command, enum command_type type)
         arm_roboot_executor.update_state(&command_context);
         break;
     case MODULE_INTELI:
-        command_context.command = 'C';
-        arm_roboot_executor.update_state(&command_context);
+        command_context.command = 'D';
+        vehicle_executor.update_state(&command_context);
         break;
 
     default:
+
         break;
     }
+
 }
 
 /**

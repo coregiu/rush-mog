@@ -76,7 +76,7 @@ enum commands_def
     COMMAND_CLOSE_VEDIO  = 'G',
     COMMAND_OPEN_INTELI  = 'H',
     COMMAND_CLOSE_INTELI = 'I',
-    COMMAND_PLAYING      = 'L',
+    COMMAND_PLAYING      = 'J',
     COMMAND_UNKNOWN      = 'Z'
 };
 
