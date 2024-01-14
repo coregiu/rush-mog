@@ -22,7 +22,7 @@
 // define the single light
 #define LED PCout(13)	//PC13 0-light up; 1-turn off.
 
-#define COMMANDS_LENGTH 20
+#define COMMANDS_LENGTH 21
 
 #define DEFAULT_BOUND_RATE 9600
 
@@ -76,6 +76,7 @@ enum commands_def
     COMMAND_CLOSE_VEDIO  = 'G',
     COMMAND_OPEN_INTELI  = 'H',
     COMMAND_CLOSE_INTELI = 'I',
+    COMMAND_PLAYING      = 'L',
     COMMAND_UNKNOWN      = 'Z'
 };
 
@@ -85,6 +86,7 @@ enum module_def
     MODULE_VEHICLE   = '0',
     MODULE_VEDIO     = '1',
     MODULE_ROBOOT    = '2',
+    MODULE_INTELI    = '3',
     MODULE_UNKNOWN   = '9'
 };
 

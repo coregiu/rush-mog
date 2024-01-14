@@ -30,6 +30,7 @@ const char command_module_map[COMMANDS_LENGTH][2] = {{COMMAND_STOP, MODULE_VEHIC
                                                       {COMMAND_CLOSE_VEDIO, MODULE_VEDIO},
                                                       {COMMAND_OPEN_INTELI, MODULE_VEDIO},
                                                       {COMMAND_CLOSE_INTELI, MODULE_VEDIO},
+                                                      {COMMAND_PLAYING, MODULE_INTELI},
                                                       {COMMAND_UNKNOWN, MODULE_UNKNOWN}};
 
 /**
@@ -75,6 +76,10 @@ void notify_all(enum module_def module, char command, enum command_type type)
         video_executor.update_state(&command_context);
         break;
     case MODULE_ROBOOT:
+        arm_roboot_executor.update_state(&command_context);
+        break;
+    case MODULE_INTELI:
+        command_context.command = 'C';
         arm_roboot_executor.update_state(&command_context);
         break;
 
