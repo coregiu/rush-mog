@@ -80,6 +80,11 @@ IO口分配如下：
 如果嫌声音小，可以这个放大器进一步放大音量。
 <img src="modules/upper.jpg" />
 
+#### 视觉模块
+使用OpenMV作为视觉模块
+<img src="modules/OpenMV4.jpg" />
+[教程参照:https://singtown.com/openmv/](https://singtown.com/openmv/)
+
 ## 硬件设计工具KiCAD
 
 安装：https://docs.kicad.org/5.1/zh/getting_started_in_kicad/getting_started_in_kicad.html
