@@ -68,9 +68,19 @@ IO口分配如下：
 <img src="modules/servo-driver.jpg" />
 16路舵机驱动
 
-#### 树莓派
-<img src="modules/raspberry.jpg" />
-树莓派4B+摄像头进行图像识别处理。
+#### 视觉模块
+使用OpenMV作为视觉模块
+<img src="modules/OpenMV4.jpg" />
+[教程参照:https://singtown.com/openmv/](https://singtown.com/openmv/)
+
+#### 6轴陀螺仪
+<img src="modules/mpu6050.jpg" />
+
+#### OLED显示屏
+<img src="modules/oled.jpg" />
+
+#### GY53L0X TOF测距
+<img src="modules/gy530.jpg" />
 
 #### 电源及电压转换板
 小车上有12V，5V， 3.3V三种电压，最好用12V供电电源，并用电压转换板转换一下。
@@ -80,10 +90,9 @@ IO口分配如下：
 如果嫌声音小，可以这个放大器进一步放大音量。
 <img src="modules/upper.jpg" />
 
-#### 视觉模块
-使用OpenMV作为视觉模块
-<img src="modules/OpenMV4.jpg" />
-[教程参照:https://singtown.com/openmv/](https://singtown.com/openmv/)
+#### 树莓派
+<img src="modules/raspberry.jpg" />
+树莓派4B+摄像头进行图像识别处理。
 
 ## 硬件设计工具KiCAD
 
