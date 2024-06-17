@@ -44,7 +44,7 @@ AGO是语音控制万向轮小车，车载视频自动智能识别系统，自�
 - 视频及图像处理基于PyTorchVideo开发，同时树莓派与中控建立IIC通信，反馈视频分析结果驱动小车和机械臂移动。
 - 手机APP基于鸿蒙应用框架开发，控制指令同语音指令。通过树莓派热点与小车建立无线通信网络。HTTP协议通信。
 
-![](software/archetecture.png)
+![](software/architechture.png)
 
 详细参照：[软件设计说明和代码](software/README.md)
 
