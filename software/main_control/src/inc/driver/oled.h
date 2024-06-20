@@ -17,8 +17,14 @@
 //////////////////////////////////////////////////////////////////////////////////
 #ifndef __OLED_H
 #define __OLED_H
+
+#include "stdlib.h"
+#include "oledfont.h"
+#include "delay.h"
 #include "sys.h"
 #include "stdlib.h"
+#include "iic.h"
+
 #define OLED_MODE 0
 #define SIZE 8
 #define XLevelL		0x00
@@ -61,10 +67,10 @@ void fill_picture(unsigned char fill_Data);
 void Picture();
 // void IIC_Start();
 // void IIC_Stop();
-// void Write_IIC_Command(unsigned char IIC_Command);
-// void Write_IIC_Data(unsigned char IIC_Data);
-// void Write_IIC_Byte(unsigned char IIC_Byte);
 // void IIC_Wait_Ack();
+void Write_IIC_Command(unsigned char IIC_Command);
+void Write_IIC_Data(unsigned char IIC_Data);
+void Write_IIC_Byte(unsigned char IIC_Byte);
 #endif
 
 

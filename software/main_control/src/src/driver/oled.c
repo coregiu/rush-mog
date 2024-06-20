@@ -16,10 +16,7 @@
 //All rights reserved
 //////////////////////////////////////////////////////////////////////////////////
 
-#include "oled.h"
-#include "stdlib.h"
-#include "oledfont.h"
-#include "delay.h"
+#include <oled.h>
 //OLED的显存
 //存放格式如下.
 //[0]0 1 2 3 ... 127
@@ -78,70 +75,70 @@
 //     OLED_SCLK_Set();
 //     OLED_SCLK_Clr();
 // }
-// /**********************************************
-// // IIC Write byte
-// **********************************************/
+/**********************************************
+// IIC Write byte
+**********************************************/
 
-// void Write_IIC_Byte(unsigned char IIC_Byte)
-// {
-//     unsigned char i;
-//     unsigned char m, da;
-//     da = IIC_Byte;
-//     OLED_SCLK_Clr();
-//     for (i = 0; i < 8; i++)
-//     {
-//         m = da;
-//         //	OLED_SCLK_Clr();
-//         m = m & 0x80;
-//         if (m == 0x80)
-//         {
-//             OLED_SDIN_Set();
-//         }
-//         else
-//             OLED_SDIN_Clr();
-//         da = da << 1;
-//         OLED_SCLK_Set();
-//         OLED_SCLK_Clr();
-//     }
-// }
-// /**********************************************
-// // IIC Write Command
-// **********************************************/
-// void Write_IIC_Command(unsigned char IIC_Command)
-// {
-//     IIC_Start();
-//     Write_IIC_Byte(0x78); //Slave address,SA0=0
-//     IIC_Wait_Ack();
-//     Write_IIC_Byte(0x00); //write command
-//     IIC_Wait_Ack();
-//     Write_IIC_Byte(IIC_Command);
-//     IIC_Wait_Ack();
-//     IIC_Stop();
-// }
-// /**********************************************
-// // IIC Write Data
-// **********************************************/
-// void Write_IIC_Data(unsigned char IIC_Data)
-// {
-//     IIC_Start();
-//     Write_IIC_Byte(0x78); //D/C#=0; R/W#=0
-//     IIC_Wait_Ack();
-//     Write_IIC_Byte(0x40); //write data
-//     IIC_Wait_Ack();
-//     Write_IIC_Byte(IIC_Data);
-//     IIC_Wait_Ack();
-//     IIC_Stop();
-// }
+void Write_IIC_Byte(unsigned char IIC_Byte)
+{
+    unsigned char i;
+    unsigned char m, da;
+    da = IIC_Byte;
+    OLED_SCLK_Clr();
+    for (i = 0; i < 8; i++)
+    {
+        m = da;
+        //	OLED_SCLK_Clr();
+        m = m & 0x80;
+        if (m == 0x80)
+        {
+            OLED_SDIN_Set();
+        }
+        else
+            OLED_SDIN_Clr();
+        da = da << 1;
+        OLED_SCLK_Set();
+        OLED_SCLK_Clr();
+    }
+}
+/**********************************************
+// IIC Write Command
+**********************************************/
+void Write_IIC_Command(unsigned char IIC_Command)
+{
+    IIC_Start();
+    Write_IIC_Byte(0x78); //Slave address,SA0=0
+    IIC_Wait_Ack();
+    Write_IIC_Byte(0x00); //write command
+    IIC_Wait_Ack();
+    Write_IIC_Byte(IIC_Command);
+    IIC_Wait_Ack();
+    IIC_Stop();
+}
+/**********************************************
+// IIC Write Data
+**********************************************/
+void Write_IIC_Data(unsigned char IIC_Data)
+{
+    IIC_Start();
+    Write_IIC_Byte(0x78); //D/C#=0; R/W#=0
+    IIC_Wait_Ack();
+    Write_IIC_Byte(0x40); //write data
+    IIC_Wait_Ack();
+    Write_IIC_Byte(IIC_Data);
+    IIC_Wait_Ack();
+    IIC_Stop();
+}
 void OLED_WR_Byte(unsigned dat, unsigned cmd)
 {
     if (cmd)
     {
 
-        Write_IIC_Data(dat);
+        // Write_IIC_Data(dat);
     }
     else
     {
-        Write_IIC_Command(dat);
+        // Write_IIC_Command(dat);
     }
 }
 
