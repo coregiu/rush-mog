@@ -1,9 +1,5 @@
-# AGO
-AGO: AI GOGO
-
-AGO is a voice controlled universal wheel car, and with a video automatic intelligent recognition system, which automatically controls the operation of the wheel and robotic arm. Also can be controlled using a mobile app.
-
-AGO是语音控制万向轮小车，车载视频自动智能识别系统，自动控制机械臂工作，同时可以使用手机端APP进行控制。
+# Rush Mog
+Rush Mog是一款致敬Unimog的万向轮智能高扭矩小车。基于stm32f103控制，带mpu6500方向控制、tof测距、openmv视觉以及asrpro音频控制，并且通过OLED记录显示车体状态。同时使用esp8266远程控制，实时同步车载视频。
 
 ## 功能说明
 #### （1）语音控制小车行驶
