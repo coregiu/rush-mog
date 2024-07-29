@@ -109,4 +109,7 @@ void init_command_module();
 
 // convert command to the array sequence of command_module_map.
 uint convert_command_seq(char command);
+
+void send_to_queue(struct command_context *command);
+
 #endif

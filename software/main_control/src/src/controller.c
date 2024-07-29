@@ -33,6 +33,9 @@ const char command_module_map[COMMANDS_LENGTH][2] = {{COMMAND_STOP, MODULE_VEHIC
                                                       {COMMAND_PLAYING, MODULE_INTELI},
                                                       {COMMAND_UNKNOWN, MODULE_UNKNOWN}};
 
+static BaseType_t priority = 2;
+static BaseType_t *const pxHigherPriorityTaskWoken = &priority;
+
 /**
  * init uart and all receive and executor modules
  *
@@ -101,5 +104,21 @@ void execute_commands(char *commands, enum command_type type)
     {
         LED = ~LED;
         notify_all(command_module_map[cmd_seq][1], commands[0], type);
+    }
+}
+
+void send_to_queue(struct command_context *command)
+{
+    if (command_queue == NULL)
+    {
+        uart_log_string_data("command queue is null");
+        return;
+    }
+    // BaseType_t xStatus = xQueueSend(command_queue, command, pdMS_TO_TICKS(100));
+    // BaseType_t xStatus = xQueueSendFromISR(command_queue, &(command->command), xTicksToWait);
+    BaseType_t xStatus = xQueueSendFromISR(command_queue, command, pxHigherPriorityTaskWoken);
+    if (xStatus != pdPASS)
+    {
+        uart_log_start_info("failed to send data"); //如果发送数据失败在这里进行错误处理
     }
 }

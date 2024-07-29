@@ -21,6 +21,10 @@
 #define IN6 PBout(14) // PB14
 #define IN7 PBout(13) // PB13
 #define IN8 PBout(12) // PB12
+#define ENA PBout(4)  // PB4
+#define ENB PBout(3)  // PB3
+#define ENC PAout(15) // PA15
+#define END PAout(12) // PA12
 
 #define GPIO_IN1 GPIO_Pin_11 // PA11
 #define GPIO_IN2 GPIO_Pin_10 // PA10
@@ -30,6 +34,10 @@
 #define GPIO_IN6 GPIO_Pin_14 // PB14
 #define GPIO_IN7 GPIO_Pin_13 // PB13
 #define GPIO_IN8 GPIO_Pin_12 // PB12
+#define GPIO_ENA GPIO_Pin_4  // PB4
+#define GPIO_ENB GPIO_Pin_3  // PB3
+#define GPIO_ENC GPIO_Pin_15 // PA15
+#define GPIO_END GPIO_Pin_12 // PA12
 
 // vehicle run state
 enum vehicle_state

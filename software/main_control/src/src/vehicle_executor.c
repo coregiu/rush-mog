@@ -9,9 +9,6 @@
 **/
 #include <vehicle_executor.h>
 
-static BaseType_t priority = 2;
-static BaseType_t *const pxHigherPriorityTaskWoken = &priority;
-
 // the position of gpio in CAR_STATE_LIST array.
 enum gpio_position
 {
@@ -43,22 +40,6 @@ const char VEHICLE_STATE_LIST[12][8] = {
 
 enum vehicle_state current_car_status = STOP;
 
-void send_to_queue(struct command_context *command)
-{
-    if (command_queue == NULL)
-    {
-        uart_log_string_data("command queue is null");
-        return;
-    }
-    // BaseType_t xStatus = xQueueSend(command_queue, command, pdMS_TO_TICKS(100));
-    // BaseType_t xStatus = xQueueSendFromISR(command_queue, &(command->command), xTicksToWait);
-    BaseType_t xStatus = xQueueSendFromISR(command_queue, command, pxHigherPriorityTaskWoken);
-    if (xStatus != pdPASS)
-    {
-        uart_log_start_info("failed to send data"); //如果发送数据失败在这里进行错误处理
-    }
-}
-
 void exec_vehicle_state_update(enum vehicle_state run_state, enum command_type type)
 {
     if (current_car_status == run_state)
@@ -89,6 +70,10 @@ void exec_vehicle_state_update(enum vehicle_state run_state, enum command_type t
 
     // uart_log_data(VEHICLE_STATE_LIST[run_state][RIGHT_BACK_2_POSITION] + 48);
     IN8 = VEHICLE_STATE_LIST[run_state][RIGHT_BACK_2_POSITION];
+    ENA = 1;
+    ENB = 1;
+    ENC = 1;
+    END = 1;
 
     current_car_status = run_state;
 
@@ -212,6 +197,22 @@ void init_vehicle_state()
     GPIO_InitStructure.GPIO_Pin = GPIO_IN8;
     GPIO_Init(GPIOB, &GPIO_InitStructure);
     IN8 = 0;
+
+    GPIO_InitStructure.GPIO_Pin = GPIO_ENA;
+    GPIO_Init(GPIOB, &GPIO_InitStructure);
+    ENA = 1;
+
+    GPIO_InitStructure.GPIO_Pin = GPIO_ENB;
+    GPIO_Init(GPIOB, &GPIO_InitStructure);
+    ENB = 1;
+
+    GPIO_InitStructure.GPIO_Pin = GPIO_ENC;
+    GPIO_Init(GPIOA, &GPIO_InitStructure);
+    ENC = 1;
+
+    GPIO_InitStructure.GPIO_Pin = GPIO_END;
+    GPIO_Init(GPIOA, &GPIO_InitStructure);
+    END = 1;
 }
 
 void update_vehicle_state(struct command_context *command_context)
