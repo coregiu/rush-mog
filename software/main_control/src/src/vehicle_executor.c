@@ -70,10 +70,6 @@ void exec_vehicle_state_update(enum vehicle_state run_state, enum command_type t
 
     // uart_log_data(VEHICLE_STATE_LIST[run_state][RIGHT_BACK_2_POSITION] + 48);
     IN8 = VEHICLE_STATE_LIST[run_state][RIGHT_BACK_2_POSITION];
-    ENA = 1;
-    ENB = 1;
-    ENC = 1;
-    END = 1;
 
     current_car_status = run_state;
 
@@ -198,21 +194,13 @@ void init_vehicle_state()
     GPIO_Init(GPIOB, &GPIO_InitStructure);
     IN8 = 0;
 
-    GPIO_InitStructure.GPIO_Pin = GPIO_ENA;
+    GPIO_InitStructure.GPIO_Pin = GPIO_ENL;
     GPIO_Init(GPIOB, &GPIO_InitStructure);
-    ENA = 1;
+    ENL = 1;
 
-    GPIO_InitStructure.GPIO_Pin = GPIO_ENB;
+    GPIO_InitStructure.GPIO_Pin = GPIO_ENR;
     GPIO_Init(GPIOB, &GPIO_InitStructure);
-    ENB = 1;
-
-    GPIO_InitStructure.GPIO_Pin = GPIO_ENC;
-    GPIO_Init(GPIOA, &GPIO_InitStructure);
-    ENC = 1;
-
-    GPIO_InitStructure.GPIO_Pin = GPIO_END;
-    GPIO_Init(GPIOA, &GPIO_InitStructure);
-    END = 1;
+    ENR = 1;
 }
 
 void update_vehicle_state(struct command_context *command_context)
