@@ -29,7 +29,7 @@ add_executable(${elf_file} ${sources})
 target_include_directories(${elf_file} PUBLIC inc inc/driver inc/protocol)
 
 # link libraries to project
-target_link_libraries(${elf_file} PUBLIC stm32f10x core STM32F10x_FreeRTOS)
+target_link_libraries(${elf_file} PUBLIC stm32f10x core STM32F10x_FreeRTOS m)
 
 # set additional for compiler and linker: optimization and generate map file
 set(additional_compiler_flags ${opt_level})

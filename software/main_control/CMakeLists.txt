@@ -22,7 +22,7 @@ set(CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/CMake/Modules)
 find_package(Openocd)
 
 # Project specific settings
-set(application_name "ago_maincontrol")
+set(application_name "main_control")
 
 cmake_policy(SET CMP0048 NEW)
 project (${application_name} VERSION 1.2.3 LANGUAGES C CXX ASM)

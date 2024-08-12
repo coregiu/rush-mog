@@ -88,7 +88,7 @@ void exec_vehicle_state_update(enum vehicle_state run_state, enum command_type t
     }
     else
     {
-        struct command_context stop_cmd = {2000, DELAY_BEFOR_EXE, COMMAND_TYPE_AUTO, '0'};
+        struct command_context stop_cmd = {'0', MODULE_VEHICLE, 2000, DELAY_BEFOR_EXE, COMMAND_TYPE_AUTO};
         send_to_queue(&stop_cmd);
     }
 }
@@ -128,7 +128,7 @@ void goback()
 
 void put_test_commands()
 {
-    struct command_context command_context = {2000, DELAY_AFTER_EXE, COMMAND_TYPE_AUTO, '1'};
+    struct command_context command_context = {'1', MODULE_VEHICLE, 2000, DELAY_AFTER_EXE, COMMAND_TYPE_AUTO};
     send_to_queue(&command_context);
     command_context.command = '2';
     send_to_queue(&command_context);

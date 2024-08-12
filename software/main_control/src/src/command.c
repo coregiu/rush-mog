@@ -29,7 +29,7 @@ uint convert_command_seq(char command)
     }
 }
 
-void init_command_module()
+void init_command_led_module()
 {
     GPIO_InitTypeDef GPIO_InitStructure;
 

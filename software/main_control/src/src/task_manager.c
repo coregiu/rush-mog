@@ -15,7 +15,7 @@ void exe_task_from_queue(void *argument)
 {
     uart_log_string_data("Begin exe task...");
     const TickType_t xTicksToWait = pdMS_TO_TICKS(100);
-    struct command_context received_command = {0, DELAY_BEFOR_EXE, '0'};
+    struct command_context received_command = {0};
 
     for (;;)
     {

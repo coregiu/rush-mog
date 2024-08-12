@@ -22,14 +22,39 @@ void uart_log_data(uint16_t log_data)
     USART_ClearFlag(USART2, USART_FLAG_TC);
 }
 
-void uart_log_string_data(char *log_data)
+/**
+ * log string without enter
+ */
+void uart_log_string_no_enter(char *log_data)
 {
     uint16_t size = count_str(log_data);
     for (uint16_t i = 0; i < size; i++)
     {
         uart_log_data(log_data[i]);
     }
+}
+
+void uart_log_string_data(char *log_data)
+{
+    uart_log_string_no_enter(log_data);
     uart_log_enter_char();
+}
+
+void uart_log_number(int log_number)
+{
+    if (log_number < 0)
+    {
+        uart_log_data('-');
+        log_number = ~(log_number - 1);
+    }
+    short tmpNum = log_number / 10;
+    if (tmpNum == 0)
+    {
+        uart_log_data(log_number + 0x30);
+        return;
+    }
+    uart_log_number(tmpNum);
+    uart_log_data((log_number % 10) + 0x30);
 }
 
 /**

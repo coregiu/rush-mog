@@ -1,4 +1,6 @@
 # 开发环境说明
+
+## IDE等
 - 开发IDE： VSCODE
 
 - 编译软件： arm-none-eabi-gcc, cmake
@@ -11,8 +13,9 @@ ubuntu下安装： apt install arm-none-eabi-gcc
 $ sudo apt-get install libusb-1.0
 $ sudo apt-get install cmake
 $ sudo apt-get install libgtk-3-dev
+$ sudo apt install libreadline-dev
 
-# 安装
+# 安装JLink
 $ git clone https://github.com/stlink-org/stlink
 $ cd stlink
 $ cmake
@@ -31,21 +34,48 @@ $ sudo apt install stlink-gui
 $ st-flash --version
         v1.7.0
 
-# 安装JLink
-$ sudo apt install libreadline-dev
-
-# 烧录软件
-$ st-flash write STM32F10x-Template.bin 0x8000000
-```
-- 烧录软件2：flymcu的stm32flash
-```shell
-# 安装软件
+# 安装flymcu
 $ sudo apt-get install stm32flash
-$ sudo stm32flash -w STM32F10x-Template.hex -v -g 0x0 /dev/ttyUSB0
+```
+## 编译
+```shell
+$ mkdir build
+$ cd build
+$ cmake -G "Unix Makefiles" -D "CMAKE_TOOLCHAIN_FILE=../CMake/GNU-ARM-Toolchain.cmake" ..
+$ make
+$ ll src
+total 1.0M
+drwxrwxr-x  3 eagle 4.0K 6月  11 23:15 .
+drwxrwxr-x  6 eagle 4.0K 6月  11 23:15 ..
+-rwxrwxr-x  1 eagle  18K 6月  11 23:15 main_control.bin
+-rwxrwxr-x  1 eagle 360K 6月  11 23:15 main_control.elf
+-rw-rw-r--  1 eagle  51K 6月  11 23:15 main_control.hex
+-rw-rw-r--  1 eagle 433K 6月  11 23:15 main_control.lss
+-rw-rw-r--  1 eagle 213K 6月  11 23:15 main_control.map
+drwxrwxr-x 11 eagle 4.0K 6月  11 23:15 CMakeFiles
+-rw-rw-r--  1 eagle 1017 1月  14 08:26 cmake_install.cmake
+-rw-rw-r--  1 eagle  27K 1月  14 08:26 Makefile
 ```
 
+## 烧录
+方式一： ST-LINK
+```
+$ cd src
+$ sudo st-flash write main_control.bin 0x8000000
+```
+或者打开st-link软件，点击连接，选择main_control.bin文件，点击烧录按钮。
+![st-link](st-link.png)
 
-- 依赖： python3, python-pip3, python serial
+方式2：flymcu的stm32flash
+需要boot0置1， boot1置0不动。
+```shell
+# boot0跳线置1
+$ sudo stm32flash -w main_control.hex -v -g 0x0 /dev/ttyUSB0
+```
+完成烧录后再将boot0跳线改回置0
+
+## 依赖
+依赖： python3, python-pip3, python serial
 
 安装python serial: https://www.geeksforgeeks.org/how-to-install-python-serial-package-on-linux/
 
@@ -103,29 +133,3 @@ make gdb # this will run gdb and openocd in the background.
 todo: kill openocd upon gdb termination
 ```
 
-# 手动编译烧录
-### 编译
-```shell
-$ mkdir build
-$ cd build
-$ cmake -G "Unix Makefiles" -D "CMAKE_TOOLCHAIN_FILE=../CMake/GNU-ARM-Toolchain.cmake" ..
-$ ll src
-total 1.0M
-drwxrwxr-x  3 eagle 4.0K 6月  11 23:15 .
-drwxrwxr-x  6 eagle 4.0K 6月  11 23:15 ..
--rwxrwxr-x  1 eagle  18K 6月  11 23:15 ago_maincontrol.bin
--rwxrwxr-x  1 eagle 360K 6月  11 23:15 ago_maincontrol.elf
--rw-rw-r--  1 eagle  51K 6月  11 23:15 ago_maincontrol.hex
--rw-rw-r--  1 eagle 433K 6月  11 23:15 ago_maincontrol.lss
--rw-rw-r--  1 eagle 213K 6月  11 23:15 ago_maincontrol.map
-drwxrwxr-x 11 eagle 4.0K 6月  11 23:15 CMakeFiles
--rw-rw-r--  1 eagle 1017 1月  14 08:26 cmake_install.cmake
--rw-rw-r--  1 eagle  27K 1月  14 08:26 Makefile
-```
-
-### 烧录
-打开st-link软件
-
-![st-link](st-link.png)
-
-点击连接，选择ago_maincontrol.bin文件，点击烧录按钮。

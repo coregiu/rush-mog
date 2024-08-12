@@ -9,6 +9,7 @@
 **/
 
 #include <iic.h>
+#include "stm32f10x_i2c.h"
 
 //初始化IIC
 void IIC_Init(void)
@@ -16,11 +17,25 @@ void IIC_Init(void)
     GPIO_InitTypeDef GPIO_InitStructure;
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE); //使能GPIOB时钟
 
-    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_6 | GPIO_Pin_7;
-    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_Out_PP; //推挽输出
+    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_10 | GPIO_Pin_11;
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_Out_OD; //IIC用开漏输出
     GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
     GPIO_Init(GPIOB, &GPIO_InitStructure);
-    GPIO_SetBits(GPIOB, GPIO_Pin_6 | GPIO_Pin_7); //PB6,PB7 输出高
+    GPIO_SetBits(GPIOB, GPIO_Pin_10 | GPIO_Pin_11); //PB10,PB11 输出高
+
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_I2C2, ENABLE); // 使能I2C2时钟
+    I2C_InitTypeDef I2C_InitStructure;
+
+    I2C_InitStructure.I2C_ClockSpeed = 400000; // 设置时钟速率为400kHz
+    I2C_InitStructure.I2C_Mode = I2C_Mode_I2C; // I²C模式
+    I2C_InitStructure.I2C_DutyCycle = I2C_DutyCycle_2; // 时钟占空比
+    I2C_InitStructure.I2C_OwnAddress1 = 0; // 自身地址
+    I2C_InitStructure.I2C_Ack = I2C_Ack_Enable; // 开启ACK
+    I2C_InitStructure.I2C_AcknowledgedAddress = I2C_AcknowledgedAddress_7bit; // 7位应答地址
+
+    I2C_Init(I2C2, &I2C_InitStructure); // 初始化I2C2
+
+    I2C_Cmd(I2C2, ENABLE); // 启用I2C2
 }
 
 //产生IIC起始信号
@@ -130,4 +145,63 @@ u8 IIC_Read_Byte(unsigned char ack)
     else
         IIC_Ack(); //发送ACK
     return receive;
+}
+
+/**************************实现函数********************************************
+*函数原型:		bool i2cWrite(uint8_t addr, uint8_t reg, uint8_t data)
+*功　　能:
+*******************************************************************************/
+int i2cWrite(uint8_t addr, uint8_t reg, uint8_t len, uint8_t *data)
+{
+    int i;
+    IIC_Start();
+    IIC_Send_Byte(addr << 1);
+    if (!IIC_Wait_Ack())
+    {
+        IIC_Stop();
+        return 1;
+    }
+    IIC_Send_Byte(reg);
+    IIC_Wait_Ack();
+    for (i = 0; i < len; i++)
+    {
+        IIC_Send_Byte(data[i]);
+        if (!IIC_Wait_Ack())
+        {
+            IIC_Stop();
+            return 0;
+        }
+    }
+    IIC_Stop();
+    return 0;
+}
+/**************************实现函数********************************************
+*函数原型:		bool i2cWrite(uint8_t addr, uint8_t reg, uint8_t data)
+*功　　能:
+*******************************************************************************/
+int i2cRead(uint8_t addr, uint8_t reg, uint8_t len, uint8_t *buf)
+{
+    IIC_Start();
+    IIC_Send_Byte(addr << 1);
+    if (!IIC_Wait_Ack())
+    {
+        IIC_Stop();
+        return 1;
+    }
+    IIC_Send_Byte(reg);
+    IIC_Wait_Ack();
+    IIC_Start();
+    IIC_Send_Byte((addr << 1) + 1);
+    IIC_Wait_Ack();
+    while (len)
+    {
+        if (len == 1)
+            *buf = IIC_Read_Byte(0);
+        else
+            *buf = IIC_Read_Byte(1);
+        buf++;
+        len--;
+    }
+    IIC_Stop();
+    return 0;
 }
