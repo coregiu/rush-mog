@@ -57,9 +57,9 @@ void init_modules()
     init_freertos();
 
     arm_roboot_executor.init();
-    led_display_executor.init();
-    timer_manager.init();
-    attitude_executor.init();
+    // led_display_executor.init();
+    // timer_manager.init();
+    // attitude_executor.init();
 }
 
 /**

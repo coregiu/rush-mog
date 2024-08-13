@@ -19,8 +19,8 @@ void create_timer_manager()
     // 定时器参数配置
     // 假设系统时钟为72MHz，TIM2时钟源为APB1（经过2分频后为36MHz）
     // 设置预分频值为35999，则TIM2的计数频率为36MHz/(35999+1)=1KHz
-    // 设置自动重载值为999，则中断周期为(99+1)*1ms=100ms
-    TIM_TimeBaseStructure.TIM_Period = 99;
+    // 设置自动重载值为999，则中断周期为(999+1)*1ms=1000ms
+    TIM_TimeBaseStructure.TIM_Period = 999;
     TIM_TimeBaseStructure.TIM_Prescaler = 35999;
     TIM_TimeBaseStructure.TIM_ClockDivision = TIM_CKD_DIV1;
     TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
