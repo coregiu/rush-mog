@@ -1,3 +1,6 @@
+# 语音命令
+![commands](ago-command.png)
+
 # 开发环境说明
 - 开发IDE： 天问BLOCK，[官网：http://www.twen51.com/new/twen51/index.php](http://www.twen51.com/new/twen51/index.php)
 
