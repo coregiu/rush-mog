@@ -64,16 +64,16 @@
                     <!-- D-pad -->
                     <div class="d-pad">
                         <div id="up" class="d-pad-button w-10 h-16 top-0 left-1/2 transform -translate-x-1/2">
-                            <i class="fa fa-chevron-up text-white text-xl"></i>
+                            <span class="text-white font-bold text-2xl tracking-wider">↑</span>
                         </div>
                         <div id="down" class="d-pad-button w-10 h-16 bottom-0 left-1/2 transform -translate-x-1/2">
-                            <i class="fa fa-chevron-down text-white text-xl"></i>
+                            <span class="text-white font-bold text-2xl tracking-wider">↓</span>
                         </div>
                         <div id="left" class="d-pad-button w-16 h-10 top-1/2 left-0 transform -translate-y-1/2">
-                            <i class="fa fa-chevron-left text-white text-xl"></i>
+                            <span class="text-white font-bold text-2xl tracking-wider">←</span>
                         </div>
                         <div id="right" class="d-pad-button w-16 h-10 top-1/2 right-0 transform -translate-y-1/2">
-                            <i class="fa fa-chevron-right text-white text-xl"></i>
+                            <span class="text-white font-bold text-2xl tracking-wider">→</span>
                         </div>
                         <div class="absolute w-10 h-10 bg-ps2black rounded-full top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-10"></div>
                     </div>
@@ -104,14 +104,22 @@
                     
                     <!-- Shoulder Buttons (Top View) -->
                     <div class="flex justify-between w-full mt-10">
-                        <div id="l1" class="w-20 h-6 bg-ps2black rounded-full transition-all duration-100 active:scale-90"></div>
-                        <div id="r1" class="w-20 h-6 bg-ps2black rounded-full transition-all duration-100 active:scale-90"></div>
+                        <div id="l1" class="w-20 h-6 bg-ps2black rounded-full transition-all duration-100 active:scale-90">
+                            <span class="text-white text-1xl tracking-wider">L1</span>
+                        </div>
+                        <div id="r1" class="w-20 h-6 bg-ps2black rounded-full transition-all duration-100 active:scale-90">
+                            <span class="text-white text-1xl tracking-wider text-right" style="text-align:right; display:block;">R1</span>
+                        </div>
                     </div>
                     
                     <!-- Trigger Buttons -->
-                    <div class="flex justify-between w-full mt-2">
-                        <div id="l2" class="w-16 h-4 bg-ps2dark rounded-full transition-all duration-100 active:scale-90"></div>
-                        <div id="r2" class="w-16 h-4 bg-ps2dark rounded-full transition-all duration-100 active:scale-90"></div>
+                    <div class="flex justify-between w-full mt-1">
+                        <div id="l2" class="w-20 h-6 bg-ps2dark rounded-full transition-all duration-100 active:scale-90">
+                            <span class="text-white text-1xl tracking-wider">L2</span>
+                        </div>
+                        <div id="r2" class="w-20 h-6 bg-ps2dark rounded-full transition-all duration-100 active:scale-90">
+                            <span class="text-white text-1xl tracking-wider text-right" style="text-align:right; display:block;">R2</span>
+                        </div>
                     </div>
                 </div>
                 
