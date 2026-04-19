@@ -1,369 +1,332 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PS2 Controller</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+    <title>PS2 Controller Emulator</title>
+    <script src="ps2.js"></script>
+    <link href="ps2.css" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        ps2gray: '#C0C0C0',
+                        ps2dark: '#333333',
+                        ps2red: '#D22B2B',
+                        ps2green: '#32CD32',
+                        ps2blue: '#1E90FF',
+                        ps2yellow: '#FFD700',
+                        ps2black: '#1A1A1A',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                }
+            }
         }
-
-        body {
-            background: #f0f0f0;
-            font-family: Arial, sans-serif;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 10px;
-        }
-
-        .controller {
-            background: #C0C0C0;
-            border-radius: 24px;
-            padding: 20px;
-            border: 6px solid #1A1A1A;
-            position: relative;
-            max-width: 680px;
-            width: 100%;
-        }
-
-        .btn {
-            transition: 0.1s;
-        }
-
-        .btn:active {
-            transform: scale(0.92);
-        }
-
-        /* 方向键 */
-        .dpad {
-            width: 120px;
-            height: 120px;
-            margin: 0 auto;
-            position: relative;
-        }
-
-        .dpad-btn {
-            position: absolute;
-            background: #1A1A1A;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 18px;
-        }
-
-        .dpad-up {
-            width: 36px;
-            height: 52px;
-            top: 0;
-            left: 50%;
-            transform: translateX(-50%);
-        }
-
-        .dpad-down {
-            width: 36px;
-            height: 52px;
-            bottom: 0;
-            left: 50%;
-            transform: translateX(-50%);
-        }
-
-        .dpad-left {
-            width: 52px;
-            height: 36px;
-            left: 0;
-            top: 50%;
-            transform: translateY(-50%);
-        }
-
-        .dpad-right {
-            width: 52px;
-            height: 36px;
-            right: 0;
-            top: 50%;
-            transform: translateY(-50%);
-        }
-
-        .dpad-center {
-            width: 36px;
-            height: 36px;
-            background: #1A1A1A;
-            border-radius: 50%;
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-        }
-
-        /* 摇杆 */
-        .stick {
-            width: 72px;
-            height: 72px;
-            background: #333;
-            border: 4px solid #777;
-            border-radius: 50%;
-            margin: 10px auto;
-            position: relative;
-        }
-
-        .stick-dot {
-            width: 36px;
-            height: 36px;
-            background: #1A1A1A;
-            border-radius: 50%;
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-        }
-
-        /* 动作键 △○×□ */
-        .action {
-            width: 120px;
-            height: 120px;
-            position: relative;
-            margin: 0 auto;
-        }
-
-        .action-btn {
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            position: absolute;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 20px;
-            color: white;
-            font-weight: bold;
-        }
-
-        .tri { background: #1E90FF; top:0; left:50%; transform: translate(-50%, -10%); }
-        .cir { background: #D22B2B; right:0; top:50%; transform: translate(10%, -50%); }
-        .cro { background: #32CD32; bottom:0; left:50%; transform: translate(-50%, 10%); }
-        .squ { background: #FFD700; left:0; top:50%; transform: translate(-10%, -50%); }
-
-        /* 布局 */
-        .layout {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: space-between;
-            align-items: center;
-            gap: 16px;
-        }
-
-        .col {
-            flex: 1;
-            min-width: 140px;
-            text-align: center;
-        }
-
-        .small-btn {
-            width: 36px;
-            height: 12px;
-            background: #1A1A1A;
-            border-radius: 6px;
-            display: inline-block;
-        }
-
-        .shoulder {
-            width: 60px;
-            height: 18px;
-            background: #1A1A1A;
-            border-radius: 8px;
-        }
-
-        .status {
-            background: #1A1A1A;
-            color: white;
-            padding: 10px;
-            border-radius: 8px;
-            margin-top: 16px;
-            font-size: 12px;
-        }
-
-        .status-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 6px;
-        }
-
-        .status-item {
-            background: #333;
-            padding: 6px;
-            border-radius: 4px;
-        }
-
-        .connected {
-            background: #E8F8E8;
-            color: #090;
-            padding: 8px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            display: inline-flex;
-            align-items: center;
-            gap:6px;
-            margin-top:16px;
-        }
-
-        .dot {
-            width:8px; height:8px; background:#0C0; border-radius:50%;
+    </script>
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .d-pad {
+                @apply relative w-32 h-32 mx-auto;
+            }
+            .d-pad-button {
+                @apply absolute bg-ps2black rounded-md flex items-center justify-center transition-all duration-100 active:scale-90;
+            }
+            .button-press {
+                @apply scale-90 shadow-inner;
+            }
+            .analog-stick {
+                @apply w-20 h-20 rounded-full bg-ps2dark border-4 border-gray-700 relative mx-auto transition-all duration-100;
+            }
+            .analog-dot {
+                @apply absolute w-10 h-10 bg-ps2black rounded-full top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 transition-all duration-100;
+            }
+            .action-button {
+                @apply w-14 h-14 rounded-full flex items-center justify-center text-white font-bold text-lg transition-all duration-100 active:scale-90 shadow-lg;
+            }
         }
     </style>
 </head>
-
-<body>
-    <div class="controller">
-        <div class="layout">
-            <!-- 左侧 -->
-            <div class="col">
-                <div class="dpad">
-                    <div id="up" class="dpad-btn dpad-up">↑</div>
-                    <div id="down" class="dpad-btn dpad-down">↓</div>
-                    <div id="left" class="dpad-btn dpad-left">←</div>
-                    <div id="right" class="dpad-btn dpad-right">→</div>
-                    <div class="dpad-center"></div>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+    <div class="max-w-4xl mx-auto">
+        <!-- Controller Container -->
+        <div class="bg-ps2gray rounded-3xl p-8 shadow-2xl border-8 border-ps2black relative overflow-hidden">
+            <!-- Controller Body Details -->
+            <div class="absolute top-0 left-0 w-full h-4 bg-ps2black opacity-30"></div>
+            <div class="absolute bottom-0 left-0 w-full h-4 bg-ps2black opacity-30"></div>
+            
+            <!-- Controller Layout -->
+            <div class="flex flex-col md:flex-row gap-8 items-center">
+                <!-- Left Side: D-pad and Left Analog -->
+                <div class="flex flex-col items-center gap-10 w-full md:w-1/3">
+                    <!-- D-pad -->
+                    <div class="d-pad">
+                        <div id="up" class="d-pad-button w-10 h-16 top-0 left-1/2 transform -translate-x-1/2">
+                            <i class="fa fa-chevron-up text-white text-xl"></i>
+                        </div>
+                        <div id="down" class="d-pad-button w-10 h-16 bottom-0 left-1/2 transform -translate-x-1/2">
+                            <i class="fa fa-chevron-down text-white text-xl"></i>
+                        </div>
+                        <div id="left" class="d-pad-button w-16 h-10 top-1/2 left-0 transform -translate-y-1/2">
+                            <i class="fa fa-chevron-left text-white text-xl"></i>
+                        </div>
+                        <div id="right" class="d-pad-button w-16 h-10 top-1/2 right-0 transform -translate-y-1/2">
+                            <i class="fa fa-chevron-right text-white text-xl"></i>
+                        </div>
+                        <div class="absolute w-10 h-10 bg-ps2black rounded-full top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-10"></div>
+                    </div>
+                    
+                    <!-- Left Analog Stick -->
+                    <div class="flex flex-col items-center">
+                        <span class="text-ps2black font-bold mb-2">L3</span>
+                        <div id="left-analog" class="analog-stick">
+                            <div id="left-analog-dot" class="analog-dot"></div>
+                        </div>
+                    </div>
                 </div>
-
-                <div style="margin-top:24px">
-                    <div style="font-size:12px; font-weight:bold">L3</div>
-                    <div id="lStick" class="stick">
-                        <div id="lDot" class="stick-dot"></div>
+                
+                <!-- Middle: Start, Select, Logo -->
+                <div class="flex flex-col items-center gap-6 w-full md:w-1/3">
+                    <!-- PS2 Logo -->
+                    <div class="w-32 h-16 bg-ps2black rounded-lg flex items-center justify-center mb-8">
+                        <span class="text-white font-bold text-2xl tracking-wider">PS2</span>
+                    </div>
+                    
+                    <!-- Select and Start -->
+                    <div class="flex gap-8 items-center">
+                        <div id="select" class="w-10 h-4 bg-ps2black rounded-full transition-all duration-100 active:scale-90"></div>
+                        <span class="text-ps2black font-bold text-sm">SELECT</span>
+                        <span class="text-ps2black font-bold text-sm">START</span>
+                        <div id="start" class="w-10 h-4 bg-ps2black rounded-full transition-all duration-100 active:scale-90"></div>
+                    </div>
+                    
+                    <!-- Shoulder Buttons (Top View) -->
+                    <div class="flex justify-between w-full mt-10">
+                        <div id="l1" class="w-20 h-6 bg-ps2black rounded-full transition-all duration-100 active:scale-90"></div>
+                        <div id="r1" class="w-20 h-6 bg-ps2black rounded-full transition-all duration-100 active:scale-90"></div>
+                    </div>
+                    
+                    <!-- Trigger Buttons -->
+                    <div class="flex justify-between w-full mt-2">
+                        <div id="l2" class="w-16 h-4 bg-ps2dark rounded-full transition-all duration-100 active:scale-90"></div>
+                        <div id="r2" class="w-16 h-4 bg-ps2dark rounded-full transition-all duration-100 active:scale-90"></div>
+                    </div>
+                </div>
+                
+                <!-- Right Side: Action Buttons and Right Analog -->
+                <div class="flex flex-col items-center gap-10 w-full md:w-1/3">
+                    <!-- Action Buttons -->
+                    <div class="relative w-40 h-40">
+                        <div id="triangle" class="action-button bg-ps2blue absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-1/4">
+                            △
+                        </div>
+                        <div id="circle" class="action-button bg-ps2red absolute right-0 top-1/2 transform -translate-y-1/2 translate-x-1/4">
+                            ○
+                        </div>
+                        <div id="cross" class="action-button bg-ps2green absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-1/4">
+                            ×
+                        </div>
+                        <div id="square" class="action-button bg-ps2yellow absolute left-0 top-1/2 transform -translate-y-1/2 -translate-x-1/4">
+                            □
+                        </div>
+                    </div>
+                    
+                    <!-- Right Analog Stick -->
+                    <div class="flex flex-col items-center">
+                        <span class="text-ps2black font-bold mb-2">R3</span>
+                        <div id="right-analog" class="analog-stick">
+                            <div id="right-analog-dot" class="analog-dot"></div>
+                        </div>
                     </div>
                 </div>
             </div>
-
-            <!-- 中间 -->
-            <div class="col" style="text-align:center">
-                <div style="font-size:22px; font-weight:bold; margin-bottom:20px">PS2</div>
-
-                <div style="display:flex; gap:16px; justify-content:center; margin-bottom:10px">
-                    <div>
-                        <div id="select" class="small-btn btn"></div>
-                        <div style="font-size:10px">SELECT</div>
-                    </div>
-                    <div>
-                        <div id="start" class="small-btn btn"></div>
-                        <div style="font-size:10px">START</div>
-                    </div>
-                </div>
-
-                <div style="display:flex; justify-content:space-between; margin-top:20px">
-                    <div id="l1" class="shoulder btn"></div>
-                    <div id="r1" class="shoulder btn"></div>
-                </div>
-                <div style="display:flex; justify-content:space-between; margin-top:6px">
-                    <div id="l2" style="width:48px;height:12px;background:#333;border-radius:6px" class="btn"></div>
-                    <div id="r2" style="width:48px;height:12px;background:#333;border-radius:6px" class="btn"></div>
+            
+            <!-- Connection Indicator -->
+            <div class="mt-8 text-center">
+                <div class="inline-flex items-center gap-2 bg-green-100 text-green-800 px-4 py-2 rounded-full text-sm">
+                    <span class="w-3 h-3 bg-green-500 rounded-full animate-pulse"></span>
+                    <span>Controller Connected</span>
                 </div>
             </div>
-
-            <!-- 右侧 -->
-            <div class="col">
-                <div class="action">
-                    <div id="triangle" class="action-btn tri">△</div>
-                    <div id="circle" class="action-btn cir">○</div>
-                    <div id="cross" class="action-btn cro">×</div>
-                    <div id="square" class="action-btn squ">□</div>
-                </div>
-
-                <div style="margin-top:24px">
-                    <div style="font-size:12px; font-weight:bold">R3</div>
-                    <div id="rStick" class="stick">
-                        <div id="rDot" class="stick-dot"></div>
-                    </div>
+            
+            <!-- Controller Status -->
+            <div class="mt-6 bg-ps2black text-white p-4 rounded-lg text-sm">
+                <h3 class="font-bold mb-2">Controller Status</h3>
+                <div id="status" class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <div class="bg-gray-800 p-2 rounded">No input detected</div>
                 </div>
             </div>
         </div>
-
-        <div style="text-align:center">
-            <div class="connected">
-                <span class="dot"></span>
-                <span>Controller Connected</span>
-            </div>
-        </div>
-
-        <div class="status">
-            <div style="font-weight:bold; margin-bottom:8px">Controller Status</div>
-            <div id="statusGrid" class="status-grid">
-                <div class="status-item">Ready...</div>
-            </div>
+        
+        <!-- Instructions -->
+        <div class="mt-8 bg-white p-6 rounded-xl shadow-lg">
+            <h2 class="text-xl font-bold text-ps2black mb-4">How to Use</h2>
+            <ul class="list-disc pl-5 space-y-2 text-gray-700">
+                <li>Click or tap on any button to simulate pressing it</li>
+                <li>Drag the analog sticks to simulate movement</li>
+                <li>Controller status will show your recent inputs</li>
+            </ul>
         </div>
     </div>
 
     <script>
-        const status = document.getElementById('statusGrid');
-        let list = [];
-
-        function addStatus(txt) {
-            list.unshift(txt);
-            if (list.length > 4) list = list.slice(0, 4);
-            status.innerHTML = '';
-            list.forEach(s => {
-                let d = document.createElement('div');
-                d.className = 'status-item';
-                d.textContent = s;
-                status.appendChild(d);
-            });
-
-            // 发送按键到 ESP8266
-            sendToESP(txt);
-        }
-
-        // 按键绑定
-        const keys = [
-            'up','down','left','right',
-            'triangle','circle','cross','square',
-            'select','start','l1','r1','l2','r2'
-        ];
-
-        keys.forEach(id => {
-            const el = document.getElementById(id);
-            if (!el) return;
+        // Track button presses and update status
+        const statusElement = document.getElementById('status');
+        const maxStatusEntries = 4;
+        let statusEntries = [];
+        
+        function updateStatus(button) {
+            // Add new status entry
+            const now = new Date();
+            const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+            statusEntries.unshift(`${timeString}: ${button} pressed`);
             
-            function on() { addStatus(id.toUpperCase()); }
-            el.addEventListener('touchstart', e => { e.preventDefault(); on(); });
-            el.addEventListener('mousedown', on);
+            // Keep only max entries
+            if (statusEntries.length > maxStatusEntries) {
+                statusEntries = statusEntries.slice(0, maxStatusEntries);
+            }
+            
+            // Update display
+            statusElement.innerHTML = '';
+            statusEntries.forEach(entry => {
+                const entryElement = document.createElement('div');
+                entryElement.className = 'bg-gray-800 p-2 rounded';
+                entryElement.textContent = entry;
+                statusElement.appendChild(entryElement);
+            });
+        }
+        
+        // Handle button presses
+        const buttons = ['up', 'down', 'left', 'right', 'triangle', 'circle', 'cross', 'square', 'select', 'start', 'l1', 'r1', 'l2', 'r2'];
+        
+        buttons.forEach(buttonId => {
+            const button = document.getElementById(buttonId);
+            if (button) {
+                // Mouse events
+                button.addEventListener('mousedown', () => {
+                    button.classList.add('button-press');
+                    updateStatus(buttonId.toUpperCase());
+                });
+                
+                button.addEventListener('mouseup', () => {
+                    button.classList.remove('button-press');
+                });
+                
+                button.addEventListener('mouseleave', () => {
+                    button.classList.remove('button-press');
+                });
+                
+                // Touch events for mobile
+                button.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    button.classList.add('button-press');
+                    updateStatus(buttonId.toUpperCase());
+                });
+                
+                button.addEventListener('touchend', (e) => {
+                    e.preventDefault();
+                    button.classList.remove('button-press');
+                });
+            }
         });
-
-        // 摇杆简易模拟
-        function stick(stickId, dotId, name) {
+        
+        // Handle analog sticks
+        function setupAnalogStick(stickId, dotId) {
             const stick = document.getElementById(stickId);
             const dot = document.getElementById(dotId);
-            let dragging = false;
-
-            function move(e) {
-                if (!dragging) return;
-                dot.style.transform = 'translate(-50%, -50%) translate(5px,5px)';
-                addStatus(name + " MOVE");
+            let isDragging = false;
+            
+            // Get stick boundaries
+            const stickRect = stick.getBoundingClientRect();
+            const stickCenterX = stickRect.width / 2;
+            const stickCenterY = stickRect.height / 2;
+            const maxDistance = (stickRect.width / 2) - 10; // Keep within stick
+            
+            // Mouse events
+            dot.addEventListener('mousedown', startDrag);
+            stick.addEventListener('mousedown', startDrag);
+            document.addEventListener('mousemove', drag);
+            document.addEventListener('mouseup', endDrag);
+            
+            // Touch events
+            dot.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                startDrag(getTouchPosition(e));
+            });
+            
+            stick.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                startDrag(getTouchPosition(e));
+            });
+            
+            document.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                drag(getTouchPosition(e));
+            });
+            
+            document.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                endDrag();
+            });
+            
+            function getTouchPosition(e) {
+                const touch = e.touches[0];
+                return {
+                    clientX: touch.clientX,
+                    clientY: touch.clientY
+                };
             }
-
-            function end() {
-                dragging = false;
-                dot.style.transform = 'translate(-50%, -50%)';
+            
+            function startDrag(e) {
+                isDragging = true;
+                drag(e);
             }
-
-            stick.addEventListener('mousedown', () => dragging = true);
-            document.addEventListener('mousemove', move);
-            document.addEventListener('mouseup', end);
-
-            stick.addEventListener('touchstart', e => { e.preventDefault(); dragging = true; });
-            document.addEventListener('touchmove', e => { e.preventDefault(); move(e); });
-            document.addEventListener('touchend', end);
+            
+            function drag(e) {
+                if (!isDragging) return;
+                
+                const stickRect = stick.getBoundingClientRect();
+                const stickX = stickRect.left + stickCenterX;
+                const stickY = stickRect.top + stickCenterY;
+                
+                // Calculate position relative to stick center
+                let deltaX = e.clientX - stickX;
+                let deltaY = e.clientY - stickY;
+                
+                // Calculate distance from center
+                const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+                
+                // Limit to max distance
+                if (distance > maxDistance) {
+                    deltaX = (deltaX / distance) * maxDistance;
+                    deltaY = (deltaY / distance) * maxDistance;
+                }
+                
+                // Update dot position
+                dot.style.transform = `translate(-50%, -50%) translate(${deltaX}px, ${deltaY}px)`;
+                
+                // Calculate normalized values (-1 to 1)
+                const normX = parseFloat((deltaX / maxDistance).toFixed(2));
+                const normY = parseFloat((deltaY / maxDistance).toFixed(2));
+                
+                // Update status
+                updateStatus(`${stickId.split('-')[0].toUpperCase()}3 (${normX}, ${normY})`);
+            }
+            
+            function endDrag() {
+                if (isDragging) {
+                    isDragging = false;
+                    // Return to center with animation
+                    dot.style.transform = 'translate(-50%, -50%)';
+                }
+            }
         }
-
-        stick('lStick', 'lDot', 'LEFT');
-        stick('rStick', 'rDot', 'RIGHT');
-
-        // 发送数据到 ESP8266
-        function sendToESP(cmd) {
-            fetch("/?" + cmd);
-        }
+        
+        // Setup both analog sticks
+        setupAnalogStick('left-analog', 'left-analog-dot');
+        setupAnalogStick('right-analog', 'right-analog-dot');
     </script>
 </body>
 </html>
