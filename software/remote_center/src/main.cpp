@@ -4,7 +4,7 @@
 
 // 【自己的 WiFi 热点设置】手机直接连这个
 #define AP_SSID "RUSH-MOG"          // 热点名称
-#define AP_PSW "coregiu"            // 热点密码（至少8位）
+#define AP_PSW "coregiu_927"            // 热点密码（至少8位）
 IPAddress local_IP(192, 168, 4, 1); // 本地IP
 IPAddress gateway(192, 168, 4, 1);  // 网关
 IPAddress subnet(255, 255, 255, 0); // 子网掩码
