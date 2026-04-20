@@ -29,7 +29,7 @@
     <style type="text/tailwindcss">
         @layer utilities {
             .d-pad {
-                @apply relative w-32 h-32 mx-auto;
+                @apply relative w-40 h-40 mx-auto;
             }
             .d-pad-button {
                 @apply absolute bg-ps2black rounded-md flex items-center justify-center transition-all duration-100 active:scale-90;
@@ -60,7 +60,7 @@
             <!-- Controller Layout -->
             <div class="flex flex-col md:flex-row gap-12 items-center">
                 <!-- Left Side: D-pad and Left Analog -->
-                <div class="flex flex-col items-center gap-10 w-full md:w-1/3">
+                <div class="flex flex-col items-center gap-3 w-full md:w-1/3">
                     <!-- D-pad -->
                     <div class="d-pad">
                         <div id="up" class="d-pad-button w-10 h-16 top-0 left-1/2 transform -translate-x-1/2">
@@ -75,7 +75,7 @@
                         <div id="right" class="d-pad-button w-16 h-10 top-1/2 right-0 transform -translate-y-1/2">
                             <span class="text-white font-bold text-2xl tracking-wider">→</span>
                         </div>
-                        <div class="absolute w-10 h-10 bg-ps2black rounded-full top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-10"></div>
+                        <div class="absolute w-16 h-16 bg-ps2black rounded-full top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-10"></div>
                     </div>
                     
                     <!-- Left Analog Stick -->
