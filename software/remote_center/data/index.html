@@ -314,6 +314,7 @@
                     isDragging = false;
                     // Return to center with animation
                     dot.style.transform = 'translate(-50%, -50%)';
+                    updateStatus(`${stickId.split('-')[0].toUpperCase()}3 (0, 0)`);
                     fetch(`/cmd-stick?stickId=${stickId}&normX=0&normY=0`); // 👈 发送模拟杆数据到服务器
                 }
             }

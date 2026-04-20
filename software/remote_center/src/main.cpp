@@ -61,7 +61,7 @@ void handleCmdStick() {
 
 void setup()
 {
-  Serial.begin(115200);
+  Serial.begin(9600);
   delay(50);
 
   // 挂载文件系统
