@@ -196,11 +196,13 @@
                 // Mouse events
                 button.addEventListener('mousedown', () => {
                     button.classList.add('button-press');
-                    updateStatus(buttonId.toUpperCase());
+                    //updateStatus(buttonId.toUpperCase());
+                    fetch(`/cmd-button?key=${buttonId}&type=down`); // 👈 发送按下事件到服务器
                 });
                 
                 button.addEventListener('mouseup', () => {
                     button.classList.remove('button-press');
+                    fetch(`/cmd-button?key=${buttonId}&type=up`); // 👈 发送松开事件到服务器
                 });
                 
                 button.addEventListener('mouseleave', () => {
@@ -211,12 +213,14 @@
                 button.addEventListener('touchstart', (e) => {
                     e.preventDefault();
                     button.classList.add('button-press');
-                    updateStatus(buttonId.toUpperCase());
+                    // updateStatus(buttonId.toUpperCase());
+                    fetch(`/cmd-button?key=${buttonId}&type=down`); // 👈 发送按下事件到服务器
                 });
                 
                 button.addEventListener('touchend', (e) => {
                     e.preventDefault();
                     button.classList.remove('button-press');
+                    fetch(`/cmd-button?key=${buttonId}&type=up`); // 👈 发送松开事件到服务器
                 });
             }
         });
@@ -302,6 +306,7 @@
                 
                 // Update status
                 updateStatus(`${stickId.split('-')[0].toUpperCase()}3 (${normX}, ${normY})`);
+                fetch(`/cmd-stick?stickId=${stickId}&normX=${normX}&normY=${normY}`); // 👈 发送模拟杆数据到服务器
             }
             
             function endDrag() {
@@ -309,6 +314,7 @@
                     isDragging = false;
                     // Return to center with animation
                     dot.style.transform = 'translate(-50%, -50%)';
+                    fetch(`/cmd-stick?stickId=${stickId}&normX=0&normY=0`); // 👈 发送模拟杆数据到服务器
                 }
             }
         }

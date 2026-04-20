@@ -207,11 +207,13 @@
                 // Mouse events
                 button.addEventListener('mousedown', () => {
                     button.classList.add('button-press');
-                    updateStatus(buttonId.toUpperCase());
+                    //updateStatus(buttonId.toUpperCase());
+                    fetch(`/cmd?key=${buttonId}&type=down`); // 👈 发送按下事件到服务器
                 });
                 
                 button.addEventListener('mouseup', () => {
                     button.classList.remove('button-press');
+                    fetch(`/cmd?key=${buttonId}&type=up`); // 👈 发送松开事件到服务器
                 });
                 
                 button.addEventListener('mouseleave', () => {
@@ -222,12 +224,14 @@
                 button.addEventListener('touchstart', (e) => {
                     e.preventDefault();
                     button.classList.add('button-press');
-                    updateStatus(buttonId.toUpperCase());
+                    // updateStatus(buttonId.toUpperCase());
+                    fetch(`/cmd?key=${buttonId}&type=down`); // 👈 发送按下事件到服务器
                 });
                 
                 button.addEventListener('touchend', (e) => {
                     e.preventDefault();
                     button.classList.remove('button-press');
+                    fetch(`/cmd?key=${buttonId}&type=up`); // 👈 发送松开事件到服务器
                 });
             }
         });
