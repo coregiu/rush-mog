@@ -309,8 +309,9 @@
                 const normY = parseFloat((deltaY / maxDistance).toFixed(2));
                 
                 // Update status
-                updateStatus(`${stickId.split('-')[0].toUpperCase()}3 (${normX}, ${normY})`);
-                fetch(`/cmd-stick?stickId=${stickId}&normX=${normX}&normY=${normY}`); // 👈 发送模拟杆数据到服务器
+                directInfo = getDirection(normX, normY);
+                updateStatus(`${stickId.split('-')[0].toUpperCase()}3 (${directInfo.direct}, ${directInfo.stepValue.toFixed(2)})`);
+                fetch(`/cmd-stick?stickId=${stickId}&direct=${directInfo.direct}&stepValue=${directInfo.stepValue}`); // 👈 发送模拟杆数据到服务器
             }
             
             function endDrag() {
@@ -318,9 +319,28 @@
                     isDragging = false;
                     // Return to center with animation
                     dot.style.transform = 'translate(-50%, -50%)';
-                    updateStatus(`${stickId.split('-')[0].toUpperCase()}3 (0, 0)`);
-                    fetch(`/cmd-stick?stickId=${stickId}&normX=0&normY=0`); // 👈 发送模拟杆数据到服务器
+                    updateStatus(`${stickId.split('-')[0].toUpperCase()}3 (stop, 0)`);
+                    fetch(`/cmd-stick?stickId=${stickId}&direct=stop&stepValue=0`); // 👈 发送模拟杆数据到服务器
                 }
+            }
+
+            function getDirection(normX, normY) {
+                tanValue = Math.abs(normY / normX); 
+                if (tanValue > 2.414) {
+                    direct = normY < 0 ? 'up' : 'down';
+                } else if (tanValue < 0.414) {
+                    direct = normX < 0 ? 'left' : 'right';
+                } else {
+                    if (normX < 0 && normY < 0) direct = 'uple';
+                    if (normX > 0 && normY < 0) direct = 'uprt';
+                    if (normX < 0 && normY > 0) direct = 'dnle';
+                    if (normX > 0 && normY > 0) direct = 'dnrt';
+                }
+                stepValue = Math.sqrt(normX * normX + normY * normY);
+                return {
+                    direct: direct,
+                    stepValue: stepValue
+                };
             }
         }
         

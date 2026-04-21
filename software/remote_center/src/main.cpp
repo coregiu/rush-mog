@@ -53,9 +53,9 @@ void handleCmdButton() {
 
 void handleCmdStick() {
   String stickId = server.arg("stickId");
-  String normX = server.arg("normX");
-  String normY = server.arg("normY");
-  Serial.println(stickId + " - X: " + normX + ", Y: " + normY); // 👈 网页触发串口的核心！
+  String direct = server.arg("direct");
+  String stepValue = server.arg("stepValue");
+  Serial.println(stickId + " - Direct: " + direct + ", Step Value: " + stepValue); // 👈 网页触发串口的核心！
   server.send(200);
 }
 
