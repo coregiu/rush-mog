@@ -277,9 +277,16 @@
                 drag(e);
             }
             
+            // 【加个节流开关，100ms 执行一次】
+            let stickThrottle = false;
             function drag(e) {
                 if (!isDragging) return;
                 
+                // 👇 关键：100ms 内只允许执行一次，防止刷屏
+                if (stickThrottle) return;
+                stickThrottle = true;
+                setTimeout(() => stickThrottle = false, 200);
+
                 const stickRect = stick.getBoundingClientRect();
                 const stickX = stickRect.left + stickCenterX;
                 const stickY = stickRect.top + stickCenterY;
