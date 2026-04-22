@@ -47,7 +47,46 @@ void handleCmdButton() {
   String key = server.arg("key");
   // 定义事件类型：按下还是松开
   String type = server.arg("type");
-  Serial.println(key + " - " + type);  // 👈 网页触发串口的核心！
+  if (key.isEmpty() || type.isEmpty()) {
+    server.send(400, "text/plain", "400 Bad Request - Missing 'key' or 'type' parameter");
+    return;
+  }
+  if (type == "up") {
+    if (key == "triangle" || key == "cross") {
+      
+    } else if (key == "square" || key == "circle") {
+      Serial.println('I');  
+    } else {
+      Serial.println('0'); 
+    }     
+  } else {
+    if (key == "up") {
+      Serial.println('1');  
+    } else if (key == "down") {
+      Serial.println('2');  
+    } else if (key == "left") {
+      Serial.println('3');  
+    } else if (key == "right") {
+      Serial.println('4');  
+    } else if (key == "triangle") {
+      Serial.println('E');  
+    } else if (key == "square") {
+      Serial.println('F');  
+    } else if (key == "circle") {
+      Serial.println('G');  
+    } else if (key == "cross") {
+      Serial.println('H');  
+    } else if (key == "l1") {
+      Serial.println('9');  
+    } else if (key == "r1") {
+      Serial.println('A');  
+    } else if (key == "l2") {
+      Serial.println('B');  
+    } else if (key == "r2") {
+      Serial.println('C');  
+    }
+  }
+
   server.send(200);
 }
 
@@ -55,7 +94,36 @@ void handleCmdStick() {
   String stickId = server.arg("stickId");
   String direct = server.arg("direct");
   String stepValue = server.arg("stepValue");
-  Serial.println(stickId + " - Direct: " + direct + ", Step Value: " + stepValue); // 👈 网页触发串口的核心！
+  if (stickId.isEmpty() || direct.isEmpty() || stepValue.isEmpty()) {
+    server.send(400, "text/plain", "400 Bad Request - Missing 'stickId', 'direct' or 'stepValue' parameter");
+    return;
+  }
+  if (stickId != "left-analog") {
+    server.send(200);
+    return;
+  }
+  if (direct == "stop") {
+    Serial.println('0'); 
+  } else {
+    if (direct == "up") {
+      Serial.println('1'); 
+    } else if (direct == "down") {
+      Serial.println('2'); 
+    } else if (direct == "left") {
+      Serial.println('3'); 
+    } else if (direct == "right") {
+      Serial.println('4'); 
+    } else if (direct == "uple") {
+      Serial.println('5'); 
+    } else if (direct == "uprt") {
+      Serial.println('6'); 
+    } else if (direct == "dnle") {
+      Serial.println('7'); 
+    } else if (direct == "dnrt") {
+      Serial.println('8'); 
+    }
+  }
+  // Serial.println(stickId + " - Direct: " + direct + ", Step Value: " + stepValue); 
   server.send(200);
 }
 
