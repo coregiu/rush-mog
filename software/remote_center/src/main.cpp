@@ -106,21 +106,21 @@ void handleCmdStick() {
     Serial.println('0'); 
   } else {
     if (direct == "up") {
-      Serial.println('1'); 
+      Serial.println('1'+stepValue); 
     } else if (direct == "down") {
-      Serial.println('2'); 
+      Serial.println('2'+stepValue); 
     } else if (direct == "left") {
-      Serial.println('3'); 
+      Serial.println('3'+stepValue); 
     } else if (direct == "right") {
-      Serial.println('4'); 
+      Serial.println('4'+stepValue); 
     } else if (direct == "uple") {
-      Serial.println('5'); 
+      Serial.println('5'+stepValue); 
     } else if (direct == "uprt") {
-      Serial.println('6'); 
+      Serial.println('6'+stepValue); 
     } else if (direct == "dnle") {
-      Serial.println('7'); 
+      Serial.println('7'+stepValue); 
     } else if (direct == "dnrt") {
-      Serial.println('8'); 
+      Serial.println('8'+stepValue); 
     }
   }
   // Serial.println(stickId + " - Direct: " + direct + ", Step Value: " + stepValue); 

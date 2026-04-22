@@ -336,7 +336,7 @@
                     if (normX < 0 && normY > 0) direct = 'dnle';
                     if (normX > 0 && normY > 0) direct = 'dnrt';
                 }
-                stepValue = Math.sqrt(normX * normX + normY * normY);
+                stepValue = Math.round(Math.sqrt(normX * normX + normY * normY) * 5);
                 return {
                     direct: direct,
                     stepValue: stepValue
