@@ -55,7 +55,7 @@ void handleCmdButton() {
     if (key == "triangle" || key == "cross") {
       
     } else if (key == "square" || key == "circle") {
-      Serial.println('I');  
+      Serial.println('G');  
     } else {
       Serial.println('0'); 
     }     
@@ -70,12 +70,12 @@ void handleCmdButton() {
       Serial.println('4');  
     } else if (key == "triangle") {
       Serial.println('E');  
-    } else if (key == "square") {
-      Serial.println('F');  
-    } else if (key == "circle") {
-      Serial.println('G');  
     } else if (key == "cross") {
+      Serial.println('F');  
+    } else if (key == "square") {
       Serial.println('H');  
+    } else if (key == "circle") {
+      Serial.println('I');  
     } else if (key == "l1") {
       Serial.println('9');  
     } else if (key == "r1") {
