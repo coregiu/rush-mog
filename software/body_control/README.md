@@ -16,17 +16,6 @@ $ sudo apt-get install libgtk-3-dev
 $ sudo apt install libreadline-dev
 
 # 安装JLink
-$ git clone https://github.com/stlink-org/stlink
-$ cd stlink
-$ cmake
-$ make
-$ cd bin
-$ sudo cp st-* /usr/local/bin
-$ sudo cp -r ../../config/chips /usr/local/share/stlink
-$ cd ../lib
-$ sudo cp *.so* /lib32
-$ cd ../..
-$ sudo cp config/udev/rules.d/49-stlinkv* /etc/udev/rules.d/
 $ sudo apt install stlink-tools
 $ sudo apt install stlink-gui
 
@@ -34,8 +23,6 @@ $ sudo apt install stlink-gui
 $ st-flash --version
         v1.7.0
 
-# 安装flymcu
-$ sudo apt-get install stm32flash
 ```
 ## 编译
 ```shell
