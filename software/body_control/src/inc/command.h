@@ -100,6 +100,7 @@ struct command_context
     uint16_t time_sleep_milsec;
     enum delay_type delay_type;
     enum command_type command_type;
+    uint16_t step; // 小车的转向步数，云台的转动步数
 };
 
 // define command receiver such as audio receiver and video receiver
