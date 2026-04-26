@@ -60,7 +60,7 @@ char *receive_audio_command()
 }
 
 char uart2_receive_data[DEFAULT_BUFFER_SIZE] = {0};
-int data_position = 0;
+int uart2_data_position = 0;
 /*
 ************************************************************
 *	函数名称：	USART2_IRQHandler
@@ -78,23 +78,23 @@ void USART2_IRQHandler(void)
 {
     if (USART_GetITStatus(USART2, USART_IT_RXNE) != RESET) //接收中断
     {
-        if (data_position >= DEFAULT_BUFFER_SIZE) //防止数据过多，导致内存溢出
+        if (uart2_data_position >= DEFAULT_BUFFER_SIZE) //防止数据过多，导致内存溢出
         {
-            data_position = 0;
+            uart2_data_position = 0;
         }
-        uart2_receive_data[data_position] = USART_ReceiveData(USART2);
-        data_position++;
+        uart2_receive_data[uart2_data_position] = USART_ReceiveData(USART2);
+        uart2_data_position++;
 
         /* Check if the previous byte was a newline */
-        if (uart2_receive_data[data_position - 1] == '\n' || uart2_receive_data[data_position - 1] == '\r')
+        if (uart2_receive_data[uart2_data_position - 1] == '\n' || uart2_receive_data[uart2_data_position - 1] == '\r')
         {
             /* Send the line back */
-            for (uint i = 0; i < data_position; i++)
+            for (uint i = 0; i < uart2_data_position; i++)
             {
                 uart_log_data(uart2_receive_data[i]);
             }
             execute_commands(uart2_receive_data, COMMAND_TYPE_MANUAL);
-            data_position = 0;
+            uart2_data_position = 0;
         }
 
         USART_ClearFlag(USART2, USART_FLAG_RXNE);

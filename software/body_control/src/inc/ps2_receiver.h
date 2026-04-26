@@ -1,18 +1,20 @@
 /**
   ******************************************************************************
   *
-  * Define of video receiver.
+  * Define of ps2 receiver.
   * author: coregiu
   *
   *
   ******************************************************************************
 **/
 
-#ifndef RECEIVER_VIDEO_H
-#define RECEIVER_VIDEO_H
+#ifndef RECEIVER_PS2_H
+#define RECEIVER_PS2_H
 
 #include "command.h"
 
-extern const struct module_command_receiver video_receiver;
+#define DEFAULT_BUFFER_SIZE 64
+
+extern const struct module_command_receiver ps2_receiver;
 
 #endif

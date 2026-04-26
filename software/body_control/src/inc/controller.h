@@ -13,14 +13,10 @@
 
 #include "command.h"
 #include "vehicle_executor.h"
-#include "video_executor.h"
-#include "attitude_executor.h"
-#include "timer_manager.h"
+#include "pwm_manager.h"
 #include "audio_receiver.h"
-#include "video_receiver.h"
+#include "ps2_receiver.h"
 #include "arm_roboot_executor.h"
-#include "led_display.h"
-#include "iic.h"
 
 extern const char command_module_map[COMMANDS_LENGTH][2];
 

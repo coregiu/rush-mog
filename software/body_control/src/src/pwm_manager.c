@@ -1,14 +1,11 @@
-#include <timer_manager.h>
-
-struct command_context attitude_cmd = {COMMAND_ATTITUDE_INFO, MODULE_ATTITUDE, 0, DELAY_BEFOR_EXE, COMMAND_TYPE_AUTO};
-struct command_context display_cmd = {COMMAND_LED_DISPLAY, MODULE_LED, 0, DELAY_BEFOR_EXE, COMMAND_TYPE_AUTO};
+#include <pwm_manager.h>
 
 // static void vTimerCallback(TimerHandle_t xTimer);
 // static TimerHandle_t xMyTimer = NULL;
 
 SemaphoreHandle_t xTim2Semaphore;
 
-void create_timer_manager()
+void create_pwm_manager()
 {
     TIM_TimeBaseInitTypeDef TIM_TimeBaseStructure;
     NVIC_InitTypeDef NVIC_InitStructure;
@@ -80,15 +77,15 @@ void vTimerTask(void *pvParameters)
         if (xSemaphoreTake(xTim2Semaphore, portMAX_DELAY))
         {
             LED = ~LED;
-            execute_command(&attitude_cmd);
-            execute_command(&display_cmd);
+            // execute_command(&attitude_cmd);
+            // execute_command(&display_cmd);
         }
     }
 }
 
-void init_timer_module()
+void init_pwm_module()
 {
-    create_timer_manager();
+    create_pwm_manager();
     // xTim2Semaphore = xSemaphoreCreateBinary();
     // xTaskCreate(vTimerTask,
     //             "GimbalTask",
@@ -99,7 +96,7 @@ void init_timer_module()
 }
 
 
-void update_timer_state(struct command_context *command_context)
+void update_pwm_state(struct command_context *command_context)
 {
 
 }
@@ -110,9 +107,9 @@ void TIM2_IRQHandler(void)
         // 清除更新中断标志位
         TIM_ClearITPendingBit(TIM2, TIM_IT_Update);
         // xSemaphoreGiveFromISR(xTim2Semaphore, NULL);
-        execute_command(&attitude_cmd);
-        execute_command(&display_cmd);
+        // execute_command(&attitude_cmd);
+        // execute_command(&display_cmd);
     }
 }
 
-const struct module_command_executor timer_manager = {init_timer_module, update_timer_state};
+const struct module_command_executor pwm_manager = {init_pwm_module, update_pwm_state};

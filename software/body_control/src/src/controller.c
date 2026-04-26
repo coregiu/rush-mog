@@ -11,30 +11,26 @@
 #include <controller.h>
 #include "task_manager.h"
 // the map of command to module
-const char command_module_map[COMMANDS_LENGTH][2] = {{COMMAND_STOP, MODULE_VEHICLE},
-                                                      {COMMAND_RUN, MODULE_VEHICLE},
-                                                      {COMMAND_BACK, MODULE_VEHICLE},
-                                                      {COMMAND_LEFT_RUN, MODULE_VEHICLE},
-                                                      {COMMAND_RIGHT_RUN, MODULE_VEHICLE},
-                                                      {COMMAND_LEFT_FRONT, MODULE_VEHICLE},
-                                                      {COMMAND_RIGHT_FRONT, MODULE_VEHICLE},
-                                                      {COMMAND_LEFT_BACK, MODULE_VEHICLE},
-                                                      {COMMAND_RIGHT_BACK, MODULE_VEHICLE},
-                                                      {COMMAND_LEFT_TURN, MODULE_VEHICLE},
-                                                      {COMMAND_RIGHT_TURN, MODULE_VEHICLE},
-                                                      {COMMAND_GO_BACK, MODULE_VEHICLE},
-                                                      {COMMAND_TURN_OUT, MODULE_VEHICLE},
+const char command_module_map[COMMANDS_LENGTH][2] = {{COMMAND_STOP,          MODULE_VEHICLE},
+                                                      {COMMAND_RUN,          MODULE_VEHICLE},
+                                                      {COMMAND_BACK,         MODULE_VEHICLE},
+                                                      {COMMAND_LEFT_RUN,     MODULE_VEHICLE},
+                                                      {COMMAND_RIGHT_RUN,    MODULE_VEHICLE},
+                                                      {COMMAND_LEFT_FRONT,   MODULE_VEHICLE},
+                                                      {COMMAND_RIGHT_FRONT,  MODULE_VEHICLE},
+                                                      {COMMAND_LEFT_BACK,    MODULE_VEHICLE},
+                                                      {COMMAND_RIGHT_BACK,   MODULE_VEHICLE},
+                                                      {COMMAND_LEFT_TURN,    MODULE_VEHICLE},
+                                                      {COMMAND_RIGHT_TURN,   MODULE_VEHICLE},
+                                                      {COMMAND_GO_BACK,      MODULE_VEHICLE},
+                                                      {COMMAND_TURN_OUT,     MODULE_VEHICLE},
                                                       {COMMAND_TEST_VEHICLE, MODULE_VEHICLE},
-                                                      {COMMAND_TEST_ROBOOT, MODULE_ROBOOT},
-                                                      {COMMAND_OPEN_VEDIO, MODULE_VEDIO},
-                                                      {COMMAND_CLOSE_VEDIO, MODULE_VEDIO},
-                                                      {COMMAND_OPEN_INTELI, MODULE_VEDIO},
-                                                      {COMMAND_CLOSE_INTELI, MODULE_VEDIO},
-                                                      {COMMAND_PLAYING, MODULE_INTELI},
-                                                      {COMMAND_ADAPTE_SERVO, MODULE_ROBOOT},
-                                                      {COMMAND_ATTITUDE_INFO, MODULE_ATTITUDE},
-                                                      {COMMAND_LED_DISPLAY, MODULE_LED},
-                                                      {COMMAND_UNKNOWN, MODULE_UNKNOWN}};
+                                                      {COMMAND_FAST,         MODULE_VEHICLE},
+                                                      {COMMAND_SLOW,         MODULE_VEHICLE},
+                                                      {COMMAND_LEFT_MICRO,   MODULE_VEHICLE},
+                                                      {COMMAND_RIGHT_MICRO,  MODULE_VEHICLE},
+                                                      {COMMAND_DIRECT,       MODULE_VEHICLE},
+                                                      {COMMAND_UNKNOWN,      MODULE_UNKNOWN}};
 
 static BaseType_t priority = 2;
 static BaseType_t *const pxHigherPriorityTaskWoken = &priority;
@@ -52,14 +48,13 @@ void init_protocols()
 void init_modules()
 {
     audio_receiver.init();
+    ps2_receiver.init();
     vehicle_executor.init();
 
     init_freertos();
 
     arm_roboot_executor.init();
-    // led_display_executor.init();
-    // timer_manager.init();
-    // attitude_executor.init();
+    pwm_manager.init();
 }
 
 /**
@@ -84,21 +79,8 @@ void execute_command(struct command_context *command_context)
     case MODULE_VEHICLE:
         vehicle_executor.update_state(command_context);
         break;
-    case MODULE_VEDIO:
-        video_executor.update_state(command_context);
-        break;
     case MODULE_ROBOOT:
         arm_roboot_executor.update_state(command_context);
-        break;
-    case MODULE_INTELI:
-        command_context->command = 'D';
-        vehicle_executor.update_state(command_context);
-        break;
-    case MODULE_LED:
-        led_display_executor.update_state(command_context);
-        break;
-    case MODULE_ATTITUDE:
-        attitude_executor.update_state(command_context);
         break;
 
     default:

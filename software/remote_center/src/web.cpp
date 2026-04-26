@@ -58,7 +58,7 @@ void handleCmdButton() {
     if (key == "triangle" || key == "cross") {
       
     } else if (key == "square" || key == "circle") {
-      command = "G";  
+      command = "I";  
     } else {
       command = "0"; 
     }     
@@ -76,9 +76,9 @@ void handleCmdButton() {
     } else if (key == "cross") {
       command = "F";  
     } else if (key == "square") {
-      command = "H";  
+      command = "G";  
     } else if (key == "circle") {
-      command = "I";  
+      command = "H";  
     } else if (key == "l1") {
       command = "9";  
     } else if (key == "r1") {

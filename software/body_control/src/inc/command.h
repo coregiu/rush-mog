@@ -68,15 +68,11 @@ enum commands_def
     COMMAND_TURN_OUT       = 'B',
     COMMAND_GO_BACK        = 'C',
     COMMAND_TEST_VEHICLE   = 'D',
-    COMMAND_TEST_ROBOOT    = 'E',
-    COMMAND_OPEN_VEDIO     = 'F',
-    COMMAND_CLOSE_VEDIO    = 'G',
-    COMMAND_OPEN_INTELI    = 'H',
-    COMMAND_CLOSE_INTELI   = 'I',
-    COMMAND_PLAYING        = 'J',
-    COMMAND_ADAPTE_SERVO   = 'K',
-    COMMAND_ATTITUDE_INFO  = 'L',
-    COMMAND_LED_DISPLAY    = 'M',
+    COMMAND_FAST           = 'E',
+    COMMAND_SLOW           = 'F',
+    COMMAND_LEFT_MICRO     = 'G',
+    COMMAND_RIGHT_MICRO    = 'H',
+    COMMAND_DIRECT         = 'I',
     COMMAND_UNKNOWN        = 'Z'
 };
 
@@ -84,11 +80,7 @@ enum commands_def
 enum module_def
 {
     MODULE_VEHICLE   = '0',
-    MODULE_VEDIO     = '1',
-    MODULE_ROBOOT    = '2',
-    MODULE_INTELI    = '3',
-    MODULE_ATTITUDE  = '4',
-    MODULE_LED       = '5',
+    MODULE_ROBOOT    = '1',
     MODULE_UNKNOWN   = '9'
 };
 
