@@ -94,7 +94,13 @@ void USART3_IRQHandler(void)
             {
                 uart_log_data(uart3_receive_data[i]);
             }
-            execute_commands(uart3_receive_data, COMMAND_TYPE_MANUAL);
+            // 第一位是命令，第二位是步长。
+            u8 stepValue = 5;
+            if (uart3_data_position > 1)
+            {
+                stepValue = uart3_receive_data[1] - '0'; // 将字符转换为数字
+            }
+            execute_commands(uart3_receive_data[0], COMMAND_TYPE_MANUAL);
             uart3_data_position = 0;
         }
 
