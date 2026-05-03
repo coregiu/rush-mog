@@ -34,11 +34,11 @@ $ ll src
 total 1.0M
 drwxrwxr-x  3 eagle 4.0K 6月  11 23:15 .
 drwxrwxr-x  6 eagle 4.0K 6月  11 23:15 ..
--rwxrwxr-x  1 eagle  18K 6月  11 23:15 main_control.bin
--rwxrwxr-x  1 eagle 360K 6月  11 23:15 main_control.elf
--rw-rw-r--  1 eagle  51K 6月  11 23:15 main_control.hex
--rw-rw-r--  1 eagle 433K 6月  11 23:15 main_control.lss
--rw-rw-r--  1 eagle 213K 6月  11 23:15 main_control.map
+-rwxrwxr-x  1 eagle  18K 6月  11 23:15 body_control.bin
+-rwxrwxr-x  1 eagle 360K 6月  11 23:15 body_control.elf
+-rw-rw-r--  1 eagle  51K 6月  11 23:15 body_control.hex
+-rw-rw-r--  1 eagle 433K 6月  11 23:15 body_control.lss
+-rw-rw-r--  1 eagle 213K 6月  11 23:15 body_control.map
 drwxrwxr-x 11 eagle 4.0K 6月  11 23:15 CMakeFiles
 -rw-rw-r--  1 eagle 1017 1月  14 08:26 cmake_install.cmake
 -rw-rw-r--  1 eagle  27K 1月  14 08:26 Makefile
@@ -48,16 +48,11 @@ drwxrwxr-x 11 eagle 4.0K 6月  11 23:15 CMakeFiles
 方式一： ST-LINK
 ```
 $ cd src
-$ sudo st-flash write main_control.bin 0x8000000
+$ sudo st-flash write body_control.bin 0x8000000
 ```
-或者打开st-link软件，点击连接，选择main_control.bin文件，点击烧录按钮。
+或者打开st-link软件，点击连接，选择body_control.bin文件，点击烧录按钮。
 ![st-link](st-link.png)
 
-方式2：flymcu的stm32flash
-需要boot0置1， boot1置0不动。
-```shell
-# boot0跳线置1
-$ sudo stm32flash -w main_control.hex -v -g 0x0 /dev/ttyUSB0
 ```
 完成烧录后再将boot0跳线改回置0
 
@@ -70,9 +65,8 @@ $ sudo stm32flash -w main_control.hex -v -g 0x0 /dev/ttyUSB0
 
 执行以下命令解决： sudo ln -s /usr/bin/python3 /usr/bin/python
 
-- 串口调试工具： comtool
+- 串口调试工具： VS Code Serial Monitor插件
 
-安装： sudo pipe3 install comtool
 
 # 问题与注意事项
 - 1 中控的中断优先级一定要设置正确，否则有诡异问题。UART2的中断优先级要低于configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY配置（即数字比这个大）。另外一定要加这句：
