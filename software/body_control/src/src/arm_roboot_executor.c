@@ -21,10 +21,9 @@ const int SERVO_TOP_FRONT_POSITION   = 160;
 // 定义一个初始化函数，同时初始化时基与输出比较
 void init_roboot_state(void)
 {
-    pwm_init();
     // 设置舵机初始状态在90度
-    change_angle(CHANNEL_BOTTOM, SERVO_DOWN_MIDDLE_POSITION);
-    change_angle(CHANNEL_UP, SERVO_TOP_MIDDLE_POSITION);
+    // change_angle(CHANNEL_BOTTOM, SERVO_DOWN_MIDDLE_POSITION);
+    // change_angle(CHANNEL_UP, SERVO_TOP_MIDDLE_POSITION);
 }
 
 void update_roboot_state(struct command_context *command_context)

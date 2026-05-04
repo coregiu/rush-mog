@@ -12,7 +12,6 @@
 #define EXECUTOR_ARM_ROBOOT_H
 
 #include "command.h"
-#include "pwm.h"
 
 #define SERVO_1 0
 #define SERVO_2 3

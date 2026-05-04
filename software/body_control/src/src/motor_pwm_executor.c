@@ -64,18 +64,18 @@ void init_timer3()
 // 设置 PB0 占空比 500 -> 50% 占空比，1000 -> 100% 占空比
 void left_motor_set_pwm(u16 compare)
 {
-    uart_log_string_data("set left motor pwm: ");
-    uart_log_number(compare);
-    uart_log_enter_char();
+    // uart_log_string_data("set left motor pwm: ");
+    // uart_log_number(compare);
+    // uart_log_enter_char();
     TIM_SetCompare3(TIM3, compare);
 }
 
 // 设置 PB1 占空比 500 -> 50% 占空比，1000 -> 100% 占空比
 void right_motor_set_pwm(u16 compare)
 {
-    uart_log_string_data("set right motor pwm: ");
-    uart_log_number(compare);
-    uart_log_enter_char();
+    // uart_log_string_data("set right motor pwm: ");
+    // uart_log_number(compare);
+    // uart_log_enter_char();
     TIM_SetCompare4(TIM3, compare);
 }
 
