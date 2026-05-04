@@ -251,6 +251,21 @@ void update_vehicle_state(struct command_context *command_context)
     case COMMAND_TEST_VEHICLE:
         put_test_commands();
         break;
+    case COMMAND_FAST:
+        put_test_commands();
+        break;
+    case COMMAND_SLOW:
+        put_test_commands();
+        break;
+    case COMMAND_LEFT_MICRO:
+        put_test_commands();
+        break;
+    case COMMAND_RIGHT_MICRO:
+        put_test_commands();
+        break;
+    case COMMAND_DIRECT:
+        put_test_commands();
+        break;
     default:
         break;
     }

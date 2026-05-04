@@ -38,7 +38,7 @@ static BaseType_t *const pxHigherPriorityTaskWoken = &priority;
 void init_protocols()
 {
     init_command_led_module();
-    IIC_Init();
+    // IIC_Init();
 }
 
 /**
