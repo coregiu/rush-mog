@@ -1,6 +1,23 @@
 #include <motor_pwm_executor.h>
 
-void init_timer3(u16 arr, u16 psc)
+
+// 当前系统默认占空比次数
+const uchar DEFAULT_TUNE_PWM_STEP = 2;
+
+// 每次微调占空比的步长
+uchar tune_pwm_step;
+
+const uchar NO_PWM = 99;
+
+uchar g_left_motor_run_state = DEFAULT_TUNE_PWM_STEP;
+uchar g_right_motor_run_state = DEFAULT_TUNE_PWM_STEP;
+
+struct motor_config g_motor_config = {5, 1};
+
+// 当前系统的占空比，以此占空比来控制电机速度
+uchar current_pwm = DEFAULT_TUNE_PWM_STEP;
+
+void init_timer3()
 {
     GPIO_InitTypeDef GPIO_InitStructure;
     TIM_TimeBaseInitTypeDef TIM_TimeBaseStructure;
@@ -17,10 +34,15 @@ void init_timer3(u16 arr, u16 psc)
     GPIO_Init(GPIOB, &GPIO_InitStructure);
 
     // 3. TIM3 基础配置
-    TIM_TimeBaseStructure.TIM_Period = arr;
-    TIM_TimeBaseStructure.TIM_Prescaler = psc;
-    TIM_TimeBaseStructure.TIM_ClockDivision = 0;
+    // 定时器参数配置
+    // 假设系统时钟为72MHz，TIM2时钟源为APB1（经过2分频后为36MHz）
+    // 设置预分频值为35999，则TIM2的计数频率为36MHz/(35999+1)=1KHz
+    // 设置自动重载值为999，则中断周期为(999+1)*1ms=1000ms
+    TIM_TimeBaseStructure.TIM_Period = 999;
+    TIM_TimeBaseStructure.TIM_Prescaler = 71;
+    TIM_TimeBaseStructure.TIM_ClockDivision = TIM_CKD_DIV1;
     TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;
+    TIM_TimeBaseStructure.TIM_RepetitionCounter = 0;
     TIM_TimeBaseInit(TIM3, &TIM_TimeBaseStructure);
 
     // 4. CH3 配置（PB0）
@@ -42,49 +64,31 @@ void init_timer3(u16 arr, u16 psc)
 // 设置 PB0 占空比 500 -> 50% 占空比，1000 -> 100% 占空比
 void left_motor_set_pwm(u16 compare)
 {
+    uart_log_string_data("set left motor pwm: ");
+    uart_log_number(compare);
+    uart_log_enter_char();
     TIM_SetCompare3(TIM3, compare);
 }
 
 // 设置 PB1 占空比 500 -> 50% 占空比，1000 -> 100% 占空比
 void right_motor_set_pwm(u16 compare)
 {
+    uart_log_string_data("set right motor pwm: ");
+    uart_log_number(compare);
+    uart_log_enter_char();
     TIM_SetCompare4(TIM3, compare);
 }
 
-// 当前系统默认占空比次数
-const uchar DEFAULT_TUNE_PWM_STEP = 2;
-
-// 每次微调占空比的步长
-uchar tune_pwm_step;
-
-// 前一条指令。当前后两条指令相同时不做操作
-uchar pre_cmd;
-
-const uchar NO_PWM = 99;
-
-uchar g_left_motor_run_state = DEFAULT_TUNE_PWM_STEP;
-uchar g_right_motor_run_state = DEFAULT_TUNE_PWM_STEP;
-
-struct motor_config g_motor_config = {5, 1};
-uchar pre_right_cmd;
-
-// 当前系统的占空比，以此占空比来控制电机速度
-uchar current_pwm = DEFAULT_TUNE_PWM_STEP;
-
 void init_tune_pwm_step()
 {
-    init_timer3(999, 71);
+    init_timer3();
+    left_motor_set_pwm(DEFAULT_TUNE_PWM_STEP * (1000 / g_motor_config.pwm_period_times));
+    right_motor_set_pwm(DEFAULT_TUNE_PWM_STEP * (1000 / g_motor_config.pwm_period_times));
     tune_pwm_step = DEFAULT_TUNE_PWM_STEP;
-    pre_cmd = COMMAND_STOP;
 }
 
 void update_pwm_state(struct command_context *command_context)
 {
-    if (command_context->command == pre_cmd)
-    {
-        return;
-    }
-    pre_cmd = command_context->command;
     switch (command_context->command)
     {
 
@@ -118,9 +122,15 @@ void update_pwm_state(struct command_context *command_context)
     default:
         g_left_motor_run_state = current_pwm;
         g_right_motor_run_state = current_pwm;
-        pre_cmd = COMMAND_STOP;
+
         break;
     }
+    g_left_motor_run_state = g_left_motor_run_state >= g_motor_config.pwm_period_times ? g_motor_config.pwm_period_times : g_left_motor_run_state;
+    g_left_motor_run_state = g_left_motor_run_state <= g_motor_config.pwm_change_step ? g_motor_config.pwm_change_step : g_left_motor_run_state;
+
+    g_right_motor_run_state = g_right_motor_run_state >= g_motor_config.pwm_period_times  ? g_motor_config.pwm_period_times : g_right_motor_run_state;
+    g_right_motor_run_state = g_right_motor_run_state <= g_motor_config.pwm_change_step ? g_motor_config.pwm_change_step : g_right_motor_run_state;
+
     left_motor_set_pwm(g_left_motor_run_state * (1000 / g_motor_config.pwm_period_times));
     right_motor_set_pwm(g_right_motor_run_state * (1000 / g_motor_config.pwm_period_times));
 }
