@@ -28,6 +28,8 @@
 
 #define COMMANDS_LENGTH 24
 
+#define DEFAULT_BUFFER_SIZE 8
+
 #define DEFAULT_BOUND_RATE 9600
 
 #define MAX_COMMAND_QUEUE_SIZE 1000
@@ -93,7 +95,7 @@ struct command_context
     uint16_t time_sleep_milsec;
     enum delay_type delay_type;
     enum command_type command_type;
-    uint16_t step; // 小车的转向步数，云台的转动步数
+    uint16_t pwm_rate; // PWM占空比，0-5, 5表示100%占空比
 };
 
 // define command receiver such as audio receiver and video receiver
@@ -115,6 +117,9 @@ void init_command_led_module();
 
 // convert command to the array sequence of command_module_map.
 uint convert_command_seq(char command);
+
+// convert pwm_rate to the uint.
+uint convert_pwm_rate(char pwm_rate);
 
 void send_to_queue(struct command_context *command);
 

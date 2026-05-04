@@ -13,7 +13,7 @@
 
 #include "command.h"
 
-#define DEFAULT_BUFFER_SIZE 64
+#define DEFAULT_BUFFER_SIZE 8
 
 extern const struct module_command_receiver audio_receiver;
 

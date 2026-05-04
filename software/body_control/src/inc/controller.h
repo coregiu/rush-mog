@@ -48,6 +48,6 @@ void execute_command(struct command_context *command_context);
  * execute commands;
  *
  */
-void execute_commands(char *commands, enum command_type type);
+void execute_commands(char *commands, uchar cmd_length, enum command_type type);
 
 #endif

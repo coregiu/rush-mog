@@ -89,12 +89,26 @@ void execute_command(struct command_context *command_context)
  * execute commands;
  *
  */
-void execute_commands(char *commands, enum command_type type)
+void execute_commands(char *commands, uchar cmd_length, enum command_type type)
 {
     uint cmd_seq = convert_command_seq(commands[0]);
     if (cmd_seq >= 0 && cmd_seq < COMMANDS_LENGTH)
     {
-        struct command_context command_context = {commands[0], command_module_map[cmd_seq][1], 0, DELAY_AFTER_EXE, type};
+        uint pwm_rate = DEFAULT_PWM_RATE;
+        struct command_context command_context = {commands[0], command_module_map[cmd_seq][1], 0, DELAY_AFTER_EXE, type, pwm_rate};
+
+        if (cmd_length > 2)
+        {
+            // uart_log_string_data("cmd_length is : ");
+            // uart_log_number(cmd_length);
+            // uart_log_enter_char();
+            pwm_rate = convert_pwm_rate(commands[1]);
+            pwm_rate = pwm_rate <= STOP_PWM ? STOP_PWM : pwm_rate;
+            pwm_rate = pwm_rate >= MAX_PWM_RATE ? MAX_PWM_RATE : pwm_rate;
+            command_context.pwm_rate = pwm_rate;
+            motor_pwm_executor.update_state(&command_context);
+        }
+        
         execute_command(&command_context);
     }
 }

@@ -29,6 +29,19 @@ uint convert_command_seq(char command)
     }
 }
 
+// convert pwm_rate to the uint.
+uint convert_pwm_rate(char pwm_rate)
+{
+    if (pwm_rate >= '0' && pwm_rate <= '9')
+    {
+        return pwm_rate - '0';
+    }
+    else
+    {
+        return 0;
+    }
+}
+
 void init_command_led_module()
 {
     GPIO_InitTypeDef GPIO_InitStructure;

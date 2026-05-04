@@ -13,8 +13,6 @@
 
 #include "command.h"
 
-#define DEFAULT_BUFFER_SIZE 64
-
 extern const struct module_command_receiver ps2_receiver;
 
 #endif

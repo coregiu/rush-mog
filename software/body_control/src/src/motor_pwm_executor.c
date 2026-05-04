@@ -1,13 +1,10 @@
 #include <motor_pwm_executor.h>
 
 
-// 当前系统默认占空比次数
-const uchar DEFAULT_TUNE_PWM_STEP = 2;
+
 
 // 每次微调占空比的步长
 uchar tune_pwm_step;
-
-const uchar NO_PWM = 99;
 
 uchar g_left_motor_run_state = DEFAULT_TUNE_PWM_STEP;
 uchar g_right_motor_run_state = DEFAULT_TUNE_PWM_STEP;
@@ -35,9 +32,7 @@ void init_timer3()
 
     // 3. TIM3 基础配置
     // 定时器参数配置
-    // 假设系统时钟为72MHz，TIM2时钟源为APB1（经过2分频后为36MHz）
-    // 设置预分频值为35999，则TIM2的计数频率为36MHz/(35999+1)=1KHz
-    // 设置自动重载值为999，则中断周期为(999+1)*1ms=1000ms
+    // 定时器时钟 = 72MHz; PWM 频率 = 72000000 / (psc+1) / (arr+1)
     TIM_TimeBaseStructure.TIM_Period = 999;
     TIM_TimeBaseStructure.TIM_Prescaler = 71;
     TIM_TimeBaseStructure.TIM_ClockDivision = TIM_CKD_DIV1;
@@ -120,16 +115,17 @@ void update_pwm_state(struct command_context *command_context)
         g_right_motor_run_state = current_pwm;
         break;
     default:
-        g_left_motor_run_state = current_pwm;
-        g_right_motor_run_state = current_pwm;
+        current_pwm = command_context->pwm_rate;
+        g_left_motor_run_state = command_context->pwm_rate;
+        g_right_motor_run_state = command_context->pwm_rate;
 
         break;
     }
-    g_left_motor_run_state = g_left_motor_run_state >= g_motor_config.pwm_period_times ? g_motor_config.pwm_period_times : g_left_motor_run_state;
-    g_left_motor_run_state = g_left_motor_run_state <= g_motor_config.pwm_change_step ? g_motor_config.pwm_change_step : g_left_motor_run_state;
+    g_left_motor_run_state = g_left_motor_run_state > g_motor_config.pwm_period_times ? g_motor_config.pwm_period_times : g_left_motor_run_state;
+    g_left_motor_run_state = g_left_motor_run_state < g_motor_config.pwm_change_step ? STOP_PWM : g_left_motor_run_state;
 
-    g_right_motor_run_state = g_right_motor_run_state >= g_motor_config.pwm_period_times  ? g_motor_config.pwm_period_times : g_right_motor_run_state;
-    g_right_motor_run_state = g_right_motor_run_state <= g_motor_config.pwm_change_step ? g_motor_config.pwm_change_step : g_right_motor_run_state;
+    g_right_motor_run_state = g_right_motor_run_state > g_motor_config.pwm_period_times  ? g_motor_config.pwm_period_times : g_right_motor_run_state;
+    g_right_motor_run_state = g_right_motor_run_state < g_motor_config.pwm_change_step ? STOP_PWM : g_right_motor_run_state;
 
     left_motor_set_pwm(g_left_motor_run_state * (1000 / g_motor_config.pwm_period_times));
     right_motor_set_pwm(g_right_motor_run_state * (1000 / g_motor_config.pwm_period_times));

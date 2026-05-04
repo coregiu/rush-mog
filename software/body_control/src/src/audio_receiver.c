@@ -93,7 +93,7 @@ void USART2_IRQHandler(void)
             {
                 uart_log_data(uart2_receive_data[i]);
             }
-            execute_commands(uart2_receive_data, COMMAND_TYPE_MANUAL);
+            execute_commands(uart2_receive_data, uart2_data_position, COMMAND_TYPE_MANUAL);
             uart2_data_position = 0;
         }
 

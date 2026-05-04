@@ -94,7 +94,7 @@ void USART3_IRQHandler(void)
             {
                 uart_log_data(uart3_receive_data[i]);
             }
-            execute_commands(uart3_receive_data, COMMAND_TYPE_AUTO);
+            execute_commands(uart3_receive_data, uart3_data_position, COMMAND_TYPE_AUTO);
             uart3_data_position = 0;
         }
 

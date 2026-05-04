@@ -13,6 +13,14 @@
 #include "command.h"
 #include "controller.h"
 
+#define MAX_PWM_RATE 5
+#define MIN_PWM_RATE 1
+#define STOP_PWM 0
+#define NO_PWM 99
+#define DEFAULT_TUNE_PWM_STEP 2
+#define DEFAULT_PWM_RATE 3
+
+
 // the main configuration of car.
 struct motor_config
 {
