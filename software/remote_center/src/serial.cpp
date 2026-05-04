@@ -1,5 +1,6 @@
 #include "serial.h"
 
+// D3 = RX（接收脚）; D4 = TX（发送脚）
 SoftwareSerial softwareSerial(D3, D4);  
 
 void initSoftwareSerial() {
