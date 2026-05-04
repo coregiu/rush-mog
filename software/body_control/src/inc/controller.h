@@ -12,8 +12,8 @@
 #define CONTROLLER_DEFINE_H
 
 #include "command.h"
-#include "vehicle_executor.h"
-#include "pwm_manager.h"
+#include "motor_direct_executor.h"
+#include "motor_pwm_executor.h"
 #include "audio_receiver.h"
 #include "ps2_receiver.h"
 #include "arm_roboot_executor.h"
@@ -35,11 +35,6 @@ void init_protocols();
  *
  */
 void init_modules();
-
-/**
- * receive commands from clients.
- */
-char* receive_commands();
 
 /**
  * notify modules to execute the commands.

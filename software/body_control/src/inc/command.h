@@ -79,9 +79,10 @@ enum commands_def
 // define module id
 enum module_def
 {
-    MODULE_VEHICLE   = '0',
-    MODULE_ROBOOT    = '1',
-    MODULE_UNKNOWN   = '9'
+    MODULE_MOTOR_DIRECT  = '0',
+    MODULE_MOTOR_PWM     = '1',
+    MODULE_ARB_BOT       = '2',
+    MODULE_UNKNOWN       = '9'
 };
 
 // 放入队列的元素。一个是命令，一个是命令执行后挂起时长。

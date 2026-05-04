@@ -7,7 +7,7 @@
   *
   ******************************************************************************
 **/
-#include <vehicle_executor.h>
+#include <motor_direct_executor.h>
 
 // the position of gpio in CAR_STATE_LIST array.
 enum gpio_position
@@ -88,7 +88,7 @@ void exec_vehicle_state_update(enum vehicle_state run_state, enum command_type t
     }
     else
     {
-        struct command_context stop_cmd = {'0', MODULE_VEHICLE, 2000, DELAY_BEFOR_EXE, COMMAND_TYPE_AUTO};
+        struct command_context stop_cmd = {'0', MODULE_MOTOR_DIRECT, 2000, DELAY_BEFOR_EXE, COMMAND_TYPE_AUTO};
         send_to_queue(&stop_cmd);
     }
 }
@@ -128,7 +128,7 @@ void goback()
 
 void put_test_commands()
 {
-    struct command_context command_context = {'1', MODULE_VEHICLE, 2000, DELAY_AFTER_EXE, COMMAND_TYPE_AUTO};
+    struct command_context command_context = {'1', MODULE_MOTOR_DIRECT, 2000, DELAY_AFTER_EXE, COMMAND_TYPE_AUTO};
     send_to_queue(&command_context);
     command_context.command = '2';
     send_to_queue(&command_context);
@@ -193,14 +193,6 @@ void init_vehicle_state()
     GPIO_InitStructure.GPIO_Pin = GPIO_IN8;
     GPIO_Init(GPIOB, &GPIO_InitStructure);
     IN8 = 0;
-
-    GPIO_InitStructure.GPIO_Pin = GPIO_ENL;
-    GPIO_Init(GPIOB, &GPIO_InitStructure);
-    ENL = 1;
-
-    GPIO_InitStructure.GPIO_Pin = GPIO_ENR;
-    GPIO_Init(GPIOB, &GPIO_InitStructure);
-    ENR = 1;
 }
 
 void update_vehicle_state(struct command_context *command_context)
@@ -251,24 +243,9 @@ void update_vehicle_state(struct command_context *command_context)
     case COMMAND_TEST_VEHICLE:
         put_test_commands();
         break;
-    case COMMAND_FAST:
-        put_test_commands();
-        break;
-    case COMMAND_SLOW:
-        put_test_commands();
-        break;
-    case COMMAND_LEFT_MICRO:
-        put_test_commands();
-        break;
-    case COMMAND_RIGHT_MICRO:
-        put_test_commands();
-        break;
-    case COMMAND_DIRECT:
-        put_test_commands();
-        break;
     default:
         break;
     }
 }
 
-const struct module_command_executor vehicle_executor = {init_vehicle_state, update_vehicle_state};
+const struct module_command_executor motor_direct_executor = {init_vehicle_state, update_vehicle_state};

@@ -52,5 +52,5 @@ enum vehicle_state
     TURN_OVER   = 11
 };
 
-extern const struct module_command_executor vehicle_executor;
+extern const struct module_command_executor motor_direct_executor;
 #endif

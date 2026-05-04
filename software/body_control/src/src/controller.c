@@ -11,25 +11,25 @@
 #include <controller.h>
 #include "task_manager.h"
 // the map of command to module
-const char command_module_map[COMMANDS_LENGTH][2] = {{COMMAND_STOP,          MODULE_VEHICLE},
-                                                      {COMMAND_RUN,          MODULE_VEHICLE},
-                                                      {COMMAND_BACK,         MODULE_VEHICLE},
-                                                      {COMMAND_LEFT_RUN,     MODULE_VEHICLE},
-                                                      {COMMAND_RIGHT_RUN,    MODULE_VEHICLE},
-                                                      {COMMAND_LEFT_FRONT,   MODULE_VEHICLE},
-                                                      {COMMAND_RIGHT_FRONT,  MODULE_VEHICLE},
-                                                      {COMMAND_LEFT_BACK,    MODULE_VEHICLE},
-                                                      {COMMAND_RIGHT_BACK,   MODULE_VEHICLE},
-                                                      {COMMAND_LEFT_TURN,    MODULE_VEHICLE},
-                                                      {COMMAND_RIGHT_TURN,   MODULE_VEHICLE},
-                                                      {COMMAND_GO_BACK,      MODULE_VEHICLE},
-                                                      {COMMAND_TURN_OUT,     MODULE_VEHICLE},
-                                                      {COMMAND_TEST_VEHICLE, MODULE_VEHICLE},
-                                                      {COMMAND_FAST,         MODULE_VEHICLE},
-                                                      {COMMAND_SLOW,         MODULE_VEHICLE},
-                                                      {COMMAND_LEFT_MICRO,   MODULE_VEHICLE},
-                                                      {COMMAND_RIGHT_MICRO,  MODULE_VEHICLE},
-                                                      {COMMAND_DIRECT,       MODULE_VEHICLE},
+const char command_module_map[COMMANDS_LENGTH][2] = {{COMMAND_STOP,          MODULE_MOTOR_DIRECT},
+                                                      {COMMAND_RUN,          MODULE_MOTOR_DIRECT},
+                                                      {COMMAND_BACK,         MODULE_MOTOR_DIRECT},
+                                                      {COMMAND_LEFT_RUN,     MODULE_MOTOR_DIRECT},
+                                                      {COMMAND_RIGHT_RUN,    MODULE_MOTOR_DIRECT},
+                                                      {COMMAND_LEFT_FRONT,   MODULE_MOTOR_DIRECT},
+                                                      {COMMAND_RIGHT_FRONT,  MODULE_MOTOR_DIRECT},
+                                                      {COMMAND_LEFT_BACK,    MODULE_MOTOR_DIRECT},
+                                                      {COMMAND_RIGHT_BACK,   MODULE_MOTOR_DIRECT},
+                                                      {COMMAND_LEFT_TURN,    MODULE_MOTOR_DIRECT},
+                                                      {COMMAND_RIGHT_TURN,   MODULE_MOTOR_DIRECT},
+                                                      {COMMAND_GO_BACK,      MODULE_MOTOR_DIRECT},
+                                                      {COMMAND_TURN_OUT,     MODULE_MOTOR_DIRECT},
+                                                      {COMMAND_TEST_VEHICLE, MODULE_MOTOR_DIRECT},
+                                                      {COMMAND_FAST,         MODULE_MOTOR_PWM},
+                                                      {COMMAND_SLOW,         MODULE_MOTOR_PWM},
+                                                      {COMMAND_LEFT_MICRO,   MODULE_MOTOR_PWM},
+                                                      {COMMAND_RIGHT_MICRO,  MODULE_MOTOR_PWM},
+                                                      {COMMAND_DIRECT,       MODULE_MOTOR_PWM},
                                                       {COMMAND_UNKNOWN,      MODULE_UNKNOWN}};
 
 static BaseType_t priority = 2;
@@ -49,20 +49,12 @@ void init_modules()
 {
     audio_receiver.init();
     ps2_receiver.init();
-    vehicle_executor.init();
+    motor_direct_executor.init();
 
     init_freertos();
 
+    motor_pwm_executor.init();
     arm_roboot_executor.init();
-    pwm_manager.init();
-}
-
-/**
- * receive commands from clients.
- */
-char* receive_commands()
-{
-    return audio_receiver.receive_commands();
 }
 
 /**
@@ -76,10 +68,13 @@ void execute_command(struct command_context *command_context)
     LED = ~LED;
     switch (command_context->module)
     {
-    case MODULE_VEHICLE:
-        vehicle_executor.update_state(command_context);
+    case MODULE_MOTOR_DIRECT:
+        motor_direct_executor.update_state(command_context);
         break;
-    case MODULE_ROBOOT:
+    case MODULE_MOTOR_PWM:
+        motor_pwm_executor.update_state(command_context);
+        break;
+    case MODULE_ARB_BOT:
         arm_roboot_executor.update_state(command_context);
         break;
 
