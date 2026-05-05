@@ -9,5 +9,6 @@ void initSoftwareSerial() {
 }
 
 void sendCommands(String command){
-    softwareSerial.println(command); // 发送命令到STM32
+    softwareSerial.print(command); // 发送命令到STM32
+    softwareSerial.write('\n');  // 发送换行符，表示命令结束
 }

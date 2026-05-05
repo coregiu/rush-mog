@@ -46,10 +46,17 @@
             .action-button {
                 @apply w-14 h-14 rounded-full flex items-center justify-center text-white font-bold text-lg transition-all duration-100 active:scale-90 shadow-lg;
             }
+
+            * {
+                -webkit-user-select: none;
+                -moz-user-select: none;
+                -ms-user-select: none;
+                user-select: none;
+            }
         }
     </style>
 </head>
-<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4" onselectstart="return false">
     <div class="max-w-4xl mx-auto">
         <!-- Controller Container -->
         <div class="bg-ps2gray rounded-3xl p-8 shadow-2xl border-8 border-ps2black relative overflow-hidden">
