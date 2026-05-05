@@ -54,15 +54,15 @@ void handleCmdButton() {
     server.send(400, "text/plain", "400 Bad Request - Missing 'key' or 'type' parameter");
     return;
   }
-  if (type == "up") {
-    if (key == "triangle" || key == "cross") {
+  if (type == "up") { // 松开事件
+    if (key == "triangle" || key == "cross" || key == "select" || key == "start") {
       
     } else if (key == "square" || key == "circle") {
       command = "I";  
     } else {
       command = "0"; 
     }     
-  } else {
+  } else { // 按下事件
     if (key == "up") {
       command = "1";  
     } else if (key == "down") {
@@ -87,6 +87,10 @@ void handleCmdButton() {
       command = "B";  
     } else if (key == "r2") {
       command = "C";  
+    } else if (key == "start") {
+      command = "D";  
+    } else if (key == "select") {
+      command = "J";  
     }
   }
 
