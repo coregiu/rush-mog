@@ -6,13 +6,13 @@
 // 每次微调占空比的步长
 uchar tune_pwm_step;
 
-uchar g_left_motor_run_state = DEFAULT_TUNE_PWM_STEP;
-uchar g_right_motor_run_state = DEFAULT_TUNE_PWM_STEP;
+uchar g_left_motor_run_state = DEFAULT_PWM_RATE;
+uchar g_right_motor_run_state = DEFAULT_PWM_RATE;
 
 struct motor_config g_motor_config = {5, 1};
 
 // 当前系统的占空比，以此占空比来控制电机速度
-uchar current_pwm = DEFAULT_TUNE_PWM_STEP;
+uchar current_pwm = DEFAULT_PWM_RATE;
 
 void init_timer3()
 {
@@ -59,26 +59,26 @@ void init_timer3()
 // 设置 PB0 占空比 500 -> 50% 占空比，1000 -> 100% 占空比
 void left_motor_set_pwm(u16 compare)
 {
-    // uart_log_string_data("set left motor pwm: ");
-    // uart_log_number(compare);
-    // uart_log_enter_char();
+    uart_log_string_data("set left motor pwm: ");
+    uart_log_number(compare);
+    uart_log_enter_char();
     TIM_SetCompare3(TIM3, compare);
 }
 
 // 设置 PB1 占空比 500 -> 50% 占空比，1000 -> 100% 占空比
 void right_motor_set_pwm(u16 compare)
 {
-    // uart_log_string_data("set right motor pwm: ");
-    // uart_log_number(compare);
-    // uart_log_enter_char();
+    uart_log_string_data("set right motor pwm: ");
+    uart_log_number(compare);
+    uart_log_enter_char();
     TIM_SetCompare4(TIM3, compare);
 }
 
 void init_tune_pwm_step()
 {
     init_timer3();
-    left_motor_set_pwm(DEFAULT_TUNE_PWM_STEP * (1000 / g_motor_config.pwm_period_times));
-    right_motor_set_pwm(DEFAULT_TUNE_PWM_STEP * (1000 / g_motor_config.pwm_period_times));
+    left_motor_set_pwm(g_left_motor_run_state * (1000 / g_motor_config.pwm_period_times));
+    right_motor_set_pwm(g_right_motor_run_state * (1000 / g_motor_config.pwm_period_times));
     tune_pwm_step = DEFAULT_TUNE_PWM_STEP;
 }
 
