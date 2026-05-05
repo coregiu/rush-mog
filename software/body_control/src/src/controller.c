@@ -66,9 +66,8 @@ void init_modules()
 void execute_command(struct command_context *command_context)
 {
     LED = ~LED;
-    uart_log_data(command_context->exe_cmd);
-
     command_context->exe_cmd = command_context->commands[0];
+    uart_log_data(command_context->exe_cmd);
 
     uint cmd_seq = convert_command_seq(command_context->exe_cmd);
     if (cmd_seq < 0 || cmd_seq > COMMANDS_LENGTH)
@@ -77,6 +76,7 @@ void execute_command(struct command_context *command_context)
     }
     
     command_context->module = command_module_map[cmd_seq][1];
+    uart_log_data(command_context->module);
 
     switch (command_context->module)
     {
