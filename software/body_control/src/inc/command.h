@@ -46,13 +46,6 @@ enum delay_type
     DELAY_AFTER_EXE = '1'
 };
 
-// define command type
-enum command_type
-{
-    COMMAND_TYPE_MANUAL  = '0',
-    COMMAND_TYPE_AUTO    = '1'
-};
-
 // define commands id
 enum commands_def
 {
@@ -90,12 +83,13 @@ enum module_def
 // 放入队列的元素。一个是命令，一个是命令执行后挂起时长。
 struct command_context
 {
-    char command;
+    uchar *commands; // 原始命令
+    uchar exe_cmd;
+    uchar cmd_length;
     enum module_def module;
     uint16_t time_sleep_milsec;
     enum delay_type delay_type;
-    enum command_type command_type;
-    uint16_t pwm_rate; // PWM占空比，0-5, 5表示100%占空比
+    uchar pwm_rate; // PWM占空比，0-5, 5表示100%占空比
 };
 
 // define command receiver such as audio receiver and video receiver

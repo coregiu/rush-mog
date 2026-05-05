@@ -31,7 +31,7 @@ void exe_task_from_queue(void *argument)
             vTaskDelay(xTicksToDelay);
         }
         // uart_log_data(received_command.command);
-        execute_commands(&received_command.command, 1, COMMAND_TYPE_AUTO);
+        execute_command(&received_command);
 
         if (received_command.delay_type == DELAY_AFTER_EXE && received_command.time_sleep_milsec > 0)
         {

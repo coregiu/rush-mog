@@ -84,7 +84,7 @@ void init_tune_pwm_step()
 
 void update_pwm_state(struct command_context *command_context)
 {
-    switch (command_context->command)
+    switch (command_context->exe_cmd)
     {
 
     case COMMAND_FAST:

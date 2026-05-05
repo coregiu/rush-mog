@@ -59,8 +59,8 @@ char *receive_audio_command()
     return "0";
 }
 
-char uart2_receive_data[DEFAULT_BUFFER_SIZE] = {0};
-int uart2_data_position = 0;
+uchar uart2_receive_data[DEFAULT_BUFFER_SIZE] = {0};
+uchar uart2_data_position = 0;
 /*
 ************************************************************
 *	函数名称：	USART2_IRQHandler
@@ -89,11 +89,13 @@ void USART2_IRQHandler(void)
         if (uart2_receive_data[uart2_data_position - 1] == '\n' || uart2_receive_data[uart2_data_position - 1] == '\r')
         {
             /* Send the line back */
-            for (uint i = 0; i < uart2_data_position; i++)
-            {
-                uart_log_data(uart2_receive_data[i]);
-            }
-            execute_commands(uart2_receive_data, uart2_data_position, COMMAND_TYPE_MANUAL);
+            // for (uint i = 0; i < uart2_data_position; i++)
+            // {
+            //     uart_log_data(uart2_receive_data[i]);
+            // }
+            struct command_context command_context = {uart2_receive_data, uart2_receive_data[0], uart2_data_position, MODULE_MOTOR_DIRECT, 0, DELAY_AFTER_EXE};
+            
+            send_to_queue(&command_context);
             uart2_data_position = 0;
         }
 

@@ -60,8 +60,23 @@ char *receive_ps2_command()
     return "0";
 }
 
-char uart3_receive_data[DEFAULT_BUFFER_SIZE] = {0};
+uchar uart3_receive_data[DEFAULT_BUFFER_SIZE] = {0};
 int uart3_data_position = 0;
+
+// 拷贝 UART3 接收数据到 cmd_buffer
+void copy_uart3_data(uchar *cmd_buffer, uchar *uart3_receive_data, int uart3_data_position)
+{
+    // 清空目标数组
+    memset(cmd_buffer, 0, sizeof(cmd_buffer));
+    
+    // 拷贝（只拷贝有效长度，不拷贝多余脏数据）
+    memcpy(cmd_buffer, uart3_receive_data, uart3_data_position);
+    
+    // 拷贝完成后，清空接收缓冲区（关键！）
+    memset(uart3_receive_data, 0, sizeof(uart3_receive_data));
+    uart3_data_position = 0;
+}
+
 /*
 ************************************************************
 *	函数名称：	USART3_IRQHandler
@@ -90,11 +105,23 @@ void USART3_IRQHandler(void)
         if (uart3_receive_data[uart3_data_position - 1] == '\n' || uart3_receive_data[uart3_data_position - 1] == '\r')
         {
             /* Send the line back */
-            for (uint i = 0; i < uart3_data_position; i++)
+            // for (uint i = 0; i < uart3_data_position; i++)
+            // {
+            //     uart_log_data(uart3_receive_data[i]);
+            // }
+            // 定义一个目标数组（你可以放到全局）
+            struct command_context command_context = {uart3_receive_data, uart3_receive_data[0], uart3_data_position, MODULE_MOTOR_DIRECT, 0, DELAY_AFTER_EXE};
+
+            if (uart3_data_position > 2)
             {
-                uart_log_data(uart3_receive_data[i]);
+                uchar pwm_rate = convert_pwm_rate(uart3_receive_data[1]);
+                pwm_rate = pwm_rate <= STOP_PWM ? STOP_PWM : pwm_rate;
+                pwm_rate = pwm_rate >= MAX_PWM_RATE ? MAX_PWM_RATE : pwm_rate;
+                command_context.pwm_rate = pwm_rate;
             }
-            execute_commands(uart3_receive_data, uart3_data_position, COMMAND_TYPE_AUTO);
+            
+            send_to_queue(&command_context);
+            // execute_commands(uart3_receive_data, uart3_data_position, COMMAND_TYPE_AUTO);
             uart3_data_position = 0;
         }
 
