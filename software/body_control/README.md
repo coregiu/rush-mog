@@ -49,6 +49,11 @@ drwxrwxr-x 11 eagle 4.0K 6月  11 23:15 CMakeFiles
 ```
 $ cd src
 $ sudo st-flash write body_control.bin 0x8000000
+
+$ 如果在wsl中执行烧录，需要的windows terminal中执行：
+   1 usbipd list
+   2 usbipd bind --busid 2-4
+   3 usbipd attach --wsl --busid 2-4
 ```
 或者打开st-link软件，点击连接，选择body_control.bin文件，点击烧录按钮。
 ![st-link](st-link.png)
