@@ -60,14 +60,15 @@ enum commands_def
     COMMAND_RIGHT_BACK     = '8',
     COMMAND_LEFT_TURN      = '9',
     COMMAND_RIGHT_TURN     = 'A',
-    COMMAND_TURN_OUT       = 'B',
-    COMMAND_GO_BACK        = 'C',
+    COMMAND_TURN_OUT_L     = 'B',
+    COMMAND_TURN_OUT_R     = 'C',
     COMMAND_TEST_VEHICLE   = 'D',
     COMMAND_FAST           = 'E',
     COMMAND_SLOW           = 'F',
     COMMAND_LEFT_MICRO     = 'G',
     COMMAND_RIGHT_MICRO    = 'H',
     COMMAND_DIRECT         = 'I',
+    COMMAND_RESET          = 'J',
     COMMAND_UNKNOWN        = 'Z'
 };
 
@@ -76,7 +77,8 @@ enum module_def
 {
     MODULE_MOTOR_DIRECT  = '0',
     MODULE_MOTOR_PWM     = '1',
-    MODULE_ARB_BOT       = '2',
+    MODULE_ARM_BOT       = '2',
+    MODULE_RESET         = '3',
     MODULE_UNKNOWN       = '9'
 };
 
@@ -102,6 +104,7 @@ struct module_command_receiver
 struct module_command_executor
 {
 	void (*init)();
+    void (*reset)();
 	void (*update_state)(struct command_context *command_context);
 };
 

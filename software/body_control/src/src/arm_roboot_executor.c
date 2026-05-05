@@ -26,10 +26,15 @@ void init_roboot_state(void)
     // change_angle(CHANNEL_UP, SERVO_TOP_MIDDLE_POSITION);
 }
 
+void reset_roboot_state(void)
+{
+
+}
+
 void update_roboot_state(struct command_context *command_context)
 {
     
 }
 
 
-const struct module_command_executor arm_roboot_executor = {init_roboot_state, update_roboot_state};
+const struct module_command_executor arm_roboot_executor = {init_roboot_state, reset_roboot_state, update_roboot_state};

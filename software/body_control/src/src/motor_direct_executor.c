@@ -23,7 +23,7 @@ enum gpio_position
 };
 
 // car sate to set to gpio: {LEFT_EN, LEFT_MV, LEFT_BK, RIGHT_EN, RIGHT_MV, RIGHT_BK}
-const char VEHICLE_STATE_LIST[12][8] = {
+const char VEHICLE_STATE_LIST[13][8] = {
     {0, 0, 0, 0, 0, 0, 0, 0}, // 0, init/stop
     {1, 0, 1, 0, 1, 0, 1, 0}, // 1, move, all move
     {0, 1, 0, 1, 0, 1, 0, 1}, // 2, back, all back
@@ -35,7 +35,8 @@ const char VEHICLE_STATE_LIST[12][8] = {
     {0, 0, 0, 1, 0, 1, 0, 0}, // 8, right_back
     {0, 0, 0, 0, 1, 0, 1, 0}, // 9, left_turn
     {1, 0, 1, 0, 0, 0, 0, 0}, // 10, right_turn
-    {1, 0, 1, 0, 0, 1, 0, 1}  // 11, turn over
+    {1, 0, 1, 0, 0, 1, 0, 1}, // 11, turn over from left to right
+    {0, 1, 0, 1, 0, 0, 1, 0}  // 12, turn over from right to left
 };
 
 enum vehicle_state current_car_status = STOP;
@@ -135,7 +136,6 @@ void put_test_commands()
     command_context.commands[0] = COMMAND_LEFT_BACK;
     send_to_queue(&command_context);
 
-
     command_context.commands[0] = COMMAND_RIGHT_BACK;
     send_to_queue(&command_context);
 
@@ -145,7 +145,10 @@ void put_test_commands()
     command_context.commands[0] = COMMAND_RIGHT_TURN;
     send_to_queue(&command_context);
 
-    command_context.commands[0] = COMMAND_TURN_OUT;
+    command_context.commands[0] = COMMAND_TURN_OUT_L;
+    send_to_queue(&command_context);
+
+    command_context.commands[0] = COMMAND_TURN_OUT_R;
     send_to_queue(&command_context);
 
     command_context.commands[0] = COMMAND_STOP;
@@ -193,6 +196,11 @@ void init_vehicle_state()
     IN8 = 0;
 }
 
+void reset_vehicle_state()
+{
+    exec_vehicle_state_update(STOP);
+}
+
 void update_vehicle_state(struct command_context *command_context)
 {
     uart_log_data(command_context->commands[0]);
@@ -232,11 +240,11 @@ void update_vehicle_state(struct command_context *command_context)
     case COMMAND_RIGHT_TURN:
         exec_vehicle_state_update(RIGHT_TURN);
         break;
-    case COMMAND_TURN_OUT:
-        exec_vehicle_state_update(TURN_OVER);
+    case COMMAND_TURN_OUT_L:
+        exec_vehicle_state_update(TURN_OVER_L);
         break;
-    case COMMAND_GO_BACK:
-        goback();
+    case COMMAND_TURN_OUT_R:
+        exec_vehicle_state_update(TURN_OVER_R);
         break;
     case COMMAND_TEST_VEHICLE:
         put_test_commands();
@@ -246,4 +254,4 @@ void update_vehicle_state(struct command_context *command_context)
     }
 }
 
-const struct module_command_executor motor_direct_executor = {init_vehicle_state, update_vehicle_state};
+const struct module_command_executor motor_direct_executor = {init_vehicle_state, reset_vehicle_state, update_vehicle_state};

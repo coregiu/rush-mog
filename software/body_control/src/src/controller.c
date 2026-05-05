@@ -22,14 +22,15 @@ const char command_module_map[COMMANDS_LENGTH][2] = {{COMMAND_STOP,          MOD
                                                       {COMMAND_RIGHT_BACK,   MODULE_MOTOR_DIRECT},
                                                       {COMMAND_LEFT_TURN,    MODULE_MOTOR_DIRECT},
                                                       {COMMAND_RIGHT_TURN,   MODULE_MOTOR_DIRECT},
-                                                      {COMMAND_GO_BACK,      MODULE_MOTOR_DIRECT},
-                                                      {COMMAND_TURN_OUT,     MODULE_MOTOR_DIRECT},
+                                                      {COMMAND_TURN_OUT_L,   MODULE_MOTOR_DIRECT},
+                                                      {COMMAND_TURN_OUT_R,   MODULE_MOTOR_DIRECT},
                                                       {COMMAND_TEST_VEHICLE, MODULE_MOTOR_DIRECT},
                                                       {COMMAND_FAST,         MODULE_MOTOR_PWM},
                                                       {COMMAND_SLOW,         MODULE_MOTOR_PWM},
                                                       {COMMAND_LEFT_MICRO,   MODULE_MOTOR_PWM},
                                                       {COMMAND_RIGHT_MICRO,  MODULE_MOTOR_PWM},
                                                       {COMMAND_DIRECT,       MODULE_MOTOR_PWM},
+                                                      {COMMAND_RESET,        MODULE_RESET},
                                                       {COMMAND_UNKNOWN,      MODULE_UNKNOWN}};
 
 static BaseType_t priority = 2;
@@ -94,8 +95,14 @@ void execute_command(struct command_context *command_context)
     case MODULE_MOTOR_PWM:
         motor_pwm_executor.update_state(command_context);
         break;
-    case MODULE_ARB_BOT:
+    case MODULE_ARM_BOT:
         arm_roboot_executor.update_state(command_context);
+        break;
+    case MODULE_RESET:
+        reset_command_queue();
+        motor_pwm_executor.reset();
+        motor_direct_executor.reset();
+        arm_roboot_executor.reset();
         break;
 
     default:

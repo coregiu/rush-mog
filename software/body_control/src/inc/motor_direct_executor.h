@@ -47,7 +47,8 @@ enum vehicle_state
     RIGHT_BACK  = 8,
     LEFT_TURN   = 9,
     RIGHT_TURN  = 10,
-    TURN_OVER   = 11
+    TURN_OVER_L = 11,
+    TURN_OVER_R = 12
 };
 
 extern const struct module_command_executor motor_direct_executor;

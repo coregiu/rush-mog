@@ -82,6 +82,15 @@ void init_tune_pwm_step()
     tune_pwm_step = DEFAULT_TUNE_PWM_STEP;
 }
 
+void reset_pwm_state()
+{
+    g_left_motor_run_state = DEFAULT_PWM_RATE;
+    g_right_motor_run_state = DEFAULT_PWM_RATE;
+    current_pwm = DEFAULT_PWM_RATE;
+    left_motor_set_pwm(g_left_motor_run_state * (1000 / g_motor_config.pwm_period_times));
+    right_motor_set_pwm(g_right_motor_run_state * (1000 / g_motor_config.pwm_period_times));
+}
+
 void update_pwm_state(struct command_context *command_context)
 {
     switch (command_context->commands[0])
@@ -131,4 +140,4 @@ void update_pwm_state(struct command_context *command_context)
     right_motor_set_pwm(g_right_motor_run_state * (1000 / g_motor_config.pwm_period_times));
 }
 
-const struct module_command_executor motor_pwm_executor = {init_tune_pwm_step, update_pwm_state};
+const struct module_command_executor motor_pwm_executor = {init_tune_pwm_step, reset_pwm_state, update_pwm_state};

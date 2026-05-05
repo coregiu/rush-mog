@@ -41,6 +41,20 @@ void exe_task_from_queue(void *argument)
     }
 }
 
+void reset_command_queue()
+{
+    if (command_queue == NULL)
+    {
+        uart_log_string_data("command queue is null");
+        return;
+    }
+    BaseType_t xStatus = xQueueReset(command_queue);
+    if (xStatus != pdPASS)
+    {
+        uart_log_string_data("failed to reset command queue");
+    }
+}
+
 void init_freertos()
 {
     command_queue = xQueueCreate(MAX_COMMAND_QUEUE_SIZE, sizeof(struct command_context));
