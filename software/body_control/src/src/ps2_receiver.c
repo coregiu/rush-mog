@@ -110,17 +110,20 @@ void USART3_IRQHandler(void)
             //     uart_log_data(uart3_receive_data[i]);
             // }
             // 定义一个目标数组（你可以放到全局）
-            struct command_context command_context = {uart3_receive_data, uart3_receive_data[0], uart3_data_position, MODULE_MOTOR_DIRECT, 0, DELAY_AFTER_EXE};
+            struct command_context command_context = {0};
+            command_context.commands[0] = uart3_receive_data[0];
+            command_context.cmd_length = 1;
+            command_context.module = MODULE_MOTOR_DIRECT;
+            command_context.time_sleep_milsec = 0;
+            command_context.delay_type = DELAY_AFTER_EXE;
 
             if (uart3_data_position > 2)
             {
-                uchar pwm_rate = convert_pwm_rate(uart3_receive_data[1]);
-                pwm_rate = pwm_rate <= STOP_PWM ? STOP_PWM : pwm_rate;
-                pwm_rate = pwm_rate >= MAX_PWM_RATE ? MAX_PWM_RATE : pwm_rate;
-                command_context.pwm_rate = pwm_rate;
+                command_context.commands[1] = uart3_receive_data[1];
+                command_context.cmd_length = 2;
             }
             
-            send_to_queue(&command_context);
+            send_to_queue_isr(&command_context);
             // execute_commands(uart3_receive_data, uart3_data_position, COMMAND_TYPE_AUTO);
             uart3_data_position = 0;
         }

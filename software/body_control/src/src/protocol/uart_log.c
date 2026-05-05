@@ -17,9 +17,9 @@
  */
 void uart_log_data(uint16_t log_data)
 {
-    USART_SendData(USART3, log_data);
-    while(USART_GetFlagStatus(USART3, USART_FLAG_TC) == 0);
-    USART_ClearFlag(USART3, USART_FLAG_TC);
+    // USART_SendData(USART3, log_data);
+    // while(USART_GetFlagStatus(USART3, USART_FLAG_TC) == 0);
+    // USART_ClearFlag(USART3, USART_FLAG_TC);
 }
 
 /**

@@ -109,41 +109,46 @@ void goback()
 
 void put_test_commands()
 {
-    uchar default_commands[] = "1";
-    struct command_context command_context = {default_commands, '0', 1, MODULE_MOTOR_DIRECT, 2000, DELAY_AFTER_EXE};
+    struct command_context command_context = {0};
+    command_context.commands[0] = COMMAND_RUN;
+    command_context.cmd_length = 1;
+    command_context.module = MODULE_MOTOR_DIRECT;
+    command_context.time_sleep_milsec = 1000;
+    command_context.delay_type = DELAY_AFTER_EXE;
     send_to_queue(&command_context);
-    default_commands[0] = '2';
-    command_context.commands = default_commands;
+
+    command_context.commands[0] = COMMAND_BACK;
     send_to_queue(&command_context);
-    default_commands[0] = '3';
-    command_context.commands = default_commands;
+
+    command_context.commands[0] = COMMAND_LEFT_RUN;
     send_to_queue(&command_context);
-    default_commands[0] = '4';
-    command_context.commands = default_commands;
+
+    command_context.commands[0] = COMMAND_RIGHT_RUN;
     send_to_queue(&command_context);
-    default_commands[0] = '5';
-    command_context.commands = default_commands;
+
+    command_context.commands[0] = COMMAND_LEFT_FRONT;
     send_to_queue(&command_context);
-    default_commands[0] = '6';
-    command_context.commands = default_commands;
+
+    command_context.commands[0] = COMMAND_RIGHT_FRONT;
     send_to_queue(&command_context);
-    default_commands[0] = '7';
-    command_context.commands = default_commands;
+
+    command_context.commands[0] = COMMAND_LEFT_BACK;
     send_to_queue(&command_context);
-    default_commands[0] = '8';
-    command_context.commands = default_commands;
+
+
+    command_context.commands[0] = COMMAND_RIGHT_BACK;
     send_to_queue(&command_context);
-    default_commands[0] = '9';
-    command_context.commands = default_commands;
+
+    command_context.commands[0] = COMMAND_LEFT_TURN;
     send_to_queue(&command_context);
-    default_commands[0] = 'A';
-    command_context.commands = default_commands;
+
+    command_context.commands[0] = COMMAND_RIGHT_TURN;
     send_to_queue(&command_context);
-    default_commands[0] = 'B';
-    command_context.commands = default_commands;
+
+    command_context.commands[0] = COMMAND_TURN_OUT;
     send_to_queue(&command_context);
-    default_commands[0] = '0';
-    command_context.commands = default_commands;
+
+    command_context.commands[0] = COMMAND_STOP;
     send_to_queue(&command_context);
 }
 
@@ -190,9 +195,9 @@ void init_vehicle_state()
 
 void update_vehicle_state(struct command_context *command_context)
 {
-    uart_log_data(command_context->exe_cmd);
+    uart_log_data(command_context->commands[0]);
     uart_log_enter_char();
-    switch (command_context->exe_cmd)
+    switch (command_context->commands[0])
     {
     case COMMAND_STOP:
         exec_vehicle_state_update(STOP);

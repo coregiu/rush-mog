@@ -93,9 +93,14 @@ void USART2_IRQHandler(void)
             // {
             //     uart_log_data(uart2_receive_data[i]);
             // }
-            struct command_context command_context = {uart2_receive_data, uart2_receive_data[0], uart2_data_position, MODULE_MOTOR_DIRECT, 0, DELAY_AFTER_EXE};
-            
-            send_to_queue(&command_context);
+            struct command_context command_context = {0};
+            command_context.commands[0] = uart2_receive_data[0];
+            command_context.cmd_length = 1;
+            command_context.module = MODULE_MOTOR_DIRECT;
+            command_context.time_sleep_milsec = 0;
+            command_context.delay_type = DELAY_AFTER_EXE;
+
+            send_to_queue_isr(&command_context);
             uart2_data_position = 0;
         }
 

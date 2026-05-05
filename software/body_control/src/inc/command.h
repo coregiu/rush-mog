@@ -28,7 +28,7 @@
 
 #define COMMANDS_LENGTH 24
 
-#define DEFAULT_BUFFER_SIZE 8
+#define DEFAULT_BUFFER_SIZE 4
 
 #define DEFAULT_BOUND_RATE 9600
 
@@ -83,8 +83,7 @@ enum module_def
 // 放入队列的元素。一个是命令，一个是命令执行后挂起时长。
 struct command_context
 {
-    uchar *commands; // 原始命令
-    uchar exe_cmd;
+    uchar commands[DEFAULT_BUFFER_SIZE]; // 原始命令
     uchar cmd_length;
     enum module_def module;
     uint16_t time_sleep_milsec;
@@ -116,5 +115,7 @@ uint convert_command_seq(char command);
 uint convert_pwm_rate(char pwm_rate);
 
 void send_to_queue(struct command_context *command);
+
+void send_to_queue_isr(struct command_context *command);
 
 #endif

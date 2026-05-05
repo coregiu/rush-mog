@@ -66,22 +66,22 @@ void init_modules()
 void execute_command(struct command_context *command_context)
 {
     LED = ~LED;
-    command_context->exe_cmd = command_context->commands[0];
-    uart_log_data(command_context->exe_cmd);
+    uchar exe_cmd = command_context->commands[0];
+    uart_log_string_data("receive command: ");
+    uart_log_data(exe_cmd);
 
-    uint cmd_seq = convert_command_seq(command_context->exe_cmd);
+    uint cmd_seq = convert_command_seq(exe_cmd);
     if (cmd_seq < 0 || cmd_seq > COMMANDS_LENGTH)
     {
         return;
     }
     
     command_context->module = command_module_map[cmd_seq][1];
-    uart_log_data(command_context->module);
 
     switch (command_context->module)
     {
     case MODULE_MOTOR_DIRECT:
-        if (command_context->cmd_length > 2)
+        if (command_context->cmd_length >= 2)
         {
             uchar pwm_rate = convert_pwm_rate(command_context->commands[1]);
             pwm_rate = pwm_rate <= STOP_PWM ? STOP_PWM : pwm_rate;
@@ -105,7 +105,7 @@ void execute_command(struct command_context *command_context)
 
 }
 
-void send_to_queue(struct command_context *command)
+void send_to_queue_isr(struct command_context *command)
 {
     if (command_queue == NULL)
     {
@@ -115,6 +115,22 @@ void send_to_queue(struct command_context *command)
     // BaseType_t xStatus = xQueueSend(command_queue, command, pdMS_TO_TICKS(100));
     // BaseType_t xStatus = xQueueSendFromISR(command_queue, &(command->command), xTicksToWait);
     BaseType_t xStatus = xQueueSendFromISR(command_queue, command, pxHigherPriorityTaskWoken);
+    if (xStatus != pdPASS)
+    {
+        uart_log_start_info("failed to send data"); //如果发送数据失败在这里进行错误处理
+    }
+}
+
+void send_to_queue(struct command_context *command)
+{
+    if (command_queue == NULL)
+    {
+        uart_log_string_data("command queue is null");
+        return;
+    }
+    // BaseType_t xStatus = xQueueSend(command_queue, command, pdMS_TO_TICKS(100));
+    // BaseType_t xStatus = xQueueSendFromISR(command_queue, &(command->command), xTicksToWait);
+    BaseType_t xStatus = xQueueSend(command_queue, command, pdMS_TO_TICKS(100));
     if (xStatus != pdPASS)
     {
         uart_log_start_info("failed to send data"); //如果发送数据失败在这里进行错误处理
