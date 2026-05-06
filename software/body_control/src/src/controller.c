@@ -112,6 +112,20 @@ void execute_command(struct command_context *command_context)
 
 }
 
+void reset_command_queue()
+{
+    if (command_queue == NULL)
+    {
+        uart_log_string_data("command queue is null");
+        return;
+    }
+    BaseType_t xStatus = xQueueReset(command_queue);
+    if (xStatus != pdPASS)
+    {
+        uart_log_string_data("failed to reset command queue");
+    }
+}
+
 void send_to_queue_isr(struct command_context *command)
 {
     if (command_queue == NULL)
@@ -138,6 +152,21 @@ void send_to_queue(struct command_context *command)
     // BaseType_t xStatus = xQueueSend(command_queue, command, pdMS_TO_TICKS(100));
     // BaseType_t xStatus = xQueueSendFromISR(command_queue, &(command->command), xTicksToWait);
     BaseType_t xStatus = xQueueSend(command_queue, command, pdMS_TO_TICKS(100));
+    if (xStatus != pdPASS)
+    {
+        uart_log_start_info("failed to send data"); //如果发送数据失败在这里进行错误处理
+    }
+}
+
+void send_to_queue_front_isr(struct command_context *command)
+{
+    if (command_queue == NULL)
+    {
+        uart_log_string_data("command queue is null");
+        return;
+    }
+
+    BaseType_t xStatus = xQueueSendToFrontFromISR(command_queue, command, pxHigherPriorityTaskWoken);
     if (xStatus != pdPASS)
     {
         uart_log_start_info("failed to send data"); //如果发送数据失败在这里进行错误处理

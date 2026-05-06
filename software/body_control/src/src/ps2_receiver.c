@@ -104,11 +104,6 @@ void USART3_IRQHandler(void)
         /* Check if the previous byte was a newline */
         if (uart3_receive_data[uart3_data_position - 1] == '\n' || uart3_receive_data[uart3_data_position - 1] == '\r')
         {
-            /* Send the line back */
-            // for (uint i = 0; i < uart3_data_position; i++)
-            // {
-            //     uart_log_data(uart3_receive_data[i]);
-            // }
             // 定义一个目标数组（你可以放到全局）
             struct command_context command_context = {0};
             command_context.commands[0] = uart3_receive_data[0];
@@ -122,8 +117,15 @@ void USART3_IRQHandler(void)
                 command_context.commands[1] = uart3_receive_data[1];
                 command_context.cmd_length = 2;
             }
+
             
-            send_to_queue_isr(&command_context);
+            if (command_context.commands[0] != COMMAND_RESET)
+            {
+                send_to_queue_isr(&command_context);
+            } else {
+                send_to_queue_front_isr(&command_context);
+            }
+            
             // execute_commands(uart3_receive_data, uart3_data_position, COMMAND_TYPE_AUTO);
             uart3_data_position = 0;
         }

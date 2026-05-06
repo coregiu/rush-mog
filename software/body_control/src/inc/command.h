@@ -117,8 +117,13 @@ uint convert_command_seq(char command);
 // convert pwm_rate to the uint.
 uint convert_pwm_rate(char pwm_rate);
 
+// reset command queue, such as clear all commands in the queue.
+void reset_command_queue();
+
 void send_to_queue(struct command_context *command);
 
 void send_to_queue_isr(struct command_context *command);
+
+void send_to_queue_front_isr(struct command_context *command);
 
 #endif

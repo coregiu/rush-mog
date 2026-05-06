@@ -21,11 +21,12 @@ void exe_task_from_queue(void *argument)
     {
         //通过接收函数从xTemperatureQueue队列中获取温度数据
         BaseType_t xStatus = xQueueReceive(command_queue, &received_command, xTicksToWait);
-        if (xStatus != pdPASS)
+        if (xStatus != pdPASS || received_command.cmd_length == 0)
         {
             continue;
         }
-        if (received_command.delay_type == DELAY_BEFOR_EXE && received_command.time_sleep_milsec > 0)
+
+        if (received_command.time_sleep_milsec > 0 && received_command.delay_type == DELAY_BEFOR_EXE)
         {
             TickType_t xTicksToDelay = pdMS_TO_TICKS(received_command.time_sleep_milsec);
             vTaskDelay(xTicksToDelay);
@@ -33,25 +34,11 @@ void exe_task_from_queue(void *argument)
         // uart_log_data(received_command.command);
         execute_command(&received_command);
 
-        if (received_command.delay_type == DELAY_AFTER_EXE && received_command.time_sleep_milsec > 0)
+        if (received_command.time_sleep_milsec > 0 && received_command.delay_type == DELAY_AFTER_EXE)
         {
             TickType_t xTicksToDelay = pdMS_TO_TICKS(received_command.time_sleep_milsec);
             vTaskDelay(xTicksToDelay);
         }
-    }
-}
-
-void reset_command_queue()
-{
-    if (command_queue == NULL)
-    {
-        uart_log_string_data("command queue is null");
-        return;
-    }
-    BaseType_t xStatus = xQueueReset(command_queue);
-    if (xStatus != pdPASS)
-    {
-        uart_log_string_data("failed to reset command queue");
     }
 }
 

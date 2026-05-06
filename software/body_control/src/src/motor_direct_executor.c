@@ -36,7 +36,7 @@ const char VEHICLE_STATE_LIST[13][8] = {
     {0, 0, 0, 0, 1, 0, 1, 0}, // 9, left_turn
     {1, 0, 1, 0, 0, 0, 0, 0}, // 10, right_turn
     {1, 0, 1, 0, 0, 1, 0, 1}, // 11, turn over from left to right
-    {0, 1, 0, 1, 0, 0, 1, 0}  // 12, turn over from right to left
+    {0, 1, 0, 1, 1, 0, 1, 0}  // 12, turn over from right to left
 };
 
 enum vehicle_state current_car_status = STOP;
