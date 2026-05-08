@@ -1,8 +1,8 @@
 #ifndef WEB_H
 #define WEB_H
 
-#include <ESP8266WiFi.h>
-#include <ESP8266WebServer.h>
+#include <WiFi.h>
+#include <WebServer.h>
 #include <LittleFS.h>
 #include "serial.h"
 
@@ -13,7 +13,7 @@ extern IPAddress local_IP; // 本地IP
 extern IPAddress gateway;  // 网关
 extern IPAddress subnet; // 子网掩码
 
-extern ESP8266WebServer server; 
+extern WebServer server; 
 
 bool initFS();
 void handleWebRequest();

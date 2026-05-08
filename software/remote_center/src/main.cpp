@@ -1,4 +1,5 @@
-#include <web.h>
+#include "web.h"
+#include "camera.h"
 
 void setup()
 {
@@ -8,6 +9,7 @@ void setup()
 
   // 挂载文件系统
   initFS();
+  initCamera();
 
   // ======================
   // 开启 WiFi 热点 (AP 模式)

@@ -4,7 +4,7 @@ IPAddress local_IP(192, 168, 4, 1); // 本地IP
 IPAddress gateway(192, 168, 4, 1);  // 网关
 IPAddress subnet(255, 255, 255, 0); // 子网掩码
 
-ESP8266WebServer server(80);
+WebServer server(80);
 
 // 初始化 LittleFS
 bool initFS()

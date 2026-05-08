@@ -1,7 +1,7 @@
 #ifndef SERIAL_H
 #define SERIAL_H
 
-#include <SoftwareSerial.h>
+#include <HardwareSerial.h>
 
 void initSoftwareSerial();
 void sendCommands(String command);
