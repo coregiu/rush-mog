@@ -102,8 +102,8 @@
                     <div class="flex items-center gap-6">
                         <!-- 左侧：SELECT 竖放 -->
                         <div class="vertical-button items-center">
-                            <div id="select" class="w-4 h-10 bg-ps2black rounded-full items-center transition-all duration-100 active:scale-90">
-                                <span class="text-white items-center">⏹</span>
+                            <div id="select" class="w-4 h-10 bg-ps2black rounded-full flex items-center justify-center transition-all duration-100 active:scale-90">
+                                <span class="text-white">⏹</span>
                             </div>
                         </div>
 
@@ -114,22 +114,22 @@
 
                         <!-- 右侧：START 竖放 -->
                         <div class="vertical-button items-center">
-                            <div id="start" class="w-4 h-10 bg-ps2black rounded-full items-center transition-all duration-100 active:scale-90">
-                                <span class="text-white items-center">▶</span>
+                            <div id="start" class="w-4 h-10 bg-ps2black rounded-full flex items-center justify-center transition-all duration-100 active:scale-90">
+                                <span class="text-white">▶</span>
                             </div>
                         </div>
                     </div>
 
-                    <!-- 摄像头画面 320×240 -->
+                    <!-- 摄像头画面 320×240  src="https://picsum.photos/320/240"  -->
                     <div class="mt-2 border-4 border-ps2black rounded-lg bg-black overflow-hidden">
                         <img 
                             id="camera" 
-                            src="https://picsum.photos/320/240" 
+                            src="unimog.jpeg" 
                             alt="Camera" 
                             width="320" 
                             height="240"
                             class="object-cover"
-                        >
+                        />
                     </div>
                 </div>
                 
@@ -161,24 +161,23 @@
                 </div>
             </div>
             
-            <!-- 🔥 最终底部：状态栏全屏宽 + L1/L2 R1/R2 等高固定 -->
-            <div class="mt-4 flex items-stretch w-full gap-1">
-                <!-- 左侧 L1 / L2：高度与状态栏完全一致 -->
-                <div class="flex flex-col h-[88px]">
-                    <div id="l1" class="h-1/2 w-16 bg-ps2black rounded-md flex items-center justify-center text-white font-bold transition-all duration-100 active:scale-95">L1</div>
-                    <div id="l2" class="h-1/2 w-16 bg-ps2dark rounded-md flex items-center justify-center text-white font-bold mt-0.5 transition-all duration-100 active:scale-95">L2</div>
+            <!-- 🔥 固定宽度底部：永远不伸缩、不抖动 -->
+            <div class="mt-4 flex items-stretch" style="width: 768px; gap: 4px;">
+                <!-- 左侧 L1 / L2 固定宽度 -->
+                <div class="flex flex-col h-[88px] w-[64px]">
+                    <div id="l1" class="h-1/2 bg-ps2black rounded-md flex items-center justify-center text-white font-bold transition-all duration-100 active:scale-95">L1</div>
+                    <div id="l2" class="h-1/2 bg-ps2dark rounded-md flex items-center justify-center text-white font-bold mt-0.5 transition-all duration-100 active:scale-95">L2</div>
                 </div>
 
-                <!-- 中间：状态栏 100% 宽度 -->
-
-                <div id="status" class="bg-ps2black text-white p-3 rounded-md flex-1 h-[88px] grid grid-cols-1 md:grid-cols-4 gap-1">
+                <!-- 中间：状态栏 固定宽度 -->
+                <div id="status" class="bg-ps2black text-white p-3 rounded-md h-[88px] w-[584px] grid grid-cols-1 md:grid-cols-4 gap-1 overflow-hidden">
                     <div class="bg-gray-800 p-2 rounded">No input detected</div>
                 </div>
 
-                <!-- 右侧 R1 / R2：高度与状态栏完全一致 -->
-                <div class="flex flex-col h-[88px]">
-                    <div id="r1" class="h-1/2 w-16 bg-ps2black rounded-md flex items-center justify-center text-white font-bold transition-all duration-100 active:scale-95">R1</div>
-                    <div id="r2" class="h-1/2 w-16 bg-ps2dark rounded-md flex items-center justify-center text-white font-bold mt-0.5 transition-all duration-100 active:scale-95">R2</div>
+                <!-- 右侧 R1 / R2 固定宽度 -->
+                <div class="flex flex-col h-[88px] w-[64px]">
+                    <div id="r1" class="h-1/2 bg-ps2black rounded-md flex items-center justify-center text-white font-bold transition-all duration-100 active:scale-95">R1</div>
+                    <div id="r2" class="h-1/2 bg-ps2dark rounded-md flex items-center justify-center text-white font-bold mt-0.5 transition-all duration-100 active:scale-95">R2</div>
                 </div>
             </div>
         </div>
