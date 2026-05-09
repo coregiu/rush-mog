@@ -124,15 +124,20 @@
                     </div>
 
                     <!-- 摄像头画面 自适应缩小 -->
-                    <div class="mt-2 border-2 md:border-4 border-ps2black rounded-lg bg-black overflow-hidden">
+                    <div class="mt-2 border-2 md:border-4 border-ps2black rounded-lg bg-black overflow-hidden relative">
                         <img 
                             id="camera" 
                             src="unimog.jpeg" 
-                            alt="Camera" 
+                            alt="Camera Stream" 
                             width="320" 
                             height="240"
                             class="object-cover"
                         />
+                        <!-- 摄像头状态指示器 -->
+                        <div id="camera-status" class="absolute top-1 right-1 flex items-center gap-1 bg-black bg-opacity-50 px-2 py-0.5 rounded text-xs text-white">
+                            <span id="camera-status-dot" class="w-2 h-2 rounded-full bg-yellow-500"></span>
+                            <span id="camera-status-text">Loading...</span>
+                        </div>
                     </div>
                 </div>
                 
@@ -297,6 +302,68 @@
         
         setupAnalogStick('left-analog','left-analog-dot');
         setupAnalogStick('right-analog','right-analog-dot');
+
+        // 摄像头流管理
+        const cameraImg = document.getElementById('camera');
+        const statusDot = document.getElementById('camera-status-dot');
+        const statusText = document.getElementById('camera-status-text');
+        const defaultImage = 'unimog.jpeg';
+        const streamUrl = '/stream';
+        let isStreaming = false;
+        let retryCount = 0;
+        const maxRetries = 3;
+
+        // 尝试连接摄像头流
+        function startCameraStream() {
+            statusDot.className = 'w-2 h-2 rounded-full bg-yellow-500';
+            statusText.textContent = 'Connecting...';
+            
+            // 创建一个隐藏的 Image 对象来测试流是否可用
+            const testImg = new Image();
+            testImg.onload = function() {
+                isStreaming = true;
+                statusDot.className = 'w-2 h-2 rounded-full bg-green-500';
+                statusText.textContent = 'Live';
+                cameraImg.src = streamUrl;
+            };
+            testImg.onerror = function() {
+                retryCount++;
+                if (retryCount < maxRetries) {
+                    statusText.textContent = `Retrying... (${retryCount}/${maxRetries})`;
+                    setTimeout(startCameraStream, 2000);
+                } else {
+                    showDefaultImage('Camera unavailable');
+                }
+            };
+            testImg.src = streamUrl + '?t=' + Date.now();
+        }
+
+        // 显示默认图片
+        function showDefaultImage(message) {
+            isStreaming = false;
+            cameraImg.src = defaultImage;
+            statusDot.className = 'w-2 h-2 rounded-full bg-gray-500';
+            statusText.textContent = message || 'Default';
+        }
+
+        // 监听图片加载错误
+        cameraImg.onerror = function() {
+            if (isStreaming) {
+                showDefaultImage('Stream lost');
+                // 尝试重新连接
+                setTimeout(() => {
+                    retryCount = 0;
+                    startCameraStream();
+                }, 5000);
+            } else {
+                showDefaultImage('Image error');
+            }
+        };
+
+        // 页面加载完成后启动摄像头流
+        window.addEventListener('load', function() {
+            startCameraStream();
+        });
     </script>
 </body>
 </html>

@@ -19,5 +19,6 @@ bool initFS();
 void handleWebRequest();
 void handleCmdButton();
 void handleCmdStick();
+void handleCameraStream();
 
 #endif // WEB_H

@@ -1,4 +1,5 @@
 #include "web.h"
+#include "camera.h"
 
 IPAddress local_IP(192, 168, 4, 1); // 本地IP
 IPAddress gateway(192, 168, 4, 1);  // 网关
@@ -141,4 +142,61 @@ void handleCmdStick() {
   sendCommands(command);
   // Serial.println(stickId + " - Direct: " + direct + ", Step Value: " + stepValue); 
   server.send(200);
+}
+
+// 摄像头流处理 - MJPEG 流
+void handleCameraStream() {
+  WiFiClient client = server.client();
+  if (!client) {
+    server.send(500, "text/plain", "Failed to get client");
+    return;
+  }
+
+  // 发送 MJPEG 流响应头
+  String response = "HTTP/1.1 200 OK\r\n";
+  response += "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n";
+  response += "Cache-Control: no-cache\r\n";
+  response += "Connection: close\r\n\r\n";
+  
+  client.print(response);
+
+  unsigned long lastFrameTime = 0;
+  const unsigned long frameInterval = 100; // 10FPS，可根据需要调整
+
+  while (client.connected()) {
+    unsigned long currentTime = millis();
+    if (currentTime - lastFrameTime < frameInterval) {
+      delay(10);
+      continue;
+    }
+    lastFrameTime = currentTime;
+
+    // 获取摄像头帧
+    camera_fb_t *fb = esp_camera_fb_get();
+    if (!fb) {
+      Serial.println("Failed to get camera frame");
+      delay(100);
+      continue;
+    }
+
+    // 发送 JPEG 帧
+    client.print("-----frame\r\n");
+    client.print("Content-Type: image/jpeg\r\n");
+    client.printf("Content-Length: %zu\r\n", fb->len);
+    client.print("\r\n");
+    
+    // 发送图像数据
+    size_t sent = client.write(fb->buf, fb->len);
+    if (sent != fb->len) {
+      Serial.printf("Failed to send frame: sent %zu of %zu\n", sent, fb->len);
+    }
+    
+    client.print("\r\n");
+
+    // 释放帧缓冲
+    esp_camera_fb_return(fb);
+    
+    // 短暂延迟，避免发送过快
+    delay(10);
+  }
 }
