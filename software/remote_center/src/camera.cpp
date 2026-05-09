@@ -17,14 +17,14 @@ void initCamera() {
   config.pin_d6 = Y8_GPIO_NUM;
   config.pin_d7 = Y9_GPIO_NUM;
 
-  config.pin_xclk    = XCLK_GPIO_NUM;
-  config.pin_pclk   = PCLK_GPIO_NUM;
-  config.pin_vsync  = VSYNC_GPIO_NUM;
-  config.pin_href   = HREF_GPIO_NUM;
+  config.pin_xclk     = XCLK_GPIO_NUM;
+  config.pin_pclk     = PCLK_GPIO_NUM;
+  config.pin_vsync    = VSYNC_GPIO_NUM;
+  config.pin_href     = HREF_GPIO_NUM;
   config.pin_sccb_sda = SIOD_GPIO_NUM;
   config.pin_sccb_scl = SIOC_GPIO_NUM;
-  config.pin_pwdn   = PWDN_GPIO_NUM;
-  config.pin_reset  = RESET_GPIO_NUM;
+  config.pin_pwdn     = PWDN_GPIO_NUM;
+  config.pin_reset    = RESET_GPIO_NUM;
 
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;

@@ -46,7 +46,9 @@
             .action-button {
                 @apply w-14 h-14 rounded-full flex items-center justify-center text-white font-bold text-lg transition-all duration-100 active:scale-90 shadow-lg;
             }
-
+            .vertical-button {
+                @apply flex flex-col items-center gap-1;
+            }
             * {
                 -webkit-user-select: none;
                 -moz-user-select: none;
@@ -57,34 +59,36 @@
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen flex items-center justify-center p-4" onselectstart="return false">
-    <div class="max-w-3xl mx-auto w-full">
-        <div class="bg-ps2gray rounded-3xl p-6 shadow-2xl border-8 border-ps2black relative overflow-hidden">
+    <div class="max-w-4xl mx-auto">
+        <!-- Controller Container -->
+        <div class="bg-ps2gray rounded-3xl p-8 shadow-2xl border-8 border-ps2black relative overflow-hidden">
+            <!-- Controller Body Details -->
             <div class="absolute top-0 left-0 w-full h-4 bg-ps2black opacity-30"></div>
             <div class="absolute bottom-0 left-0 w-full h-4 bg-ps2black opacity-30"></div>
             
-            <!-- 顶部 RUSH-MOG -->
-            
-
-            <div class="flex flex-col md:flex-row gap-5 items-start">
-                <!-- 左侧 -->
+            <!-- Controller Layout -->
+            <div class="flex flex-col md:flex-row gap-12 items-center">
+                <!-- Left Side: D-pad and Left Analog -->
                 <div class="flex flex-col items-center gap-1 w-full md:w-1/3">
+                    <!-- D-pad -->
                     <div class="d-pad">
                         <div id="up" class="d-pad-button w-10 h-16 top-0 left-1/2 transform -translate-x-1/2">
-                            <span class="text-white font-bold text-2xl">↑</span>
+                            <span class="text-white font-bold text-2xl tracking-wider">↑</span>
                         </div>
                         <div id="down" class="d-pad-button w-10 h-16 bottom-0 left-1/2 transform -translate-x-1/2">
-                            <span class="text-white font-bold text-2xl">↓</span>
+                            <span class="text-white font-bold text-2xl tracking-wider">↓</span>
                         </div>
                         <div id="left" class="d-pad-button w-16 h-10 top-1/2 left-0 transform -translate-y-1/2">
-                            <span class="text-white font-bold text-2xl">←</span>
+                            <span class="text-white font-bold text-2xl tracking-wider">←</span>
                         </div>
                         <div id="right" class="d-pad-button w-16 h-10 top-1/2 right-0 transform -translate-y-1/2">
-                            <span class="text-white font-bold text-2xl">→</span>
+                            <span class="text-white font-bold text-2xl tracking-wider">→</span>
                         </div>
                         <div class="absolute w-16 h-16 bg-ps2black rounded-full top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-10"></div>
                     </div>
                     
-                    <div class="flex flex-col items-center mt-2">
+                    <!-- Left Analog Stick -->
+                    <div class="flex flex-col items-center">
                         <span class="text-ps2black font-bold mb-2">L3</span>
                         <div id="left-analog" class="analog-stick">
                             <div id="left-analog-dot" class="analog-dot"></div>
@@ -92,35 +96,63 @@
                     </div>
                 </div>
                 
-                <!-- 中间：最大流区域 + 按键 -->
-                <div class="flex flex-col items-center gap-2 w-full md:w-1/3 flex-1 h-full">
-                    <div class="w-full h-14 bg-ps2black rounded-lg flex items-center justify-center mb-3">
-                        <span class="text-white font-bold text-3xl tracking-widest">RUSH-MOG</span>
-                    </div>
-                    <!-- L1 L2 R2 R1 同一行 -->
-                    <div class="flex gap-2 items-center w-full justify-center">
-                        <div id="l1" class="w-16 h-7 bg-ps2black rounded-full flex items-center justify-center text-white font-bold transition-all active:scale-90">L1</div>
-                        <div id="l2" class="w-16 h-7 bg-ps2dark rounded-full flex items-center justify-center text-white font-bold transition-all active:scale-90">L2</div>
-                        <div id="r2" class="w-16 h-7 bg-ps2dark rounded-full flex items-center justify-center text-white font-bold transition-all active:scale-90">R2</div>
-                        <div id="r1" class="w-16 h-7 bg-ps2black rounded-full flex items-center justify-center text-white font-bold transition-all active:scale-90">R1</div>
+                <!-- Middle: Start, Select, Logo, Camera -->
+                <div class="flex flex-col items-center gap-3 w-full md:w-1/3">
+                    <!-- 顶部：SELECT + LOGO + START 竖排 -->
+                    <div class="flex items-center gap-6">
+                        <!-- 左侧：SELECT 竖放 -->
+                        <div class="vertical-button items-center">
+                            <div id="select" class="w-4 h-10 bg-ps2black rounded-full items-center transition-all duration-100 active:scale-90">
+                                <span class="text-white items-center">⏹</span>
+                            </div>
+                        </div>
+
+                        <!-- 中间：LOGO -->
+                        <div class="w-48 h-12 bg-ps2black rounded-lg flex items-center justify-center">
+                            <span class="text-white font-bold text-2xl tracking-wider">RUSH-MOG</span>
+                        </div>
+
+                        <!-- 右侧：START 竖放 -->
+                        <div class="vertical-button items-center">
+                            <div id="start" class="w-4 h-10 bg-ps2black rounded-full items-center transition-all duration-100 active:scale-90">
+                                <span class="text-white items-center">▶</span>
+                            </div>
+                        </div>
                     </div>
 
-                    <!-- 摄像头流 → 放到最大 -->
-                    <div class="w-full flex-1 min-h-[170px] bg-black rounded-lg mt-2 border-2 border-ps2black">
-                        <img id="stream" src="/stream" class="w-full h-full object-cover rounded-lg" alt="Camera Stream">
+                    <!-- 摄像头画面 320×240 -->
+                    <div class="mt-2 border-4 border-ps2black rounded-lg bg-black overflow-hidden">
+                        <img 
+                            id="camera" 
+                            src="https://picsum.photos/320/240" 
+                            alt="Camera" 
+                            width="320" 
+                            height="240"
+                            class="object-cover"
+                        >
                     </div>
                 </div>
                 
-                <!-- 右侧 -->
+                <!-- Right Side: Action Buttons and Right Analog -->
                 <div class="flex flex-col items-center gap-6 w-full md:w-1/3">
+                    <!-- Action Buttons -->
                     <div class="relative w-36 h-36">
-                        <div id="triangle" class="action-button bg-ps2blue absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-1/8">△</div>
-                        <div id="circle" class="action-button bg-ps2red absolute right-0 top-1/2 transform -translate-y-1/2 translate-x-1/4">○</div>
-                        <div id="cross" class="action-button bg-ps2green absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-1/4">×</div>
-                        <div id="square" class="action-button bg-ps2yellow absolute left-0 top-1/2 transform -translate-y-1/2 -translate-x-1/4">□</div>
+                        <div id="triangle" class="action-button bg-ps2blue absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-1/4">
+                            △
+                        </div>
+                        <div id="circle" class="action-button bg-ps2red absolute right-0 top-1/2 transform -translate-y-1/2 translate-x-1/4">
+                            ○
+                        </div>
+                        <div id="cross" class="action-button bg-ps2green absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-1/4">
+                            ×
+                        </div>
+                        <div id="square" class="action-button bg-ps2yellow absolute left-0 top-1/2 transform -translate-y-1/2 -translate-x-1/4">
+                            □
+                        </div>
                     </div>
                     
-                    <div class="flex flex-col items-center mt-2">
+                    <!-- Right Analog Stick -->
+                    <div class="flex flex-col items-center">
                         <span class="text-ps2black font-bold mb-1">R3</span>
                         <div id="right-analog" class="analog-stick">
                             <div id="right-analog-dot" class="analog-dot"></div>
@@ -129,13 +161,27 @@
                 </div>
             </div>
             
-            <div class="mt-3 bg-ps2black text-white p-3 rounded-lg text-sm">
-                <div id="status" class="grid grid-cols-1 md:grid-cols-4 gap-1">
+            <!-- 🔥 最终底部：状态栏全屏宽 + L1/L2 R1/R2 等高固定 -->
+            <div class="mt-4 flex items-stretch w-full gap-1">
+                <!-- 左侧 L1 / L2：高度与状态栏完全一致 -->
+                <div class="flex flex-col h-[88px]">
+                    <div id="l1" class="h-1/2 w-16 bg-ps2black rounded-md flex items-center justify-center text-white font-bold transition-all duration-100 active:scale-95">L1</div>
+                    <div id="l2" class="h-1/2 w-16 bg-ps2dark rounded-md flex items-center justify-center text-white font-bold mt-0.5 transition-all duration-100 active:scale-95">L2</div>
+                </div>
+
+                <!-- 中间：状态栏 100% 宽度 -->
+
+                <div id="status" class="bg-ps2black text-white p-3 rounded-md flex-1 h-[88px] grid grid-cols-1 md:grid-cols-4 gap-1">
                     <div class="bg-gray-800 p-2 rounded">No input detected</div>
+                </div>
+
+                <!-- 右侧 R1 / R2：高度与状态栏完全一致 -->
+                <div class="flex flex-col h-[88px]">
+                    <div id="r1" class="h-1/2 w-16 bg-ps2black rounded-md flex items-center justify-center text-white font-bold transition-all duration-100 active:scale-95">R1</div>
+                    <div id="r2" class="h-1/2 w-16 bg-ps2dark rounded-md flex items-center justify-center text-white font-bold mt-0.5 transition-all duration-100 active:scale-95">R2</div>
                 </div>
             </div>
         </div>
-    </div>
 
     <script>
         // Track button presses and update status
@@ -144,186 +190,110 @@
         let statusEntries = [];
         
         function updateStatus(button) {
-            // Add new status entry
-            const now = new Date();
-            const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
             statusEntries.unshift(`${button}`);
-            
-            // Keep only max entries
             if (statusEntries.length > maxStatusEntries) {
                 statusEntries = statusEntries.slice(0, maxStatusEntries);
             }
-            
-            // Update display
             statusElement.innerHTML = '';
             statusEntries.forEach(entry => {
-                const entryElement = document.createElement('div');
-                entryElement.className = 'bg-gray-800 p-2 rounded';
-                entryElement.textContent = entry;
-                statusElement.appendChild(entryElement);
+                const el = document.createElement('div');
+                el.className = 'bg-gray-800 p-2 rounded';
+                el.textContent = entry;
+                statusElement.appendChild(el);
             });
         }
         
-        // Handle button presses
-        const buttons = ['up', 'down', 'left', 'right', 'triangle', 'circle', 'cross', 'square', 'select', 'start', 'l1', 'r1', 'l2', 'r2'];
-        
+        // Handle all buttons
+        const buttons = ['up','down','left','right','triangle','circle','cross','square','select','start','l1','r1','l2','r2'];
         buttons.forEach(buttonId => {
-            const button = document.getElementById(buttonId);
-            if (button) {
-                // Mouse events
-                button.addEventListener('mousedown', () => {
-                    button.classList.add('button-press');
-                    updateStatus(buttonId.toUpperCase() + "-down");
-                    fetch(`/cmd-button?key=${buttonId}&type=down`); // 👈 发送按下事件到服务器
-                });
-                
-                button.addEventListener('mouseup', () => {
-                    button.classList.remove('button-press');
-                    updateStatus(buttonId.toUpperCase() + "-up");
-                    fetch(`/cmd-button?key=${buttonId}&type=up`); // 👈 发送松开事件到服务器
-                });
-                
-                button.addEventListener('mouseleave', () => {
-                    button.classList.remove('button-press');
-                });
-                
-                // Touch events for mobile
-                button.addEventListener('touchstart', (e) => {
-                    e.preventDefault();
-                    button.classList.add('button-press');
-                    updateStatus(buttonId.toUpperCase() + "-down");
-                    fetch(`/cmd-button?key=${buttonId}&type=down`); // 👈 发送按下事件到服务器
-                });
-                
-                button.addEventListener('touchend', (e) => {
-                    e.preventDefault();
-                    button.classList.remove('button-press');
-                    updateStatus(buttonId.toUpperCase() + "-up");
-                    fetch(`/cmd-button?key=${buttonId}&type=up`); // 👈 发送松开事件到服务器
-                });
-            }
+            const btn = document.getElementById(buttonId);
+            if(!btn) return;
+            
+            btn.addEventListener('mousedown', () => {
+                btn.classList.add('button-press');
+                updateStatus(buttonId.toUpperCase()+"-down");
+                fetch(`/cmd-button?key=${buttonId}&type=down`);
+            });
+            btn.addEventListener('mouseup', () => {
+                btn.classList.remove('button-press');
+                updateStatus(buttonId.toUpperCase()+"-up");
+                fetch(`/cmd-button?key=${buttonId}&type=up`);
+            });
+            btn.addEventListener('mouseleave', () => btn.classList.remove('button-press'));
+            
+            btn.addEventListener('touchstart', e => {
+                e.preventDefault();
+                btn.classList.add('button-press');
+                updateStatus(buttonId.toUpperCase()+"-down");
+                fetch(`/cmd-button?key=${buttonId}&type=down`);
+            });
+            btn.addEventListener('touchend', e => {
+                e.preventDefault();
+                btn.classList.remove('button-press');
+                updateStatus(buttonId.toUpperCase()+"-up");
+                fetch(`/cmd-button?key=${buttonId}&type=up`);
+            });
         });
         
-        // Handle analog sticks
+        // Analog Sticks
         function setupAnalogStick(stickId, dotId) {
             const stick = document.getElementById(stickId);
             const dot = document.getElementById(dotId);
             let isDragging = false;
-            
-            // Get stick boundaries
             const stickRect = stick.getBoundingClientRect();
-            const stickCenterX = stickRect.width / 2;
-            const stickCenterY = stickRect.height / 2;
-            const maxDistance = (stickRect.width / 2) - 10; // Keep within stick
+            const centerX = stickRect.width/2, centerY = stickRect.height/2;
+            const maxDist = centerX - 10;
+            let throttle = false;
             
-            // Mouse events
-            // dot.addEventListener('mousedown', startDrag);
-            stick.addEventListener('mousedown', startDrag);
+            stick.addEventListener('mousedown', start);
             document.addEventListener('mousemove', drag);
-            document.addEventListener('mouseup', endDrag);
+            document.addEventListener('mouseup', end);
             
-            // Touch events
-            dot.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-                startDrag(getTouchPosition(e));
-            });
+            dot.addEventListener('touchstart', e => {e.preventDefault(); start(getTouch(e));});
+            document.addEventListener('touchmove', e => {e.preventDefault(); drag(getTouch(e));});
+            document.addEventListener('touchend', e => {e.preventDefault(); end();});
             
-            document.addEventListener('touchmove', (e) => {
-                e.preventDefault();
-                drag(getTouchPosition(e));
-            });
+            function getTouch(e) {const t=e.touches[0]; return {clientX:t.clientX, clientY:t.clientY};}
+            function start(e) {isDragging=true; drag(e);}
+            function end() {if(!isDragging) return; isDragging=false; dot.style.transform='translate(-50%,-50%)'; updateStatus(stickId.split('-')[0].toUpperCase()+'3 (stop, 0)'); fetch(`/cmd-stick?stickId=${stickId}&direct=stop&stepValue=0`);}
             
-            document.addEventListener('touchend', (e) => {
-                e.preventDefault();
-                endDrag();
-            });
-            
-            function getTouchPosition(e) {
-                const touch = e.touches[0];
-                return {
-                    clientX: touch.clientX,
-                    clientY: touch.clientY
-                };
-            }
-            
-            function startDrag(e) {
-                isDragging = true;
-                drag(e);
-            }
-            
-            // 【加个节流开关，100ms 执行一次】
-            let stickThrottle = false;
             function drag(e) {
-                if (!isDragging) return;
+                if(!isDragging || throttle) return;
+                throttle=true; setTimeout(()=>throttle=false, 200);
                 
-                // 👇 关键：100ms 内只允许执行一次，防止刷屏
-                if (stickThrottle) return;
-                stickThrottle = true;
-                setTimeout(() => stickThrottle = false, 200);
-
-                const stickRect = stick.getBoundingClientRect();
-                const stickX = stickRect.left + stickCenterX;
-                const stickY = stickRect.top + stickCenterY;
+                const rect = stick.getBoundingClientRect();
+                const x = e.clientX - (rect.left+centerX);
+                const y = e.clientY - (rect.top+centerY);
+                const dist = Math.hypot(x,y);
+                const fx = dist>maxDist ? x/dist*maxDist : x;
+                const fy = dist>maxDist ? y/dist*maxDist : y;
+                dot.style.transform = `translate(-50%,-50%) translate(${fx}px,${fy}px)`;
                 
-                // Calculate position relative to stick center
-                let deltaX = e.clientX - stickX;
-                let deltaY = e.clientY - stickY;
-                
-                // Calculate distance from center
-                const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-                
-                // Limit to max distance
-                if (distance > maxDistance) {
-                    deltaX = (deltaX / distance) * maxDistance;
-                    deltaY = (deltaY / distance) * maxDistance;
-                }
-                
-                // Update dot position
-                dot.style.transform = `translate(-50%, -50%) translate(${deltaX}px, ${deltaY}px)`;
-                
-                // Calculate normalized values (-1 to 1)
-                const normX = parseFloat((deltaX / maxDistance).toFixed(2));
-                const normY = parseFloat((deltaY / maxDistance).toFixed(2));
-                
-                // Update status
-                directInfo = getDirection(normX, normY);
-                updateStatus(`${stickId.split('-')[0].toUpperCase()}3 (${directInfo.direct}, ${directInfo.stepValue.toFixed(2)})`);
-                fetch(`/cmd-stick?stickId=${stickId}&direct=${directInfo.direct}&stepValue=${directInfo.stepValue}`); // 👈 发送模拟杆数据到服务器
+                const nx = (fx/maxDist).toFixed(2);
+                const ny = (fy/maxDist).toFixed(2);
+                const dir = getDir(nx,ny);
+                updateStatus(`${stickId.split('-')[0].toUpperCase()}3 (${dir.direct}, ${dir.stepValue})`);
+                fetch(`/cmd-stick?stickId=${stickId}&direct=${dir.direct}&stepValue=${dir.stepValue}`);
             }
             
-            function endDrag() {
-                if (isDragging) {
-                    isDragging = false;
-                    // Return to center with animation
-                    dot.style.transform = 'translate(-50%, -50%)';
-                    updateStatus(`${stickId.split('-')[0].toUpperCase()}3 (stop, 0)`);
-                    fetch(`/cmd-stick?stickId=${stickId}&direct=stop&stepValue=0`); // 👈 发送模拟杆数据到服务器
+            function getDir(x,y) {
+                x=parseFloat(x); y=parseFloat(y);
+                let tan = Math.abs(y/x) || 99;
+                let d;
+                if(tan>2.414) d=y<0?'up':'down';
+                else if(tan<0.414) d=x<0?'left':'right';
+                else {
+                    if(x<0&&y<0)d='uple';
+                    else if(x>0&&y<0)d='uprt';
+                    else if(x<0&&y>0)d='dnle';
+                    else d='dnrt';
                 }
-            }
-
-            function getDirection(normX, normY) {
-                tanValue = Math.abs(normY / normX); 
-                if (tanValue > 2.414) {
-                    direct = normY < 0 ? 'up' : 'down';
-                } else if (tanValue < 0.414) {
-                    direct = normX < 0 ? 'left' : 'right';
-                } else {
-                    if (normX < 0 && normY < 0) direct = 'uple';
-                    if (normX > 0 && normY < 0) direct = 'uprt';
-                    if (normX < 0 && normY > 0) direct = 'dnle';
-                    if (normX > 0 && normY > 0) direct = 'dnrt';
-                }
-                stepValue = Math.round(Math.sqrt(normX * normX + normY * normY) * 5);
-                return {
-                    direct: direct,
-                    stepValue: stepValue
-                };
+                return {direct:d, stepValue: Math.round(Math.hypot(x,y)*5)};
             }
         }
         
-        // Setup both analog sticks
-        setupAnalogStick('left-analog', 'left-analog-dot');
-        setupAnalogStick('right-analog', 'right-analog-dot');
+        setupAnalogStick('left-analog','left-analog-dot');
+        setupAnalogStick('right-analog','right-analog-dot');
     </script>
 </body>
 </html>
