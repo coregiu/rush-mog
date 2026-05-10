@@ -182,6 +182,13 @@
                     <div class="bg-gray-600 p-1 md:p-1 rounded text-xs md:text-sm">No input detected</div>
                 </div>
 
+                <!-- 音频按钮 -->
+                <div class="flex flex-col h-[60px] md:h-[60px] w-14 md:w-16 shrink-0">
+                    <div id="audio-btn" class="h-full bg-ps2red rounded-md flex items-center justify-center text-white font-bold text-xs md:text-sm transition-all duration-100 active:scale-95 cursor-pointer">
+                        🎤
+                    </div>
+                </div>
+
                 <!-- 右侧 R1 / R2 同左侧固定窄宽 -->
                 <div class="flex flex-col h-[60px] md:h-[60px] w-12 md:w-16 shrink-0">
                     <div id="r1" class="h-1/2 bg-ps2black rounded-md flex items-center justify-center text-white font-bold text-sm transition-all duration-100 active:scale-95">R1</div>
@@ -363,6 +370,224 @@
         // 页面加载完成后启动摄像头流
         window.addEventListener('load', function() {
             startCameraStream();
+        });
+
+        // ==================== 音频录制功能 ====================
+        const audioBtn = document.getElementById('audio-btn');
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let isRecording = false;
+
+        // 检查麦克风权限支持
+        function checkMicSupport() {
+            // 优先使用 mediaDevices.getUserMedia
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                return 'modern';
+            }
+            // 回退到旧的 getUserMedia API
+            if (navigator.getUserMedia) {
+                return 'legacy';
+            }
+            if (navigator.webkitGetUserMedia) {
+                return 'webkit';
+            }
+            if (navigator.mozGetUserMedia) {
+                return 'moz';
+            }
+            return 'none';
+        }
+
+        // 初始化音频录制
+        async function initAudio() {
+            const support = checkMicSupport();
+            
+            if (support === 'none') {
+                console.error('浏览器不支持麦克风访问');
+                updateStatus('MIC NOT SUPPORTED');
+                // 提示用户
+                alert('您的浏览器不支持麦克风功能。\n\n请使用 Chrome/Firefox/Edge 浏览器，\n并通过 HTTPS 或 localhost 访问此页面。\n\n当前通过 HTTP 访问可能无法使用麦克风。');
+                return false;
+            }
+            
+            try {
+                let stream;
+                
+                if (support === 'modern') {
+                    stream = await navigator.mediaDevices.getUserMedia({ 
+                        audio: {
+                            sampleRate: 16000,
+                            channelCount: 1,
+                            echoCancellation: true,
+                            noiseSuppression: true
+                        } 
+                    });
+                } else {
+                    // 旧的 API 使用回调方式
+                    const getUserMedia = navigator.getUserMedia || 
+                                        navigator.webkitGetUserMedia || 
+                                        navigator.mozGetUserMedia;
+                    
+                    return new Promise((resolve, reject) => {
+                        getUserMedia.call(navigator, { audio: true }, 
+                            (s) => {
+                                stream = s;
+                                mediaRecorder = new MediaRecorder(stream);
+                                
+                                mediaRecorder.ondataavailable = (e) => {
+                                    if (e.data.size > 0) {
+                                        audioChunks.push(e.data);
+                                    }
+                                };
+                                
+                                mediaRecorder.onstop = async () => {
+                                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                                    audioChunks = [];
+                                    await sendAudioToESP32(audioBlob);
+                                };
+                                
+                                resolve(true);
+                            },
+                            (err) => {
+                                console.error('无法访问麦克风:', err);
+                                updateStatus('MIC ERROR');
+                                resolve(false);
+                            }
+                        );
+                    });
+                }
+                
+                mediaRecorder = new MediaRecorder(stream);
+                
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) {
+                        audioChunks.push(e.data);
+                    }
+                };
+                
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    audioChunks = [];
+                    
+                    // 发送音频到 ESP32
+                    await sendAudioToESP32(audioBlob);
+                };
+                
+                return true;
+            } catch (err) {
+                console.error('无法访问麦克风:', err);
+                updateStatus('MIC ERROR');
+                
+                // 如果是安全上下文问题，给出提示
+                if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                    alert('麦克风权限被拒绝。请在浏览器设置中允许麦克风访问。');
+                } else if (location.protocol === 'http:' && location.hostname !== 'localhost') {
+                    alert('麦克风功能需要安全上下文（HTTPS）。\n\n当前通过 HTTP 访问可能无法使用麦克风。\n\n建议：\n1. 使用 Chrome 浏览器\n2. 在地址栏输入 chrome://flags/#unsafely-treat-insecure-origin-as-secure\n3. 启用 "Insecure origins treated as secure" 并添加 ESP32 的 IP 地址');
+                }
+                
+                return false;
+            }
+        }
+
+        // 发送音频到 ESP32
+        async function sendAudioToESP32(audioBlob) {
+            updateStatus('SENDING AUDIO...');
+            audioBtn.style.backgroundColor = '#FF6B6B';
+            
+            try {
+                // 将 Blob 转换为 ArrayBuffer
+                const arrayBuffer = await audioBlob.arrayBuffer();
+                const uint8Array = new Uint8Array(arrayBuffer);
+                
+                // 使用 FormData 发送音频
+                const formData = new FormData();
+                formData.append('audio', audioBlob, 'recording.webm');
+                
+                const response = await fetch('/audio', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (response.ok) {
+                    const result = await response.text();
+                    updateStatus('🎤 ' + result);
+                } else {
+                    updateStatus('SEND FAILED');
+                }
+            } catch (err) {
+                console.error('发送音频失败:', err);
+                updateStatus('SEND ERROR');
+            }
+            
+            audioBtn.style.backgroundColor = '';
+        }
+
+        // 音频按钮事件处理
+        audioBtn.addEventListener('mousedown', async () => {
+            audioBtn.classList.add('button-press');
+            
+            if (!mediaRecorder) {
+                const initialized = await initAudio();
+                if (!initialized) return;
+            }
+            
+            if (mediaRecorder && mediaRecorder.state === 'inactive') {
+                audioChunks = [];
+                mediaRecorder.start();
+                isRecording = true;
+                updateStatus('🎤 RECORDING...');
+                audioBtn.style.backgroundColor = '#FF4444';
+            }
+        });
+
+        audioBtn.addEventListener('mouseup', () => {
+            audioBtn.classList.remove('button-press');
+            
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+                isRecording = false;
+                audioBtn.style.backgroundColor = '';
+            }
+        });
+
+        audioBtn.addEventListener('mouseleave', () => {
+            if (isRecording) {
+                audioBtn.classList.remove('button-press');
+                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                    mediaRecorder.stop();
+                    isRecording = false;
+                    audioBtn.style.backgroundColor = '';
+                }
+            }
+        });
+
+        // 触摸事件
+        audioBtn.addEventListener('touchstart', async (e) => {
+            e.preventDefault();
+            audioBtn.classList.add('button-press');
+            
+            if (!mediaRecorder) {
+                const initialized = await initAudio();
+                if (!initialized) return;
+            }
+            
+            if (mediaRecorder && mediaRecorder.state === 'inactive') {
+                audioChunks = [];
+                mediaRecorder.start();
+                isRecording = true;
+                updateStatus('🎤 RECORDING...');
+                audioBtn.style.backgroundColor = '#FF4444';
+            }
+        });
+
+        audioBtn.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            audioBtn.classList.remove('button-press');
+            
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+                isRecording = false;
+                audioBtn.style.backgroundColor = '';
+            }
         });
     </script>
 </body>

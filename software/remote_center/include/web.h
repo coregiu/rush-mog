@@ -20,5 +20,7 @@ void handleWebRequest();
 void handleCmdButton();
 void handleCmdStick();
 void handleCameraStream();
+void handleAudioUpload();
+void handleAudioUploadCallback();
 
 #endif // WEB_H
