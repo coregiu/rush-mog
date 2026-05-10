@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RUSH-MOG</title>
-    <script src="../data/ps2.js"></script>
-    <link href="../data/ps2.css" rel="stylesheet">
+    <script src="ps2.js"></script>
+    <link href="ps2.css" rel="stylesheet">
     <script>
         tailwind.config = {
             theme: {
@@ -172,18 +172,18 @@
             <!-- 底部：自适应宽度、不再写死像素，Mate60横屏完美适配不溢出 -->
             <div class="mt-3 md:mt-4 flex items-stretch w-full gap-2">
                 <!-- 左侧 L1 / L2 自适应固定窄宽 -->
-                <div class="flex flex-col h-[70px] md:h-[88px] w-12 md:w-16 shrink-0">
+                <div class="flex flex-col h-[60px] md:h-[60px] w-12 md:w-16 shrink-0">
                     <div id="l1" class="h-1/2 bg-ps2black rounded-md flex items-center justify-center text-white font-bold text-sm transition-all duration-100 active:scale-95">L1</div>
                     <div id="l2" class="h-1/2 bg-ps2dark rounded-md flex items-center justify-center text-white font-bold text-sm mt-0.5 transition-all duration-100 active:scale-95">L2</div>
                 </div>
 
                 <!-- 中间：状态栏弹性宽度、固定高度、内容溢出隐藏，不会撑宽页面 -->
-                <div id="status" class="bg-ps2black text-white p-2 md:p-3 rounded-md h-[70px] md:h-[88px] flex-1 grid grid-cols-1 md:grid-cols-4 gap-1 overflow-hidden">
-                    <div class="bg-gray-800 p-1 md:p-2 rounded text-xs md:text-sm">No input detected</div>
+                <div id="status" class="bg-ps2black text-white p-2 md:p-3 rounded-md h-[60px] md:h-[60px] flex-1 grid grid-cols-1 md:grid-cols-4 gap-1 overflow-hidden">
+                    <div class="bg-gray-600 p-1 md:p-1 rounded text-xs md:text-sm">No input detected</div>
                 </div>
 
                 <!-- 右侧 R1 / R2 同左侧固定窄宽 -->
-                <div class="flex flex-col h-[70px] md:h-[88px] w-12 md:w-16 shrink-0">
+                <div class="flex flex-col h-[60px] md:h-[60px] w-12 md:w-16 shrink-0">
                     <div id="r1" class="h-1/2 bg-ps2black rounded-md flex items-center justify-center text-white font-bold text-sm transition-all duration-100 active:scale-95">R1</div>
                     <div id="r2" class="h-1/2 bg-ps2dark rounded-md flex items-center justify-center text-white font-bold text-sm mt-0.5 transition-all duration-100 active:scale-95">R2</div>
                 </div>
@@ -205,7 +205,7 @@
             statusElement.innerHTML = '';
             statusEntries.forEach(entry => {
                 const el = document.createElement('div');
-                el.className = 'bg-gray-800 p-1 md:p-2 rounded text-xs md:text-sm';
+                el.className = 'bg-gray-800 p-1 md:p-1 rounded text-xs md:text-sm';
                 el.textContent = entry;
                 statusElement.appendChild(el);
             });
@@ -307,7 +307,7 @@
         const cameraImg = document.getElementById('camera');
         const statusDot = document.getElementById('camera-status-dot');
         const statusText = document.getElementById('camera-status-text');
-        const defaultImage = 'unimog.jpeg';
+        const defaultImage = '/data/unimog.jpeg';
         const streamUrl = '/stream';
         let isStreaming = false;
         let retryCount = 0;

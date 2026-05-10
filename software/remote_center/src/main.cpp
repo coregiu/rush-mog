@@ -37,7 +37,7 @@ void setup()
   server.onNotFound(handleWebRequest);
   server.on("/cmd-button", handleCmdButton);
   server.on("/cmd-stick", handleCmdStick);
-  // server.on("/stream", handleCameraStream);
+  server.on("/stream", handleCameraStream);
   server.begin();
   Serial.println("Web 服务器已启动");
 }
