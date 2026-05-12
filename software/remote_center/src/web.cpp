@@ -180,7 +180,7 @@ void handleCameraStream() {
     }
 
     // 发送 JPEG 帧
-    client.print("-----frame\r\n");
+    client.print("--frame\r\n");
     client.print("Content-Type: image/jpeg\r\n");
     client.printf("Content-Length: %zu\r\n", fb->len);
     client.print("\r\n");
