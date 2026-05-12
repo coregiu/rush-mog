@@ -127,7 +127,7 @@
                     <div class="mt-2 border-2 md:border-4 border-ps2black rounded-lg bg-black overflow-hidden relative" style="max-width: 320px; max-height: 200px;">
                         <img 
                             id="camera" 
-                            src="/stream" 
+                            src="" 
                             alt="Camera Stream" 
                             width="320" 
                             height="200"
@@ -136,8 +136,8 @@
                         />
                         <!-- 摄像头状态指示器 -->
                         <div id="camera-status" class="absolute top-1 right-1 flex items-center gap-1 bg-black bg-opacity-50 px-2 py-0.5 rounded text-xs text-white">
-                            <span id="camera-status-dot" class="w-2 h-2 rounded-full bg-yellow-500"></span>
-                            <span id="camera-status-text">Loading...</span>
+                            <span id="camera-status-dot" class="w-2 h-2 rounded-full bg-gray-500"></span>
+                            <span id="camera-status-text">Click RUSH-MOG to start</span>
                         </div>
                     </div>
                 </div>
@@ -326,15 +326,15 @@
             statusDot.className = 'w-2 h-2 rounded-full bg-yellow-500';
             statusText.textContent = 'Connecting...';
             
+            // 先设置摄像头图片源
+            cameraImg.src = streamUrl + '?t=' + Date.now();
+            
             // 创建一个隐藏的 Image 对象来测试流是否可用
             const testImg = new Image();
             testImg.onload = function() {
                 isStreaming = true;
                 statusDot.className = 'w-2 h-2 rounded-full bg-green-500';
                 statusText.textContent = 'Live';
-                // cameraImg.src = streamUrl;
-                // Don't re-assign cameraImg.src - it's already streaming from the initial HTML src="/stream"
-                // Re-assigning would interrupt the working stream and cause it to fail
             };
             testImg.onerror = function() {
                 retryCount++;
@@ -366,13 +366,17 @@
                     startCameraStream();
                 }, 5000);
             } else {
-                showDefaultImage('Image error');
+                showDefaultImage('Click RUSH-MOG to start');
             }
         };
 
-        // 页面加载完成后启动摄像头流
-        window.addEventListener('load', function() {
-            startCameraStream();
+        // RUSH-MOG Logo 点击启动摄像头流
+        const logoElement = document.querySelector('.w-40.h-8.md\\:w-60.md\\:h-12');
+        logoElement.style.cursor = 'pointer';
+        logoElement.addEventListener('click', function() {
+            if (!isStreaming) {
+                startCameraStream();
+            }
         });
 
         // ==================== 音频录制功能 ====================
