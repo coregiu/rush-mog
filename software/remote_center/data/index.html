@@ -124,15 +124,15 @@
                     </div>
 
                     <!-- 摄像头画面 自适应缩小 -->
-                    <div class="mt-2 border-2 md:border-4 border-ps2black rounded-lg bg-black overflow-hidden relative" style="max-width: 320px; max-height: 200px;">
+                    <div class="mt-2 border-2 md:border-4 border-ps2black rounded-lg bg-black overflow-hidden relative" style="max-width: 320px; max-height: 205px;">
                         <img 
                             id="camera" 
                             src="" 
                             alt="Camera Stream" 
                             width="320" 
-                            height="200"
+                            height="205"
                             class="object-cover"
-                            style="max-width: 320px; max-height: 200px; width: auto; height: auto;"
+                            style="max-width: 320px; max-height: 205px; width: auto; height: auto;"
                         />
                         <!-- 摄像头状态指示器 -->
                         <div id="camera-status" class="absolute top-1 right-1 flex items-center gap-1 bg-black bg-opacity-50 px-2 py-0.5 rounded text-xs text-white">
@@ -311,7 +311,7 @@
         setupAnalogStick('left-analog','left-analog-dot');
         setupAnalogStick('right-analog','right-analog-dot');
 
-        // 摄像头流管理
+        // ==================== 摄像头流管理（修复版） ====================
         const cameraImg = document.getElementById('camera');
         const statusDot = document.getElementById('camera-status-dot');
         const statusText = document.getElementById('camera-status-text');
@@ -320,62 +320,80 @@
         let isStreaming = false;
         let retryCount = 0;
         const maxRetries = 3;
+        let isStopping = false; // 新增：防止关闭时触发错误重连
 
-        // 尝试连接摄像头流
+        // 启动摄像头流
         function startCameraStream() {
+            if (isStreaming) return;
+            
+            isStopping = false;
+            isStreaming = true;
+            retryCount = 0;
+            
             statusDot.className = 'w-2 h-2 rounded-full bg-yellow-500';
             statusText.textContent = 'Connecting...';
             
-            // 先设置摄像头图片源
+            // 加载流
             cameraImg.src = streamUrl + '?t=' + Date.now();
+        }
+
+        // 停止摄像头流
+        function stopCameraStream() {
+            if (!isStreaming) return;
             
-            // 创建一个隐藏的 Image 对象来测试流是否可用
-            const testImg = new Image();
-            testImg.onload = function() {
-                isStreaming = true;
-                statusDot.className = 'w-2 h-2 rounded-full bg-green-500';
-                statusText.textContent = 'Live';
-            };
-            testImg.onerror = function() {
+            isStopping = true;     // 标记正在手动关闭
+            isStreaming = false;
+            retryCount = 0;
+            
+            // 中断流
+            cameraImg.src = '';
+            cameraImg.src = defaultImage;
+            
+            statusDot.className = 'w-2 h-2 rounded-full bg-gray-500';
+            statusText.textContent = 'Click RUSH-MOG to start';
+        }
+
+        // 图片加载错误处理（修复版）
+        cameraImg.onerror = function () {
+            // 如果是手动关闭，不处理错误
+            if (isStopping) {
+                isStopping = false;
+                return;
+            }
+
+            if (isStreaming) {
+                // 流真的断开了
+                isStreaming = false;
+                statusDot.className = 'w-2 h-2 rounded-full bg-red-500';
+                statusText.textContent = 'Stream error';
+
+                // 自动重试
                 retryCount++;
                 if (retryCount < maxRetries) {
-                    statusText.textContent = `Retrying... (${retryCount}/${maxRetries})`;
-                    setTimeout(startCameraStream, 2000);
-                } else {
-                    showDefaultImage('Camera unavailable');
+                    setTimeout(() => {
+                        if (isStopping) return;
+                        startCameraStream();
+                    }, 2000);
                 }
-            };
-            testImg.src = streamUrl + '?t=' + Date.now();
-        }
-
-        // 显示默认图片
-        function showDefaultImage(message) {
-            isStreaming = false;
-            cameraImg.src = defaultImage;
-            statusDot.className = 'w-2 h-2 rounded-full bg-gray-500';
-            statusText.textContent = message || 'Default';
-        }
-
-        // 监听图片加载错误
-        cameraImg.onerror = function() {
-            if (isStreaming) {
-                showDefaultImage('Stream lost');
-                // 尝试重新连接
-                setTimeout(() => {
-                    retryCount = 0;
-                    startCameraStream();
-                }, 5000);
-            } else {
-                showDefaultImage('Click RUSH-MOG to start');
             }
         };
 
-        // RUSH-MOG Logo 点击启动摄像头流
+        // 图片加载成功
+        cameraImg.onload = function () {
+            if (isStreaming && !isStopping) {
+                statusDot.className = 'w-2 h-2 rounded-full bg-green-500';
+                statusText.textContent = 'Live';
+            }
+        };
+
+        // Logo 点击切换（修复版）
         const logoElement = document.querySelector('.w-40.h-8.md\\:w-60.md\\:h-12');
         logoElement.style.cursor = 'pointer';
-        logoElement.addEventListener('click', function() {
-            if (!isStreaming) {
-                startCameraStream();
+        logoElement.addEventListener('click', function () {
+            if (isStreaming) {
+                stopCameraStream();  // 关闭
+            } else {
+                startCameraStream(); // 打开
             }
         });
 
