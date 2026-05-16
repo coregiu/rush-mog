@@ -6,6 +6,7 @@
 #include <LittleFS.h>
 #include "serial.h"
 #include "SD_MMC.h"
+#include "FS.h"
 
 // 【自己的 WiFi 热点设置】手机直接连这个
 #define AP_SSID "RUSH-MOG"          // 热点名称

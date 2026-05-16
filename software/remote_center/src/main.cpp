@@ -35,11 +35,11 @@ void setup()
   }
 
   // 启动网页服务
-  server.onNotFound(handleWebRequest);
   server.on("/cmd-button", handleCmdButton);
   server.on("/cmd-stick", handleCmdStick);
   server.on("/stream", handleCameraStream);
-  server.on("/sdcard/*", handleSdcard);
+
+  server.onNotFound(handleWebRequest);
 
   server.begin();
   Serial.println("Web 服务器已启动");

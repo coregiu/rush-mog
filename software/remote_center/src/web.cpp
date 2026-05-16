@@ -21,7 +21,19 @@ bool initFS()
 
 // 初始化 SD 卡
 bool initSdcard() {
-  if (!SD_MMC.begin("/sdcard", true)) { // true=1-bit模式（S3-CAM板载专用）
+  // --------------------------
+  // ESP32-S3-CAM 必须这样写！
+  // --------------------------
+  SD_MMC.setPins(
+    39,  // D0
+    38,  // D1  (不用时可设 -1)
+    40,  // D2  (不用时可设 -1)
+    41,  // D3  (不用时可设 -1)
+    42,  // CLK
+    11   // CMD
+  );
+
+  if (!SD_MMC.begin("/sdcard", true, false, 20)) { // true=1-bit模式（S3-CAM板载专用）
     Serial.println("SD卡挂载失败！");
     return false;
   }
@@ -32,8 +44,15 @@ bool initSdcard() {
 void handleWebRequest()
 {
   String path = server.uri();
-  if (path == "/")
+  if (path.startsWith("/sdcard")) {
+    Serial.printf("Handle SD Card Request: %s\n", path.c_str());
+    handleSdcard();
+    return;
+  }
+
+  if (path == "/") {
     path = "/index.html";
+  }
 
   // 自动判断文件类型
   String contentType = "text/plain";
@@ -51,6 +70,29 @@ void handleWebRequest()
     file.close();
   } else {
     server.send(404, "text/plain", "File Not Found - index.html!");
+  }
+}
+
+void handleSdcard() {
+  String url = server.uri();          // 例如: /sdcard/tf.min.js
+  String path = url.substring(8);     // 去掉 /sdcard/ → tf.min.js
+  String fullPath = "/" + path;       // → /tf.min.js
+
+  String contentType = "text/plain";
+  if (path.endsWith(".html")) contentType = "text/html";
+  else if (path.endsWith(".css")) contentType = "text/css";
+  else if (path.endsWith(".js")) contentType = "application/javascript";
+  else if (path.endsWith(".png")) contentType = "image/png";
+  else if (path.endsWith(".jpg") || path.endsWith(".jpeg")) contentType = "image/jpeg";
+  else if (path.endsWith(".ico")) contentType = "image/x-icon";
+
+
+  if (SD_MMC.exists(fullPath)) {
+    File file = SD_MMC.open(fullPath, "r");
+    server.streamFile(file, contentType);
+    file.close();
+  } else {
+    server.send(404, "text/plain", "Sdcard Not Found The File");
   }
 }
 
@@ -207,26 +249,5 @@ void handleCameraStream() {
     
     // 短暂延迟，避免发送过快
     delay(10);
-  }
-}
-
-void handleSdcard() {
-  String path = server.uri(); // 去掉 "/sdcard" 前缀
-
-  String contentType = "text/plain";
-  if (path.endsWith(".html")) contentType = "text/html";
-  else if (path.endsWith(".css")) contentType = "text/css";
-  else if (path.endsWith(".js")) contentType = "application/javascript";
-  else if (path.endsWith(".png")) contentType = "image/png";
-  else if (path.endsWith(".jpg") || path.endsWith(".jpeg")) contentType = "image/jpeg";
-  else if (path.endsWith(".ico")) contentType = "image/x-icon";
-
-
-  if (SD_MMC.exists(path)) {
-    File file = SD_MMC.open(path, "r");
-    server.streamFile(file, contentType);
-    file.close();
-  } else {
-    server.send(404, "text/plain", "Not Found");
   }
 }
