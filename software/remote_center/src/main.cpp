@@ -38,7 +38,6 @@ void setup()
   server.on("/cmd-button", handleCmdButton);
   server.on("/cmd-stick", handleCmdStick);
   server.on("/stream", handleCameraStream);
-  server.on("/audio", HTTP_POST, handleAudioUpload, handleAudioUploadCallback);
   server.begin();
   Serial.println("Web 服务器已启动");
 }
