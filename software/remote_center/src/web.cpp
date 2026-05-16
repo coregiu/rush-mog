@@ -19,6 +19,15 @@ bool initFS()
   return true;
 }
 
+// 初始化 SD 卡
+bool initSdcard() {
+  if (!SD_MMC.begin("/sdcard", true)) { // true=1-bit模式（S3-CAM板载专用）
+    Serial.println("SD卡挂载失败！");
+    return false;
+  }
+  Serial.println("SD卡挂载成功！");
+  return true;
+}
 // 网页请求处理
 void handleWebRequest()
 {
@@ -201,3 +210,23 @@ void handleCameraStream() {
   }
 }
 
+void handleSdcard() {
+  String path = server.uri(); // 去掉 "/sdcard" 前缀
+
+  String contentType = "text/plain";
+  if (path.endsWith(".html")) contentType = "text/html";
+  else if (path.endsWith(".css")) contentType = "text/css";
+  else if (path.endsWith(".js")) contentType = "application/javascript";
+  else if (path.endsWith(".png")) contentType = "image/png";
+  else if (path.endsWith(".jpg") || path.endsWith(".jpeg")) contentType = "image/jpeg";
+  else if (path.endsWith(".ico")) contentType = "image/x-icon";
+
+
+  if (SD_MMC.exists(path)) {
+    File file = SD_MMC.open(path, "r");
+    server.streamFile(file, contentType);
+    file.close();
+  } else {
+    server.send(404, "text/plain", "Not Found");
+  }
+}

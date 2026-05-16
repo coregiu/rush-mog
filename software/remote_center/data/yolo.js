@@ -26,9 +26,8 @@ function getColorForClass(className) {
     return colorMap[className];
 }
 
-// 加载YOLO模型（使用COCO-SSD）
-// 注意：COCO-SSD模型需要从外部服务器下载模型权重文件
-// 默认使用Google服务器，如果无法访问，可以配置使用其他镜像源
+// 加载YOLO模型（使用COCO-SSD本地模型）
+// 模型文件已下载到本地 data/models/coco-ssd/ 目录
 async function loadYoloModel() {
     if (yoloModel) return yoloModel;
     
@@ -37,10 +36,11 @@ async function loadYoloModel() {
     yoloStatusText.textContent = 'Loading model...';
     
     try {
-        // 尝试从默认源加载模型
-        // 如果失败，可以尝试使用modelUrl参数指定其他源
-        // 例如: cocoSsd.load({ modelUrl: 'https://your-server.com/models/ssd_lite_mobilenet_v2' })
-        yoloModel = await cocoSsd.load();
+        // 使用本地模型路径加载COCO-SSD模型
+        // 模型文件位于: data/models/coco-ssd/model.json
+        yoloModel = await cocoSsd.load({
+            modelUrl: '/sdcard/models/coco-ssd/'
+        });
         console.log('YOLO/COCO-SSD model loaded successfully');
         
         yoloStatusDot.className = 'w-2 h-2 rounded-full bg-green-500';
@@ -57,11 +57,11 @@ async function loadYoloModel() {
         // 显示详细的错误信息和解决方案
         alert(
             'YOLO模型加载失败！\n\n' +
-            '原因：COCO-SSD模型需要从外部服务器下载权重文件（约5MB）\n\n' +
+            '请检查模型文件是否存在于正确路径：/sdcard/models/coco-ssd//model.json\n\n' +
             '解决方案：\n' +
-            '1. 首次使用时，请在有网络的环境下打开页面，模型会被浏览器缓存\n' +
-            '2. 或者将模型文件部署到本地服务器\n' +
-            '3. 修改代码中的modelUrl指向您的模型服务器\n\n' +
+            '1. 确认模型文件已正确上传到设备\n' +
+            '2. 检查文件路径是否正确\n' +
+            '3. 如果使用PlatformIO，请确保模型文件通过data目录上传\n\n' +
             '错误详情：' + error.message
         );
         

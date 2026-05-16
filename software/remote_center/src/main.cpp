@@ -10,6 +10,7 @@ void setup()
   // 挂载文件系统
   initFS();
   initCamera();
+  initSdcard();
 
   // ======================
   // 开启 WiFi 热点 (AP 模式)
@@ -38,6 +39,8 @@ void setup()
   server.on("/cmd-button", handleCmdButton);
   server.on("/cmd-stick", handleCmdStick);
   server.on("/stream", handleCameraStream);
+  server.on("/sdcard/*", handleSdcard);
+
   server.begin();
   Serial.println("Web 服务器已启动");
 }
