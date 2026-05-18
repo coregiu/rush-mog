@@ -86,14 +86,42 @@ void handleSdcard() {
   else if (path.endsWith(".jpg") || path.endsWith(".jpeg")) contentType = "image/jpeg";
   else if (path.endsWith(".ico")) contentType = "image/x-icon";
 
-
-  if (SD_MMC.exists(fullPath)) {
-    File file = SD_MMC.open(fullPath, "r");
-    server.streamFile(file, contentType);
-    file.close();
-  } else {
+  if (!SD_MMC.exists(fullPath)) {
     server.send(404, "text/plain", "Sdcard Not Found The File");
+    return;
   }
+
+  File file = SD_MMC.open(fullPath, "r");
+  if (!file) {
+    server.send(500, "text/plain", "Failed to open file");
+    return;
+  }
+
+  WiFiClient client = server.client();
+
+  // 发送 HTTP 响应头 + chunked 编码标记
+  client.printf("HTTP/1.1 200 OK\r\n");
+  client.printf("Content-Type: %s\r\n", contentType.c_str());
+  client.printf("Transfer-Encoding: chunked\r\n");
+  client.printf("Connection: close\r\n\r\n");
+
+  // 分块读取并发送文件（每个chunk 1024字节）
+  uint8_t buffer[1024];
+  size_t bytesRead;
+
+  while ((bytesRead = file.read(buffer, sizeof(buffer))) > 0) {
+    // 发送 chunk 大小（十六进制）
+    client.printf("%x\r\n", bytesRead);
+    // 发送 chunk 数据
+    client.write(buffer, bytesRead);
+    // 发送 chunk 结束标记（\r\n）
+    client.printf("\r\n");
+  }
+
+  // 发送结束 chunk
+  client.printf("0\r\n\r\n");
+
+  file.close();
 }
 
 void handleCmdButton() {
