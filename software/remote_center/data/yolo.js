@@ -86,8 +86,9 @@ async function loadYoloModel() {
         yoloStatusText.textContent = 'Loading model...';
         
         // 第二步：使用本地模型路径加载COCO-SSD模型
+        // 必须指向 model.json 文件本身，而不是目录
         yoloModel = await cocoSsd.load({
-            modelUrl: '/sdcard/models/coco-ssd/'
+            modelUrl: '/sdcard/models/coco-ssd/model.json'
         });
         console.log('YOLO/COCO-SSD model loaded successfully');
         

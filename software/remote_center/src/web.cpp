@@ -83,6 +83,8 @@ void handleSdcard() {
   if (path.endsWith(".html")) contentType = "text/html";
   else if (path.endsWith(".css")) contentType = "text/css";
   else if (path.endsWith(".js")) contentType = "application/javascript";
+  else if (path.endsWith(".json")) contentType = "application/json";
+  else if (path.endsWith(".bin")) contentType = "application/octet-stream";
   else if (path.endsWith(".png")) contentType = "image/png";
   else if (path.endsWith(".jpg") || path.endsWith(".jpeg")) contentType = "image/jpeg";
   else if (path.endsWith(".ico")) contentType = "image/x-icon";
