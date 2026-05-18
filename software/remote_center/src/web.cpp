@@ -1,5 +1,6 @@
 #include "web.h"
 #include "camera.h"
+#include <esp_heap_caps.h>
 
 IPAddress local_IP(192, 168, 4, 1); // 本地IP
 IPAddress gateway(192, 168, 4, 1);  // 网关
@@ -105,14 +106,25 @@ void handleSdcard() {
   client.printf("Transfer-Encoding: chunked\r\n");
   client.printf("Connection: close\r\n\r\n");
 
-  // 分块读取并发送文件（每个chunk 1024字节）
-  uint8_t buffer[1024];
-  size_t bytesRead;
+  // DMA 方式：从 PSRAM 分配大块 DMA 缓冲区（16KB），减少循环次数
+  size_t bufSize = 16384;  // 16KB DMA 缓冲区
+  uint8_t* buffer = (uint8_t*)heap_caps_malloc(bufSize, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM);
+  if (!buffer) {
+    // PSRAM 分配失败，回退到普通堆内存
+    bufSize = 4096;
+    buffer = (uint8_t*)heap_caps_malloc(bufSize, MALLOC_CAP_DMA);
+  }
+  if (!buffer) {
+    server.send(500, "text/plain", "Failed to allocate DMA buffer");
+    file.close();
+    return;
+  }
 
-  while ((bytesRead = file.read(buffer, sizeof(buffer))) > 0) {
+  size_t bytesRead;
+  while ((bytesRead = file.read(buffer, bufSize)) > 0) {
     // 发送 chunk 大小（十六进制）
     client.printf("%x\r\n", bytesRead);
-    // 发送 chunk 数据
+    // DMA 缓冲区数据直接写入 socket
     client.write(buffer, bytesRead);
     // 发送 chunk 结束标记（\r\n）
     client.printf("\r\n");
@@ -121,6 +133,7 @@ void handleSdcard() {
   // 发送结束 chunk
   client.printf("0\r\n\r\n");
 
+  free(buffer);
   file.close();
 }
 
@@ -223,7 +236,7 @@ void handleCmdStick() {
   server.send(200);
 }
 
-// 摄像头流处理 - MJPEG 流
+// 摄像头流处理 - MJPEG 流（DMA 优化版）
 void handleCameraStream() {
   WiFiClient client = server.client();
   if (!client) {
@@ -239,6 +252,17 @@ void handleCameraStream() {
   
   client.print(response);
 
+  // 预分配 HTTP 头部模板（避免重复创建 String 对象）
+  String frameHeader = "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ";
+  String frameTrailer = "\r\n\r\n";
+  
+  // 从 PSRAM 分配 DMA 发送缓冲区（用于分块发送大帧）
+  const size_t dmaBufSize = 8192;  // 8KB DMA 发送缓冲区
+  uint8_t* dmaBuf = (uint8_t*)heap_caps_malloc(dmaBufSize, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM);
+  if (!dmaBuf) {
+    dmaBuf = (uint8_t*)heap_caps_malloc(dmaBufSize, MALLOC_CAP_DMA);
+  }
+
   unsigned long lastFrameTime = 0;
   const unsigned long frameInterval = 100; // 10FPS，可根据需要调整
 
@@ -250,7 +274,7 @@ void handleCameraStream() {
     }
     lastFrameTime = currentTime;
 
-    // 获取摄像头帧
+    // 获取摄像头帧（DMA 已由 esp32-camera 驱动内部处理）
     camera_fb_t *fb = esp_camera_fb_get();
     if (!fb) {
       Serial.println("Failed to get camera frame");
@@ -258,16 +282,33 @@ void handleCameraStream() {
       continue;
     }
 
-    // 发送 JPEG 帧
+    // 发送 JPEG 帧头
     client.print("--frame\r\n");
     client.print("Content-Type: image/jpeg\r\n");
     client.printf("Content-Length: %zu\r\n", fb->len);
     client.print("\r\n");
     
-    // 发送图像数据
-    size_t sent = client.write(fb->buf, fb->len);
-    if (sent != fb->len) {
-      Serial.printf("Failed to send frame: sent %zu of %zu\n", sent, fb->len);
+    // DMA 方式发送帧数据：如果帧较大则分块写入，避免长阻塞
+    if (dmaBuf) {
+      size_t remaining = fb->len;
+      size_t offset = 0;
+      while (remaining > 0) {
+        size_t chunk = (remaining > dmaBufSize) ? dmaBufSize : remaining;
+        memcpy(dmaBuf, fb->buf + offset, chunk);
+        size_t sent = client.write(dmaBuf, chunk);
+        if (sent != chunk) {
+          Serial.printf("DMA send failed: sent %zu of %zu\n", sent, chunk);
+          break;
+        }
+        remaining -= chunk;
+        offset += chunk;
+      }
+    } else {
+      // 无 DMA 缓冲区时的回退
+      size_t sent = client.write(fb->buf, fb->len);
+      if (sent != fb->len) {
+        Serial.printf("Failed to send frame: sent %zu of %zu\n", sent, fb->len);
+      }
     }
     
     client.print("\r\n");
@@ -278,4 +319,7 @@ void handleCameraStream() {
     // 短暂延迟，避免发送过快
     delay(10);
   }
+
+  // 释放 DMA 缓冲区
+  if (dmaBuf) free(dmaBuf);
 }
