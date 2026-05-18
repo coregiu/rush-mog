@@ -26,18 +26,66 @@ function getColorForClass(className) {
     return colorMap[className];
 }
 
+// 动态加载 TensorFlow.js 依赖脚本（仅加载一次）
+let scriptsLoaded = false;
+function loadDependencyScripts() {
+    return new Promise((resolve, reject) => {
+        if (scriptsLoaded) {
+            resolve();
+            return;
+        }
+
+        const scripts = [
+            '/sdcard/tf.min.js',
+            '/sdcard/coco-ssd.js'
+        ];
+
+        let loaded = 0;
+        scripts.forEach(src => {
+            // 检查是否已经加载过
+            const existing = document.querySelector(`script[src="${src}"]`);
+            if (existing) {
+                loaded++;
+                if (loaded === scripts.length) {
+                    scriptsLoaded = true;
+                    resolve();
+                }
+                return;
+            }
+
+            const script = document.createElement('script');
+            script.src = src;
+            script.onload = () => {
+                loaded++;
+                if (loaded === scripts.length) {
+                    scriptsLoaded = true;
+                    resolve();
+                }
+            };
+            script.onerror = () => {
+                reject(new Error(`Failed to load: ${src}`));
+            };
+            document.body.appendChild(script);
+        });
+    });
+}
+
 // 加载YOLO模型（使用COCO-SSD本地模型）
-// 模型文件已下载到本地 data/models/coco-ssd/ 目录
+// 先动态加载 TensorFlow.js 和 COCO-SSD 依赖，再加载模型
 async function loadYoloModel() {
     if (yoloModel) return yoloModel;
     
     yoloLoading = true;
     yoloStatusDot.className = 'w-2 h-2 rounded-full bg-yellow-500 animate-pulse';
-    yoloStatusText.textContent = 'Loading model...';
+    yoloStatusText.textContent = 'Loading dependencies...';
     
     try {
-        // 使用本地模型路径加载COCO-SSD模型
-        // 模型文件位于: data/models/coco-ssd/model.json
+        // 第一步：动态加载 TensorFlow.js 和 COCO-SSD
+        await loadDependencyScripts();
+        
+        yoloStatusText.textContent = 'Loading model...';
+        
+        // 第二步：使用本地模型路径加载COCO-SSD模型
         yoloModel = await cocoSsd.load({
             modelUrl: '/sdcard/models/coco-ssd/'
         });
@@ -57,7 +105,7 @@ async function loadYoloModel() {
         // 显示详细的错误信息和解决方案
         alert(
             'YOLO模型加载失败！\n\n' +
-            '请检查模型文件是否存在于正确路径：/sdcard/models/coco-ssd//model.json\n\n' +
+            '请检查模型文件是否存在于正确路径：/sdcard/models/coco-ssd/model.json\n\n' +
             '解决方案：\n' +
             '1. 确认模型文件已正确上传到设备\n' +
             '2. 检查文件路径是否正确\n' +
