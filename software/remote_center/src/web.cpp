@@ -103,8 +103,10 @@ void handleSdcard() {
   WiFiClient client = server.client();
 
   // 发送 HTTP 响应头 + chunked 编码标记
+  // Cache-Control: 客户端缓存 30 天（2592000 秒）
   client.printf("HTTP/1.1 200 OK\r\n");
   client.printf("Content-Type: %s\r\n", contentType.c_str());
+  client.printf("Cache-Control: public, max-age=2592000, immutable\r\n");
   client.printf("Transfer-Encoding: chunked\r\n");
   client.printf("Connection: close\r\n\r\n");
 
