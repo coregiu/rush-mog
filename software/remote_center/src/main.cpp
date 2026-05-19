@@ -39,7 +39,14 @@ void setup()
   server.on("/cmd-stick", handleCmdStick);
   server.on("/stream", handleCameraStream);
 
-  server.onNotFound(handleWebRequest);
+  server.onNotFound([&]() {
+  String uri = server.uri();
+  if (uri.startsWith("/sdcard/")) {
+    handleSdcard();
+  } else {
+    handleWebRequest();
+  }
+});
 
   server.begin();
 

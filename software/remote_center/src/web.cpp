@@ -41,28 +41,27 @@ bool initSdcard() {
   Serial.println("SD卡挂载成功！");
   return true;
 }
+
+String contentTypeFromPath(const String& path) {
+  if (path.endsWith(".html")) return "text/html";
+  if (path.endsWith(".css")) return "text/css";
+  if (path.endsWith(".js")) return "application/javascript";
+  if (path.endsWith(".png")) return "image/png";
+  if (path.endsWith(".jpg") || path.endsWith(".jpeg")) return "image/jpeg";
+  if (path.endsWith(".ico")) return "image/x-icon";
+  return "text/plain"; // 默认类型
+}
+
 // 网页请求处理
 void handleWebRequest()
 {
   String path = server.uri();
-  if (path.startsWith("/sdcard")) {
-    Serial.printf("Handle SD Card Request: %s\n", path.c_str());
-    handleSdcard();
-    return;
-  }
-
   if (path == "/") {
     path = "/index.html";
   }
 
   // 自动判断文件类型
-  String contentType = "text/plain";
-  if (path.endsWith(".html")) contentType = "text/html";
-  else if (path.endsWith(".css")) contentType = "text/css";
-  else if (path.endsWith(".js")) contentType = "application/javascript";
-  else if (path.endsWith(".png")) contentType = "image/png";
-  else if (path.endsWith(".jpg") || path.endsWith(".jpeg")) contentType = "image/jpeg";
-  else if (path.endsWith(".ico")) contentType = "image/x-icon";
+  String contentType = contentTypeFromPath(path);
   
   // 读取并返回文件
   if (LittleFS.exists(path)) {
@@ -79,15 +78,8 @@ void handleSdcard() {
   String path = url.substring(8);     // 去掉 /sdcard/ → tf.min.js
   String fullPath = "/" + path;       // → /tf.min.js
 
-  String contentType = "text/plain";
-  if (path.endsWith(".html")) contentType = "text/html";
-  else if (path.endsWith(".css")) contentType = "text/css";
-  else if (path.endsWith(".js")) contentType = "application/javascript";
-  else if (path.endsWith(".json")) contentType = "application/json";
-  else if (path.endsWith(".bin")) contentType = "application/octet-stream";
-  else if (path.endsWith(".png")) contentType = "image/png";
-  else if (path.endsWith(".jpg") || path.endsWith(".jpeg")) contentType = "image/jpeg";
-  else if (path.endsWith(".ico")) contentType = "image/x-icon";
+  // 自动判断文件类型
+  String contentType = contentTypeFromPath(path);
 
   if (!SD_MMC.exists(fullPath)) {
     server.send(404, "text/plain", "Sdcard Not Found The File");
@@ -111,13 +103,9 @@ void handleSdcard() {
   client.printf("Connection: close\r\n\r\n");
 
   // DMA 方式：从 PSRAM 分配大块 DMA 缓冲区（16KB），减少循环次数
-  size_t bufSize = 16384;  // 16KB DMA 缓冲区
-  uint8_t* buffer = (uint8_t*)heap_caps_malloc(bufSize, MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM);
-  if (!buffer) {
-    // PSRAM 分配失败，回退到普通堆内存
-    bufSize = 4096;
-    buffer = (uint8_t*)heap_caps_malloc(bufSize, MALLOC_CAP_DMA);
-  }
+  size_t bufSize = 512;  // 16KB DMA 缓冲区
+  uint8_t* buffer = (uint8_t*)heap_caps_malloc(bufSize, MALLOC_CAP_DMA);
+
   if (!buffer) {
     server.send(500, "text/plain", "Failed to allocate DMA buffer");
     file.close();
