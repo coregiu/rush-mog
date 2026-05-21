@@ -17,7 +17,7 @@
 #define MIN_PWM_RATE 1
 #define STOP_PWM 0
 #define NO_PWM 99
-#define DEFAULT_TUNE_PWM_STEP 2
+#define DEFAULT_TUNE_PWM_STEP 1
 #define DEFAULT_PWM_RATE 5
 
 
