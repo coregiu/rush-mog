@@ -9,7 +9,7 @@ uchar tune_pwm_step;
 uchar g_left_motor_run_state = DEFAULT_PWM_RATE;
 uchar g_right_motor_run_state = DEFAULT_PWM_RATE;
 
-struct motor_config g_motor_config = {5, 1};
+struct motor_config g_motor_config = {DEFAULT_PWM_RATE, DEFAULT_TUNE_PWM_STEP};
 
 // 当前系统的占空比，以此占空比来控制电机速度
 uchar current_pwm = DEFAULT_PWM_RATE;
