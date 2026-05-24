@@ -66,18 +66,20 @@ Rush Mog是一款致敬Unimog的VLA控制的智能万向轮小车。基于esp32 
 
 ## 成品效果
 
-##### 视频
+- 视频
 [https://www.bilibili.com/video/BV1Db4y1V7Ny](https://www.bilibili.com/video/BV1Db4y1V7Ny)
 
-##### 左视
+- 左视
 ![](images/AGO.png)
 
-##### 正视
+- 正视
 ![](images/AGO_F.png)
 
-##### 俯视
+- 俯视
 ![](images/AGO_T.png)
 
-##### 后视
+- 后视
 ![](images/AGO_B.png)
 
+## 避坑说明
+1 不要把麦放到小车上，因为小车电机声音大，开起来了声音就难识别了。

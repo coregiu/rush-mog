@@ -2,3 +2,4 @@ rucar-backups
 .vscode
 build
 *.FCBak
+.history
