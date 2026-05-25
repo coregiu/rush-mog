@@ -31,6 +31,12 @@ const char command_module_map[COMMANDS_LENGTH][2] = {{COMMAND_STOP,          MOD
                                                       {COMMAND_RIGHT_MICRO,  MODULE_MOTOR_PWM},
                                                       {COMMAND_DIRECT,       MODULE_MOTOR_PWM},
                                                       {COMMAND_RESET,        MODULE_RESET},
+                                                      {COMMAND_AUDIO_NEXT,   MODULE_AUDIO},
+                                                      {COMMAND_AUDIO_PREV,   MODULE_AUDIO},
+                                                      {COMMAND_AUDIO_VOL_UP, MODULE_AUDIO},
+                                                      {COMMAND_AUDIO_VOL_DOWN, MODULE_AUDIO},
+                                                      {COMMAND_AUDIO_STOP,   MODULE_AUDIO},
+                                                      {COMMAND_AUDIO_PLAY,   MODULE_AUDIO},
                                                       {COMMAND_UNKNOWN,      MODULE_UNKNOWN}};
 
 static BaseType_t priority = 2;
@@ -56,6 +62,7 @@ void init_modules()
 
     motor_pwm_executor.init();
     arm_roboot_executor.init();
+    audio_executor.init();
 }
 
 /**
@@ -98,11 +105,15 @@ void execute_command(struct command_context *command_context)
     case MODULE_ARM_BOT:
         arm_roboot_executor.update_state(command_context);
         break;
+    case MODULE_AUDIO:
+        audio_executor.update_state(command_context);
+        break;
     case MODULE_RESET:
         reset_command_queue();
         motor_pwm_executor.reset();
         motor_direct_executor.reset();
         arm_roboot_executor.reset();
+        audio_executor.reset();
         break;
 
     default:

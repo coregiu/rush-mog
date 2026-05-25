@@ -26,7 +26,7 @@
 // define the single light
 #define LED PCout(13)	//PC13 0-light up; 1-turn off.
 
-#define COMMANDS_LENGTH 24
+#define COMMANDS_LENGTH 28
 
 #define DEFAULT_BUFFER_SIZE 4
 
@@ -69,6 +69,12 @@ enum commands_def
     COMMAND_RIGHT_MICRO    = 'H',
     COMMAND_DIRECT         = 'I',
     COMMAND_RESET          = 'J',
+    COMMAND_AUDIO_NEXT     = 'K',
+    COMMAND_AUDIO_PREV     = 'L',
+    COMMAND_AUDIO_VOL_UP   = 'M',
+    COMMAND_AUDIO_VOL_DOWN = 'N',
+    COMMAND_AUDIO_STOP     = 'O',
+    COMMAND_AUDIO_PLAY     = 'P',
     COMMAND_UNKNOWN        = 'Z'
 };
 
@@ -79,6 +85,7 @@ enum module_def
     MODULE_MOTOR_PWM     = '1',
     MODULE_ARM_BOT       = '2',
     MODULE_RESET         = '3',
+    MODULE_AUDIO         = '4',
     MODULE_UNKNOWN       = '9'
 };
 

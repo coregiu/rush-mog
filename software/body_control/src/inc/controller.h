@@ -17,6 +17,7 @@
 #include "audio_receiver.h"
 #include "ps2_receiver.h"
 #include "arm_roboot_executor.h"
+#include "audio_executor.h"
 
 extern const char command_module_map[COMMANDS_LENGTH][2];
 
