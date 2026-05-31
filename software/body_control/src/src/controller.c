@@ -99,6 +99,11 @@ void execute_command(struct command_context *command_context)
         }
         motor_direct_executor.update_state(command_context);
 
+        // struct command_context audio_command_context = {0};
+        // audio_command_context.commands[0] = COMMAND_AUDIO_PLAY;
+        // audio_command_context.commands[1] = V8_START;
+        // audio_executor.update_state(&audio_command_context);
+
         break;
     case MODULE_MOTOR_PWM:
         motor_pwm_executor.update_state(command_context);

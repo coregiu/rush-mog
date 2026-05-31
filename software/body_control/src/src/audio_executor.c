@@ -143,14 +143,14 @@ void init_jq6500_state(void)
     delay_ms(50);
 
     // 播放第一首初始化状态（JQ6500 曲目索引从1开始）
-    jq6500_play_by_index(1);
+    jq6500_play_by_index(V8_STOP);
 }
 
 /************************ 状态复位 ************************/
 void reset_jq6500_state(void)
 {
     jq6500_set_play_mode(0x02);
-    jq6500_play_by_index(1);
+    jq6500_play_by_index(V8_STOP);
 }
 
 /************************ 命令解析与执行 ************************/
@@ -197,14 +197,14 @@ void update_jq6500_state(struct command_context *command_context)
             }
             else
             {
-                jq6500_play_by_index(1);
-                uart_log_string_data("jq6500: play track 1");
+                jq6500_play_by_index(V8_STOP);
+                uart_log_string_data("jq6500: play track V8_STOP");
             }
             break;
 
         default:
             // 数字字符直接映射为曲目播放
-            if (cmd >= '0' && cmd <= '9')
+            if (cmd > '0' && cmd <= '9')
             {
                 uint8_t track_index = cmd - '0';
                 if(track_index < 1) track_index = 1;
