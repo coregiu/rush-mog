@@ -1,11 +1,12 @@
 #include "web.h"
 #include "camera.h"
+#include "serial.h"
 
 void setup()
 {
   Serial.begin(9600);
   delay(50);
-  initSoftwareSerial();
+  initSerialPorts();
 
   // 挂载文件系统
   initFS();
