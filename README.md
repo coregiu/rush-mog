@@ -1,78 +1,69 @@
 # Rush Mog
-Rush Mog是一款致敬Unimog的VLA控制的智能万向轮小车。基于esp32 + stm32f103 + L298N + ov2640 + 激光雷达，实现支持手机WIFI的PS2模拟器、语音控制和VLA智能控制三种模式，并支持机械臂操作和声音外放的智能小车。同时提供动作编程，可自定义组合效果的动作指令。
 
-## 功能说明
-#### （1）手机模拟PS2控制小车行驶
-可通过手机模拟PS2控制小车前进、后退、左转、右转、向左横向行驶，向右横向行驶，向左前、右前、左后、右后方向行驶。
+[中文版](README_cn.md)
 
-#### （2）摄像头监控及自动识别物体
-通过车载摄像头监控和自动识别、分类物体。并将画面实时在手机模拟的PS2控制器上查看。
+Rush Mog is an intelligent omnidirectional wheel car controlled by VLA (Vision-Language-Action), inspired by the Unimog. Based on ESP32 + STM32F103 + L298N + OV2640 + LiDAR, it supports three control modes: a mobile phone Wi-Fi PS2 emulator, voice control, and VLA intelligent control. It also supports robotic arm operations and audio playback. Additionally, it provides action programming, allowing users to customize combined action commands.
 
-#### （3）语音控制小车行驶
-可通过手机模拟PS2控制器中的语音控制键控制小车前进、后退、左转、右转、向左横向行驶，向右横向行驶，向左前、右前、左后、右后方向行驶。
+## Features
+#### (1) Mobile Phone PS2 Emulator for Car Control
+Use your phone as a PS2 emulator to control the car to move forward, backward, turn left, turn right, strafe left, strafe right, move diagonally forward-left, forward-right, backward-left, and backward-right.
 
-#### （4）外放炸街
-通过车载MP3播放V8发动机声音实现炸街效果。
+#### (2) Camera Monitoring & Automatic Object Recognition
+Monitor and automatically identify and classify objects via the onboard camera. View the live feed in real-time on the mobile phone PS2 controller interface.
 
-#### （5）动作编程
-提供编程页面，对炸街效果、小车动作进行编程，实现各种编排效果。
+#### (3) Voice Control for Car Movement
+Use the voice control button on the mobile PS2 controller to command the car to move forward, backward, turn left, turn right, strafe left, strafe right, and move in diagonal directions.
 
-#### （6）自动寻找目标
-通过车载摄像头和车载激光雷达自动识别、分类物体。可以根据目标物体进行搜索、锁定，并对移动目标物体进行跟踪。
+#### (4) Audio Playback
+Play V8 engine sounds through the onboard MP3 player for a thrilling audio experience.
 
-#### （7）搬运物体
-使用VLA模型控制车体移动，可以根据目标物体进行搜索、锁定，并对移动目标物体进行跟踪。使用机械臂对物体进行夹起、转移、放下到指定范围区域等动作，实现物体搬运。搬运路径可规划也可自动学习。
+#### (5) Action Programming
+A programming interface is provided to script audio effects and car movements, enabling various choreographed sequences.
+
+#### (6) Automatic Target Seeking
+Automatically identify and classify objects using the onboard camera and LiDAR. Search for and lock onto target objects, and track moving targets.
+
+#### (7) Object Handling
+Use the VLA model to control car movement, enabling searching, locking onto, and tracking target objects. Use the robotic arm to grasp, transfer, and place objects into designated areas. The transport path can be pre-planned or automatically learned.
 
 
-## 设计说明
-#### 总体系统架构
+## Design Overview
+#### Overall System Architecture
 ![](images/system-arch.png)
-设计原理：
-- 1 通过esp32实现web server，提供PS2控制页面、语音输入操作。
-- 2 esp32接收PS2指令直接下发stm32进行操作。
-- 3 esp32接收语音指令进行识别，转换指令后下发stm32进行操作。
-- 4 esp32接ov2640摄像头和激光雷达，运行轻量化vla模型进行推理。推理结果指令下发stm32。
-- 5 stm32作为车体控制中心，将操作指令转换为具体的GPIO电位或PWM，对接L298N驱动小车电机，或对接机械臂驱动，执行命令。
 
-#### 硬件架构设计
-- DIY小车，使用97mm万向轮加JGB37-520电机，L298N驱动板(四驱的，或者用两个两驱的)。
-- 车体控制使用STM32F103C8T6单板。
-- WIFI及VLA模型推理使用ESP32-S3-CAM + OV2640摄像头。
+Design principles:
+- 1 ESP32 implements a web server, providing the PS2 control page and voice input.
+- 2 ESP32 receives PS2 commands and directly forwards them to STM32 for execution.
+- 3 ESP32 receives voice commands, recognizes them, converts them into instructions, and forwards them to STM32.
+- 4 ESP32 interfaces with the OV2640 camera and LiDAR, running a lightweight VLA model for inference. The inference results are sent as commands to STM32.
+- 5 STM32 acts as the car's control center, translating operation commands into specific GPIO levels or PWM signals to drive the L298N motor driver or the robotic arm.
+
+#### Hardware Architecture
+- DIY car using 97mm omnidirectional wheels with JGB37-520 motors, driven by an L298N driver board (4WD, or two 2WD boards).
+- Car body control uses an STM32F103C8T6 board.
+- Wi-Fi and VLA model inference use an ESP32-S3-CAM + OV2640 camera.
 
 ![](hardware/integrate_archetecture.png)
 
-详细参照：[硬件设计说明](hardware/README.md)
+For details, see: [Hardware Design Notes](hardware/README.md)
 
-#### 软件架构设计
-- 软件分车体控制子系统和远程控制中心。
-- 车体控制子系统，由STM32F103单板承载，驱动小车电机、机械臂、外放，接远程控制子系统命令进行执行。
-- 远程控制子系统，由ESP32-S3-CAM承载，接摄像头和激光雷达，提供WEB Server，视频监控推送到终端，并提供视频推送到终端功能。同时提供语音识别转换成指令。
+#### Software Architecture
+- The software is divided into the vehicle control subsystem and the remote control center.
+- The vehicle control subsystem runs on the STM32F103 board, driving the car motors, robotic arm, and audio output. It receives and executes commands from the remote control subsystem.
+- The remote control subsystem runs on the ESP32-S3-CAM, interfacing with the camera and LiDAR, providing a web server, video surveillance streaming to the terminal, and speech recognition for converting voice into commands.
 
 ![](software/architechture.png)
 
-详细参照：[软件设计说明和代码](software/README.md)
+For details, see: [Software Design Notes and Code](software/README.md)
 
-## 手柄使用办法
+## How to Use the Controller
 ![](software/remote_center/ps2.png)
 
-启动小车后，使用手机连接RUSH-MOG WIFI。连接成功后打开手机浏览器，输入192.168.4.1，打开PS2手柄页面，操控小车。
+After starting the car, connect your phone to the RUSH-MOG Wi-Fi network. Once connected, open your phone's browser and go to 192.168.4.1 to access the PS2 controller page and operate the car.
 
-## 成品效果
+## Final Product Showcase
 
-- 视频
-[https://www.bilibili.com/video/BV1Db4y1V7Ny](https://www.bilibili.com/video/BV1Db4y1V7Ny)
-
-- 左视
 ![](images/AGO.png)
 
-- 正视
-![](images/AGO_F.png)
-
-- 俯视
-![](images/AGO_T.png)
-
-- 后视
-![](images/AGO_B.png)
-
-## 避坑说明
-1 不要把麦放到小车上，因为小车电机声音大，开起来了声音就难识别了。
+## Tips & Cautions
+1 Do not place the microphone on the car. The car's motors are loud when running, making voice recognition difficult.
