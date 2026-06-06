@@ -28,10 +28,10 @@
 #define JQ_CMD_SET_PLAY_MODE   0x11    // 设置播放模式
 
 /************************ 音频序号 ************************/
-#define V8_STOP                2    // V8 STOP
-#define V8_START               3    // V8 START
-#define GET_COMMAND            4    // GET COMMAND
-#define FIND_FINISH            5    // FIND
+#define V8_STOP                1    // V8 STOP
+#define V8_START               2    // V8 START
+#define GET_COMMAND            3    // GET COMMAND
+#define FIND_FINISH            4    // FIND
 
 extern const struct module_command_executor audio_executor;
 
