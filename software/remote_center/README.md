@@ -20,6 +20,11 @@
 ## 功能介绍
 系统支持通过语音识别来控制小车，使用浏览器的Web Speech API实现语音转文字，然后将识别结果转换为控制指令。支持中英文语音命令。
 
+浏览器中设置麦克风权限：
+chrome://settings/content/microphone
+
+edge://settings/privacy/sitePermissions/allPermissions/microphone
+
 ## 使用方法
 1. **启用语音控制**: 点击底部🎙️按钮（蓝色）开启语音识别
 2. **说出命令**: 清晰地说出控制命令
