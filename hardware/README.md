@@ -63,8 +63,8 @@ IO口分配如下：
 | PB0          | 小车左侧电机使能        |  电机使用控制      |
 | PB1          | 小车右侧电机使能        |  电机使用控制      |         |
 
-#### ESP8266
-![ESP8266](modules/esp8266.png)
+#### ESP32-S3-CAM
+![esp32-s3-cam.png](modules/esp32-s3-cam.png)
 
 
 

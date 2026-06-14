@@ -3,7 +3,7 @@
 
 #include <HardwareSerial.h>
 
-// STM32 串口: GPIO17=TX, GPIO18=RX
+// STM32 串口: GPIO43=TX, GPIO44=RX
 extern HardwareSerial SerialSTM32;
 // 激光雷达串口: GPIO19=TX, GPIO20=RX
 extern HardwareSerial SerialLiDAR;
