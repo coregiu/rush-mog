@@ -8,6 +8,7 @@ IPAddress gateway(192, 168, 4, 1);  // 网关
 IPAddress subnet(255, 255, 255, 0); // 子网掩码
 
 WebServer server(80);
+WebSocketsServer webSocket(WS_PORT);
 
 // 初始化 LittleFS
 bool initFS()
@@ -130,16 +131,9 @@ void handleSdcard() {
   file.close();
 }
 
-void handleCmdButton() {
-  // 定义按钮
-  String key = server.arg("key");
-  // 定义事件类型：按下还是松开
-  String type = server.arg("type");
+// 按钮命令处理（HTTP 与 WebSocket 共用）
+void processCmdButton(String key, String type) {
   String command;
-  if (key.isEmpty() || type.isEmpty()) {
-    server.send(400, "text/plain", "400 Bad Request - Missing 'key' or 'type' parameter");
-    return;
-  }
   if (type == "up") { // 松开事件
     if (key == "triangle" || key == "cross" || key == "select" || key == "start") {
       
@@ -184,21 +178,25 @@ void handleCmdButton() {
     Serial.println(command); 
     sendToSTM32(command);
   }
+}
 
+void handleCmdButton() {
+  // 定义按钮
+  String key = server.arg("key");
+  // 定义事件类型：按下还是松开
+  String type = server.arg("type");
+  if (key.isEmpty() || type.isEmpty()) {
+    server.send(400, "text/plain", "400 Bad Request - Missing 'key' or 'type' parameter");
+    return;
+  }
+  processCmdButton(key, type);
   server.send(200);
 }
 
-void handleCmdStick() {
-  String stickId = server.arg("stickId");
-  String direct = server.arg("direct");
-  String stepValue = server.arg("stepValue");
+// 摇杆命令处理（HTTP 与 WebSocket 共用）
+void processCmdStick(String stickId, String direct, String stepValue) {
   String command;
-  if (stickId.isEmpty() || direct.isEmpty() || stepValue.isEmpty()) {
-    server.send(400, "text/plain", "400 Bad Request - Missing 'stickId', 'direct' or 'stepValue' parameter");
-    return;
-  }
   if (stickId != "left-analog") {
-    server.send(200);
     return;
   }
   if (direct == "stop") {
@@ -223,10 +221,62 @@ void handleCmdStick() {
     }
   }
 
-  Serial.println(command);
-  sendToSTM32(command);
-  // Serial.println(stickId + " - Direct: " + direct + ", Step Value: " + stepValue); 
+  if (!command.isEmpty()) {
+    Serial.println(command);
+    sendToSTM32(command);
+  }
+}
+
+void handleCmdStick() {
+  String stickId = server.arg("stickId");
+  String direct = server.arg("direct");
+  String stepValue = server.arg("stepValue");
+  if (stickId.isEmpty() || direct.isEmpty() || stepValue.isEmpty()) {
+    server.send(400, "text/plain", "400 Bad Request - Missing 'stickId', 'direct' or 'stepValue' parameter");
+    return;
+  }
+  processCmdStick(stickId, direct, stepValue);
   server.send(200);
+}
+
+// WebSocket 事件回调
+void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
+  switch (type) {
+    case WStype_CONNECTED: {
+      IPAddress ip = webSocket.remoteIP(num);
+      Serial.printf("[WS] Client #%u connected from %s\n", num, ip.toString().c_str());
+      break;
+    }
+    case WStype_DISCONNECTED:
+      Serial.printf("[WS] Client #%u disconnected\n", num);
+      break;
+    case WStype_TEXT: {
+      String msg = String((char*)payload);
+      // 消息格式：
+      //   button:<key>:<type>         例如 button:up:down
+      //   stick:<stickId>:<direct>:<stepValue>  例如 stick:left-analog:up:5
+      if (msg.startsWith("button:")) {
+        int first = msg.indexOf(':', 7);
+        if (first > 0) {
+          String key = msg.substring(7, first);
+          String type = msg.substring(first + 1);
+          processCmdButton(key, type);
+        }
+      } else if (msg.startsWith("stick:")) {
+        int first = msg.indexOf(':', 6);
+        int second = msg.indexOf(':', first + 1);
+        if (first > 0 && second > first) {
+          String stickId = msg.substring(6, first);
+          String direct = msg.substring(first + 1, second);
+          String stepValue = msg.substring(second + 1);
+          processCmdStick(stickId, direct, stepValue);
+        }
+      }
+      break;
+    }
+    default:
+      break;
+  }
 }
 
 // 摄像头流处理 - MJPEG 流（DMA 优化版）
@@ -310,10 +360,11 @@ void handleCameraStream() {
     esp_camera_fb_return(fb);
     
     // +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    // 【关键修复】在摄像头流循环中调用 server.handleClient()
-    // 让 PS2 按钮的 /cmd-button 和 /cmd-stick 请求也能被处理
+    // 【关键修复】在摄像头流循环中调用 server.handleClient() 和 webSocket.loop()
+    // 让 PS2 按钮的 /cmd-button 和 /cmd-stick 请求以及 WebSocket 消息也能被处理
     // +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     server.handleClient();
+    webSocket.loop();
     
     // 短暂延迟，避免发送过快
     delay(10);

@@ -51,10 +51,16 @@ void setup()
 
   server.begin();
 
+  // 启动 WebSocket 长连接服务（端口 81）
+  webSocket.begin();
+  webSocket.onEvent(webSocketEvent);
+
   Serial.println("Web 服务器已启动");
+  Serial.printf("WebSocket 服务器已启动，端口：%d\n", WS_PORT);
 }
 
 void loop()
 {
   server.handleClient();
+  webSocket.loop();
 }

@@ -82,14 +82,14 @@ function executeVoiceCommand(command) {
     return false;
 }
 
-// 发送按钮命令
+// 发送按钮命令（通过 WebSocket 长连接）
 function sendCommandButton(key, type) {
-    fetch(`/cmd-button?key=${key}&type=${type}`);
+    sendButtonCommand(key, type);
 }
 
-// 发送方向命令
+// 发送方向命令（通过 WebSocket 长连接）
 function sendCommand(cmd) {
-    fetch(`/cmd-button?key=${cmd}&type=down`);
+    sendButtonCommand(cmd, 'down');
 }
 
 // 初始化语音识别

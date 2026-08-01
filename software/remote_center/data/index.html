@@ -181,6 +181,51 @@
     </div>
 
     <script>
+        // ==================== WebSocket 长连接 ====================
+        let ws = null;
+        let wsReconnectTimer = null;
+        const wsUrl = `ws://${location.hostname}:81`;
+
+        function connectWebSocket() {
+            if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+                return;
+            }
+            ws = new WebSocket(wsUrl);
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                if (wsReconnectTimer) {
+                    clearTimeout(wsReconnectTimer);
+                    wsReconnectTimer = null;
+                }
+            };
+            ws.onclose = () => {
+                console.log('WebSocket disconnected, reconnecting...');
+                if (!wsReconnectTimer) {
+                    wsReconnectTimer = setTimeout(connectWebSocket, 2000);
+                }
+            };
+            ws.onerror = (e) => {
+                console.error('WebSocket error:', e);
+                ws.close();
+            };
+        }
+
+        // 通过 WebSocket 发送按钮命令
+        function sendButtonCommand(key, type) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(`button:${key}:${type}`);
+            }
+        }
+
+        // 通过 WebSocket 发送摇杆命令
+        function sendStickCommand(stickId, direct, stepValue) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(`stick:${stickId}:${direct}:${stepValue}`);
+            }
+        }
+
+        connectWebSocket();
+
         const statusElement = document.getElementById('status');
         const maxStatusEntries = 4;
         let statusEntries = [];
@@ -207,12 +252,12 @@
             btn.addEventListener('mousedown', () => {
                 btn.classList.add('button-press');
                 updateStatus(buttonId.toUpperCase()+"-down");
-                fetch(`/cmd-button?key=${buttonId}&type=down`);
+                sendButtonCommand(buttonId, 'down');
             });
             btn.addEventListener('mouseup', () => {
                 btn.classList.remove('button-press');
                 updateStatus(buttonId.toUpperCase()+"-up");
-                fetch(`/cmd-button?key=${buttonId}&type=up`);
+                sendButtonCommand(buttonId, 'up');
             });
             btn.addEventListener('mouseleave', () => btn.classList.remove('button-press'));
             
@@ -220,13 +265,13 @@
                 e.preventDefault();
                 btn.classList.add('button-press');
                 updateStatus(buttonId.toUpperCase()+"-down");
-                fetch(`/cmd-button?key=${buttonId}&type=down`);
+                sendButtonCommand(buttonId, 'down');
             });
             btn.addEventListener('touchend', e => {
                 e.preventDefault();
                 btn.classList.remove('button-press');
                 updateStatus(buttonId.toUpperCase()+"-up");
-                fetch(`/cmd-button?key=${buttonId}&type=up`);
+                sendButtonCommand(buttonId, 'up');
             });
         });
         
@@ -249,7 +294,7 @@
             
             function getTouch(e) {const t=e.touches[0]; return {clientX:t.clientX, clientY:t.clientY};}
             function start(e) {isDragging=true; drag(e);}
-            function end() {if(!isDragging) return; isDragging=false; dot.style.transform='translate(-50%,-50%)'; updateStatus(stickId.split('-')[0].toUpperCase()+'3 (stop, 0)'); fetch(`/cmd-stick?stickId=${stickId}&direct=stop&stepValue=0`);}
+            function end() {if(!isDragging) return; isDragging=false; dot.style.transform='translate(-50%,-50%)'; updateStatus(stickId.split('-')[0].toUpperCase()+'3 (stop, 0)'); sendStickCommand(stickId, 'stop', 0);}
             
             function drag(e) {
                 if(!isDragging || throttle) return;
@@ -267,7 +312,7 @@
                 const ny = (fy/maxDist).toFixed(2);
                 const dir = getDir(nx,ny);
                 updateStatus(`${stickId.split('-')[0].toUpperCase()}3 (${dir.direct}, ${dir.stepValue})`);
-                fetch(`/cmd-stick?stickId=${stickId}&direct=${dir.direct}&stepValue=${dir.stepValue}`);
+                sendStickCommand(stickId, dir.direct, dir.stepValue);
             }
             
             function getDir(x,y) {
