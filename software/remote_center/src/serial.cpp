@@ -6,7 +6,7 @@ HardwareSerial SerialSTM32(1);
 HardwareSerial SerialLiDAR(2);
 
 void initSerialPorts() {
-  // 初始化 STM32 串口：波特率 9600，GPIO43=TX，GPIO44=RX
+  // 初始化 STM32 串口：波特率 9600，GPIO44=RX，GPIO43=TX
   SerialSTM32.begin(9600, SERIAL_8N1, 44, 43);
   Serial.println("STM32 Serial (GPIO43 TX, GPIO44 RX) initialized");
 
@@ -15,8 +15,7 @@ void initSerialPorts() {
   // SerialSTM32.write('\n');
   // Serial.println("Sent test command '0' to STM32");
 
-  // 初始化激光雷达串口：波特率 115200，GPIO19=TX，GPIO20=RX
-  // LiDAR 常用波特率 115200，如有需要可调整
+  // 初始化激光雷达串口：波特率 9600=RX，GPIO19=TX
   SerialLiDAR.begin(9600, SERIAL_8N1, 20, 19);
   Serial.println("LiDAR Serial (GPIO19 TX, GPIO20 RX) initialized");
 }
