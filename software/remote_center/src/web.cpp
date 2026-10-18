@@ -69,6 +69,7 @@ void handleWebRequest()
   if (LittleFS.exists(path)) {
     File file = LittleFS.open(path, "r");
     server.streamFile(file, contentType);
+    server.sendHeader("Cache-Control", "public, max-age=36000");
     file.close();
   } else {
     server.send(404, "text/plain", "File Not Found - index.html!");
