@@ -4,7 +4,7 @@
 
 void setup()
 {
-  Serial.begin(9600);
+  Serial.begin(9600);// UART0 43/44调试口
   delay(50);
   initSerialPorts();
 

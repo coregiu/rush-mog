@@ -1,23 +1,20 @@
 #include "serial.h"
 
-// STM32 串口 (UART1): GPIO43=TX, GPIO44=RX
+// STM32 串口 (UART1): GPIO20=RX，GPIO19=TX
 HardwareSerial SerialSTM32(1);
-// 激光雷达串口 (UART2): GPIO19=TX, GPIO20=RX
+
+// UART2：ESP ↔ 激光雷达（新分配：GPIO2=RX，GPIO1=TX）
 HardwareSerial SerialLiDAR(2);
 
 void initSerialPorts() {
-  // 初始化 STM32 串口：波特率 9600，GPIO44=RX，GPIO43=TX
-  SerialSTM32.begin(9600, SERIAL_8N1, 44, 43);
-  Serial.println("STM32 Serial (GPIO43 TX, GPIO44 RX) initialized");
+  // 初始化 STM32 串口：波特率 9600，GPIO20=RX，GPIO19=TX
+  SerialSTM32.begin(9600, SERIAL_8N1, 20, 19);
+  Serial.println("STM32 Serial (GPIO19 TX, GPIO20 RX) initialized");
 
-  // 发送测试命令验证串口通信
-  // SerialSTM32.print("0");
-  // SerialSTM32.write('\n');
-  // Serial.println("Sent test command '0' to STM32");
 
-  // 初始化激光雷达串口：波特率 9600=RX，GPIO19=TX
-  SerialLiDAR.begin(9600, SERIAL_8N1, 20, 19);
-  Serial.println("LiDAR Serial (GPIO19 TX, GPIO20 RX) initialized");
+  // 初始化激光雷达串口：波特率 9600，GPIO2=RX，GPIO1=TX
+  SerialLiDAR.begin(9600, SERIAL_8N1, 2, 1);
+  Serial.println("LiDAR Serial (TX=GPIO1, RX=GPIO2) init OK");
 }
 
 void sendToSTM32(String command) {
