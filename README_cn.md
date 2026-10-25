@@ -56,7 +56,7 @@ Rush Mog是一款致敬Unimog的VLA控制的智能万向轮小车。基于esp32 
 详细参照：[软件设计说明和代码](software/README.md)
 
 ## 手柄使用办法
-![](software/remote_center/ps2.png)
+![](software/edge_server/ps2.png)
 
 启动小车后，使用手机连接RUSH-MOG WIFI。连接成功后打开手机浏览器，输入192.168.4.1，打开PS2手柄页面，操控小车。
 

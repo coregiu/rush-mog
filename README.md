@@ -57,7 +57,7 @@ For details, see: [Hardware Design Notes](hardware/README.md)
 For details, see: [Software Design Notes and Code](software/README.md)
 
 ## How to Use the Controller
-![](software/remote_center/ps2.png)
+![](software/edge_server/ps2.png)
 
 After starting the car, connect your phone to the RUSH-MOG Wi-Fi network. Once connected, open your phone's browser and go to 192.168.4.1 to access the PS2 controller page and operate the car.
 
