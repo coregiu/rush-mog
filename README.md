@@ -1,3 +1,5 @@
+
+
 # Rush Mog
 
 [中文版](README_cn.md)
@@ -59,7 +61,7 @@ For details, see: [Software Design Notes and Code](software/README.md)
 ## How to Use the Controller
 ![](software/remote_center/ps2.png)
 
-After starting the car, connect your phone to the RUSH-MOG Wi-Fi network. Once connected, open your phone's browser and go to 192.168.4.1 to access the PS2 controller page and operate the car.
+After starting the car, connect your phone to the RUSH-MOG Wi-Fi network created by the ESP32-S3-CAM. Once connected, open your phone's browser and go to 192.168.4.1 to access the PS2 controller page and operate the car.
 
 ## Final Product Showcase
 
