@@ -1,0 +1,5 @@
+string task_id
+string instruction_text
+string voice_text
+int32 priority
+bool enable_reverse
