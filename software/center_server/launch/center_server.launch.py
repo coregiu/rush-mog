@@ -1,31 +1,41 @@
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-import os
+
+
+NODE_NAMES = [
+    "center_bridge_node",
+    "vla_inference_node",
+    "action_generator_node",
+    "reverse_operation_node",
+    "safety_manager_node",
+    "task_manager_node",
+]
+
 
 def generate_launch_description():
-    return LaunchDescription([
+    # 默认空字符串表示使用安装目录 share/center_server/config/config.yaml
+    config_file = LaunchConfiguration("config_file")
+
+    nodes = [
         Node(
             package="center_server",
-            executable="bridge_node",
-            name="bridge_node",
+            executable=name,
+            name=name,
             output="screen",
-        ),
-        Node(
-            package="center_server",
-            executable="vla_inference_node",
-            name="vla_inference_node",
-            output="screen",
-        ),
-        Node(
-            package="center_server",
-            executable="action_generator_node",
-            name="action_generator_node",
-            output="screen",
-        ),
-        Node(
-            package="center_server",
-            executable="reverse_operation_node",
-            name="reverse_operation_node",
-            output="screen",
-        ),
-    ])
+            parameters=[{"config_file": config_file}],
+        )
+        for name in NODE_NAMES
+    ]
+
+    return LaunchDescription(
+        [
+            DeclareLaunchArgument(
+                "config_file",
+                default_value="",
+                description="Path to center_server config.yaml (empty = installed default)",
+            ),
+            *nodes,
+        ]
+    )

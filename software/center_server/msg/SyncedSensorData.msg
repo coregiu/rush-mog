@@ -1,6 +1,0 @@
-builtin_interfaces/Time stamp
-sensor_msgs/Image image
-sensor_msgs/LaserScan laser
-audio_common_msgs/AudioData audio
-nav_msgs/Odometry odom
-sensor_msgs/JointState joint_state

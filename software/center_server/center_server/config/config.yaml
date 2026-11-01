@@ -1,24 +1,49 @@
-vla_engine:
-  model_name: "vla_policy_v1"
-  inference_rate: 10
-  confidence_threshold: 0.6
-  device: "cuda"
-  max_queue_size: 5
+center_server:
+  vla_engine:
+    model_name: "vla_policy_v1"
+    inference_rate: 10
+    confidence_threshold: 0.6
+    # 当前实现未加载真实模型，仅使用规则桩；有 GPU 且接入模型后可改为 cuda
+    device: "cpu"
+    max_queue_size: 5
+    default_linear_speed: 0.3
+    default_angular_speed: 0.5
 
-action_generator:
-  max_linear_speed: 0.8
-  max_angular_speed: 1.0
-  acceleration_limit: 0.3
+  action_generator:
+    max_linear_speed: 0.8
+    max_angular_speed: 1.0
+    acceleration_limit: 0.3
 
-reverse_operation:
-  reverse_speed: 0.3
-  reverse_distance: 0.5
-  emergency_stop_on_high_risk: true
+  reverse_operation:
+    reverse_speed: 0.3
+    reverse_distance: 0.5
+    operation_timeout: 5.0
+    emergency_stop_on_high_risk: true
+    arm_joint_names: ["j1", "j2", "j3", "j4", "j5"]
+    arm_home_positions: [0.0, 1.57, 0.0, 1.0, 0.5]
 
-safety:
-  obstacle_stop_distance: 0.5
-  max_twist_x: 1.0
-  max_twist_z: 1.5
+  safety:
+    obstacle_stop_distance: 0.5
+    obstacle_clear_distance: 0.7
+    max_twist_x: 1.0
+    max_twist_z: 1.5
+    data_timeout_sec: 2.0
+    laser_front_fov_deg: 60.0
+    joint_limits:
+      j1: [-3.14, 3.14]
+      j2: [-1.57, 2.09]
+      j3: [-1.57, 2.09]
+      j4: [-3.14, 3.14]
+      j5: [-3.14, 3.14]
 
-time_sync:
-  sync_window_ms: 50
+  task_manager:
+    task_timeout_sec: 30.0
+    reverse_timeout_sec: 5.0
+    status_rate: 2.0
+    # 单步任务桩：检测到非零控制指令后保持执行窗口，再判定任务成功
+    execution_hold_sec: 1.0
+
+  time_sync:
+    # 雷达/图像/音频来自不同传感器，使用近似时间同步（单位 ms）
+    sync_window_ms: 100
+    queue_size: 10

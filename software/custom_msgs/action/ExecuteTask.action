@@ -1,9 +1,11 @@
 # Goal
 string task_id
 string instruction
-# Feedback
-string progress
-string current_intent
+---
 # Result
 bool success
 string info
+---
+# Feedback
+string progress
+string current_intent

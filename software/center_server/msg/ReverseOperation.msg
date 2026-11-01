@@ -1,4 +1,0 @@
-int32 op_type
-# 0:EMERGENCY_STOP 1:REVERSE_MOVE 2:ARM_RESET 3:TASK_CANCEL 4:MANUAL_OVERRIDE
-float64 distance
-string reason

@@ -1,17 +1,46 @@
-from center_server.core.vla_engine import VLAEngine
-from center_server.core.data_preprocessor import SyncedDTO
-import torch
 import numpy as np
 
-def test_vla_engine():
-    cfg = {"device":"cpu", "confidence_threshold":0.6}
-    eng = VLAEngine(cfg)
-    dto = SyncedDTO(
-        image=torch.rand(3,224,224),
-        laser=np.random.rand(10),
-        audio=torch.rand(64,40),
-        odom={"x":0.0},
-        joint={}
+from center_server.core.data_preprocessor import SyncedDTO
+from center_server.core.vla_engine import VLAEngine
+
+
+def make_dto(instruction: str) -> SyncedDTO:
+    return SyncedDTO(
+        image=np.zeros((3, 8, 8), dtype=np.float32),
+        laser=np.ones(10, dtype=np.float32),
+        audio=np.zeros((64, 4), dtype=np.float32),
+        odom={"x": 0.0},
+        joint={},
+        task_id="task-1",
+        instruction=instruction,
     )
-    res = eng.predict(dto)
-    assert res.confidence > 0
+
+
+def test_forward_intent():
+    engine = VLAEngine({"device": "cpu", "confidence_threshold": 0.6})
+    intent = engine.predict(make_dto("请前进"))
+    assert intent.intent == "forward"
+    assert intent.task_id == "task-1"
+    assert intent.value > 0.0
+    assert intent.confidence >= 0.6
+
+
+def test_stop_has_priority_over_forward():
+    engine = VLAEngine({"confidence_threshold": 0.6})
+    intent = engine.predict(make_dto("停止前进"))
+    assert intent.intent == "stop"
+    assert intent.value == 0.0
+
+
+def test_unknown_instruction_requests_confirmation():
+    engine = VLAEngine({"confidence_threshold": 0.6})
+    intent = engine.predict(make_dto("帮我泡一杯咖啡"))
+    assert intent.intent == "stop"
+    assert intent.confidence < 0.6
+
+
+def test_unload_is_idempotent():
+    engine = VLAEngine({"confidence_threshold": 0.6})
+    engine.unload()
+    engine.unload()
+    assert engine.model is None

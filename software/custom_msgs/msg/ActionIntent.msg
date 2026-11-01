@@ -3,3 +3,4 @@ string target
 string intent
 float64 value
 float64 confidence
+bool reverse_request
