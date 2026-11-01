@@ -3,7 +3,6 @@
 
 #include <WiFi.h>
 #include <WebServer.h>
-#include <WebSocketsServer.h>
 #include <LittleFS.h>
 #include "serial.h"
 #include "SD_MMC.h"
@@ -17,9 +16,9 @@ extern IPAddress gateway;  // 网关
 extern IPAddress subnet; // 子网掩码
 
 extern WebServer server;
-extern WebSocketsServer webSocket;
 
-#define WS_PORT 81
+// 控制通道直接复用网页的 80 端口：POST /cmd，body 为纯文本命令。
+// 不再单独占用 81 端口，也不再需要 WebSocket。
 #define STREAM_PORT 8080
 
 bool initFS();
@@ -29,15 +28,17 @@ void serviceMotionKeepalive();
 void handleWebRequest();
 void handleCmdButton();
 void handleCmdStick();
+void handleCmd();
 void handleStop();
 void handleStatus();
 void handleSdcard();
 
-// 命令处理（HTTP 与 WebSocket 共用）
+// 命令处理（HTTP 接口共用）
 void processCmdButton(const String& key, const String& type);
 void processCmdStick(const String& stickId, const String& direct, const String& stepValue);
-// WebSocket 事件回调
-void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
+// 解析一条控制消息：
+//   button:<key>:<type> / stick:<stickId>:<direct>:<stepValue> / hold
+void dispatchControlMessage(const String& msg);
 
 // 视频流任务：独立端口 + 独立任务，避免阻塞控制
 void cameraStreamTask(void* arg);

@@ -180,63 +180,106 @@
     </div>
 
     <script>
-        // ==================== WebSocket 长连接 ====================
-        let ws = null;
-        let wsReconnectTimer = null;
-        const wsUrl = `ws://${location.hostname}:81`;
+        // ==================== HTTP 控制通道（80 端口） ====================
+        // 控制命令用 POST /cmd 走网页同一个 80 端口，不再占用 81 端口，
+        // 也不需要 WebSocket。命令串行发送，保证“按下/松开”按顺序到达。
         const heldButtons = new Set();
+        const cmdQueue = [];
+        let cmdSending = false;
+
+        function postControl(msg) {
+            // 请求积压时丢弃过期的续租，避免卡顿后补发一串旧心跳
+            if (msg === 'hold' && cmdQueue.length > 0) return;
+            if (cmdQueue.length >= 8) cmdQueue.shift();
+            cmdQueue.push(msg);
+            if (!cmdSending) {
+                cmdSending = true;
+                drainControlQueue();
+            }
+        }
+
+        async function sendControlOnce(msg) {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 1200);
+            try {
+                await fetch('/cmd', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'text/plain'},
+                    body: msg,
+                    cache: 'no-store',
+                    signal: ctrl.signal
+                });
+            } finally {
+                clearTimeout(timer);
+            }
+        }
+
+        async function drainControlQueue() {
+            while (cmdQueue.length > 0) {
+                const msg = cmdQueue.shift();
+                try {
+                    await sendControlOnce(msg);
+                } catch (e) {
+                    // 网络抖动时忽略；ESP32 的按住租约到期会自动停车
+                }
+            }
+            cmdSending = false;
+        }
+
+        // 按住期间每 500ms 给 ESP32 发一条 hold 续租（不下发命令，只续租）。
+        // ESP32 收到续租后才会继续把当前方向重发给 STM32；如果这里停了
+        // （松手消息丢失、页面卡死），ESP32 1.5s 后会自动补发停止。
+        let holdTimer = null;
+        let stickHeld = 0;
+
+        function startHoldKeepalive() {
+            if (holdTimer) return;
+            holdTimer = setInterval(() => postControl('hold'), 500);
+        }
+
+        function stopHoldKeepalive() {
+            if (holdTimer) {
+                clearInterval(holdTimer);
+                holdTimer = null;
+            }
+        }
+
+        function updateHoldKeepalive() {
+            const holding = stickHeld > 0 ||
+                [...heldButtons].some(k => directionButtons.has(k));
+            if (holding) startHoldKeepalive();
+            else stopHoldKeepalive();
+        }
 
         // 统一的停车入口：清空按键/摇杆状态并发 stop
-        // 持续运动由 ESP32 内部重发给 STM32，浏览器不再定时重发按钮指令
+        // 持续运动由 ESP32 内部重发给 STM32，浏览器只发续租心跳
         function sendStop() {
             heldButtons.clear();
             // 让所有摇杆也复位
             window.dispatchEvent(new Event('rush-stop'));
-            sendButtonCommand('stop', 'down');
-        }
-
-        function connectWebSocket() {
-            if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-                return;
+            stopHoldKeepalive();
+            // 丢弃还没发出的旧命令，保证停止是最后一个动作
+            cmdQueue.length = 0;
+            // 页面即将卸载时 fetch 可能被取消，用 beacon 兜底（失败也没关系，
+            // ESP32 的租约到期后会自动停车）
+            if (!navigator.sendBeacon ||
+                !navigator.sendBeacon('/cmd', 'button:stop:down')) {
+                postControl('button:stop:down');
             }
-            ws = new WebSocket(wsUrl);
-            ws.onopen = () => {
-                console.log('WebSocket connected');
-                if (wsReconnectTimer) {
-                    clearTimeout(wsReconnectTimer);
-                    wsReconnectTimer = null;
-                }
-                // 新连接先置停止，避免沿用上一次的残留运动状态
-                sendButtonCommand('stop', 'down');
-            };
-            ws.onclose = () => {
-                console.log('WebSocket disconnected, reconnecting...');
-                sendStop();
-                if (!wsReconnectTimer) {
-                    wsReconnectTimer = setTimeout(connectWebSocket, 2000);
-                }
-            };
-            ws.onerror = (e) => {
-                console.error('WebSocket error:', e);
-                ws.close();
-            };
         }
 
-        // 通过 WebSocket 发送按钮命令
+        // 通过 80 端口发送按钮命令
         function sendButtonCommand(key, type) {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(`button:${key}:${type}`);
-            }
+            postControl(`button:${key}:${type}`);
         }
 
-        // 通过 WebSocket 发送摇杆命令
+        // 通过 80 端口发送摇杆命令
         function sendStickCommand(stickId, direct, stepValue) {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(`stick:${stickId}:${direct}:${stepValue}`);
-            }
+            postControl(`stick:${stickId}:${direct}:${stepValue}`);
         }
 
-        connectWebSocket();
+        // 页面加载后先置停止，避免沿用上一次的残留运动状态
+        sendButtonCommand('stop', 'down');
 
         const statusElement = document.getElementById('status');
         const maxStatusEntries = 4;
@@ -268,6 +311,7 @@
             updateStatus(buttonId.toUpperCase()+"-down");
             // 只在按下时发一条；持续运动由 ESP32 内部对 STM32 重发
             sendButtonCommand(buttonId, 'down');
+            updateHoldKeepalive();
         }
 
         function releaseButton(buttonId) {
@@ -291,6 +335,7 @@
             } else {
                 sendButtonCommand(buttonId, 'up');
             }
+            updateHoldKeepalive();
         }
 
         buttons.forEach(buttonId => {
@@ -362,14 +407,18 @@
             }
 
             function start(e) {
-                if (!e) return;
+                if (!e || isDragging) return;
                 isDragging = true;
+                stickHeld++;
+                updateHoldKeepalive();
                 drag(e);
             }
 
             function end() {
                 if (!isDragging) return;
                 isDragging = false;
+                if (stickHeld > 0) stickHeld--;
+                updateHoldKeepalive();
                 dot.style.transform = 'translate(-50%,-50%)';
                 updateStatus(stickId.split('-')[0].toUpperCase()+'3 (stop, 0)');
                 sendStickCommand(stickId, 'stop', 0);
@@ -435,7 +484,7 @@
         const statusDot = document.getElementById('camera-status-dot');
         const statusText = document.getElementById('camera-status-text');
         const defaultImage = 'unimog.jpeg';
-        // 视频流走独立端口 8080，HTTP 80 和控制 WS 81 不再被推流阻塞
+        // 视频流走独立端口 8080，HTTP 80（网页 + 控制）不再被推流阻塞
         const streamUrl = `http://${location.hostname}:8080/stream`;
         let isStreaming = false;
         let retryCount = 0;

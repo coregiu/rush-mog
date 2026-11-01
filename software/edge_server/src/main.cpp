@@ -31,12 +31,11 @@ static bool initWiFi()
   return true;
 }
 
-// 控制任务：只处理 WebSocket，不会被视频/大文件阻塞
-static void wsControlTask(void* arg)
+// 控制任务：负责给 STM32 做运动保活；HTTP 控制命令在 80 端口处理
+static void controlTask(void* arg)
 {
   (void)arg;
   for (;;) {
-    webSocket.loop();
     serviceMotionKeepalive();
     vTaskDelay(pdMS_TO_TICKS(2));
   }
@@ -53,6 +52,7 @@ void setup()
   initFS();
   initWiFi();
 
+  server.on("/cmd", HTTP_POST, handleCmd);
   server.on("/cmd-button", handleCmdButton);
   server.on("/cmd-stick", handleCmdStick);
   server.on("/stop", handleStop);
@@ -76,16 +76,10 @@ void setup()
 
   server.begin();
 
-  // WebSocket 控制服务（端口 81）
-  webSocket.begin();
-  webSocket.onEvent(webSocketEvent);
-  // 客户端不再重复发按钮，缩短心跳以便掉线后尽快发现并停车
-  webSocket.enableHeartbeat(1000, 1000, 2);
-
   BaseType_t ok = xTaskCreatePinnedToCore(
-      wsControlTask, "ws_ctrl", 6144, nullptr, 4, nullptr, 1);
+      controlTask, "ctrl", 4096, nullptr, 4, nullptr, 1);
   if (ok != pdPASS) {
-    Serial.println("WebSocket 控制任务创建失败");
+    Serial.println("控制任务创建失败");
   }
 
   // 摄像头初始化可能较慢；失败时仍保留网页和控制，视频接口返回 503
@@ -101,13 +95,13 @@ void setup()
   }
 
   Serial.println("Web 服务器已启动");
-  Serial.printf("WebSocket 端口：%d\n", WS_PORT);
+  Serial.println("控制接口：POST http://<ip>/cmd（与网页共用 80 端口）");
   Serial.printf("视频流端口：%d\n", STREAM_PORT);
 }
 
 void loop()
 {
-  // 只负责 HTTP 静态文件/状态/SD 文件；视频和控制在独立任务
+  // 负责 HTTP（静态文件/状态/SD/控制命令）；视频推流和运动保活在独立任务
   server.handleClient();
   delay(1);
 }

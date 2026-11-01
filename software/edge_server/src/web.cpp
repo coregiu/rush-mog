@@ -14,18 +14,22 @@ IPAddress gateway(192, 168, 4, 1);  // 网关
 IPAddress subnet(255, 255, 255, 0); // 子网掩码
 
 WebServer server(80);
-WebSocketsServer webSocket(WS_PORT);
 
 bool sdcardReady = false;
 
-// WebSocket 客户端计数由事件回调维护，避免 HTTP 任务直接遍历 WS 内部客户端列表
-static volatile int wsClientCount = 0;
+// 当前持续运动命令。浏览器只在按下/松开时各发一条 HTTP 命令；
+// 按住期间 ESP32 按 200ms 把它重发给 STM32，喂 STM32 的 800ms 看门狗。
+//
+// 租约机制：HTTP 没有“连接断开”事件可依赖，所以用按住租约做失效保护。
+// 浏览器按住期间每 500ms POST 一条 hold 续租；超过 kHoldLeaseMs 没有续租
+// （松手消息丢失、页面卡死、断网）就当作已松手，主动补发停止。
+// 否则一条 "1" 会被 200ms 保活无限重发，只有 "0" 才能停下来。
+static const uint32_t kHoldLeaseMs = 1500;
 
-// 当前持续运动命令。浏览器只在按下/松开时发一条 WS 消息；
-// ESP32 内部按 200ms 把它重发给 STM32，喂 STM32 的 800ms 看门狗。
 static SemaphoreHandle_t motionMutex = nullptr;
 static String activeMotionCommand;
 static bool motionActive = false;
+static TickType_t holdDeadline = 0; // 租约到期时刻，由 motionMutex 保护
 
 void initWebControl() {
   if (motionMutex == nullptr) {
@@ -56,9 +60,11 @@ static void updateMotionState(const String& cmd) {
     // 停止 / 复位 / 测试模式：清掉持续运动
     motionActive = false;
     activeMotionCommand = "";
+    holdDeadline = 0;
   } else if (isSustainedMotionCommand(cmd)) {
     motionActive = true;
     activeMotionCommand = cmd;
+    holdDeadline = xTaskGetTickCount() + pdMS_TO_TICKS(kHoldLeaseMs);
   }
 
   xSemaphoreGive(motionMutex);
@@ -71,7 +77,32 @@ static void clearMotionState() {
   }
   motionActive = false;
   activeMotionCommand = "";
+  holdDeadline = 0;
   xSemaphoreGive(motionMutex);
+}
+
+// 浏览器按住期间每 500ms 发一条 "hold"：只续租，不直接下发命令。
+// 收到新的按下命令时 updateMotionState() 也会顺带续租一次。
+static void refreshMotionHold() {
+  if (motionMutex == nullptr ||
+      xSemaphoreTake(motionMutex, pdMS_TO_TICKS(20)) != pdTRUE) {
+    return;
+  }
+  if (motionActive) {
+    holdDeadline = xTaskGetTickCount() + pdMS_TO_TICKS(kHoldLeaseMs);
+  }
+  xSemaphoreGive(motionMutex);
+}
+
+// /status 用：读取当前是否有持续运动（加锁避免和保活任务竞争）
+static bool isMotionActive() {
+  bool active = false;
+  if (motionMutex != nullptr &&
+      xSemaphoreTake(motionMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+    active = motionActive;
+    xSemaphoreGive(motionMutex);
+  }
+  return active;
 }
 
 // 由控制任务周期调用：浏览器不重复发，ESP32 对 STM32 做重发/保活
@@ -92,14 +123,15 @@ void serviceMotionKeepalive() {
   bool active = false;
   bool needStop = false;
 
-  if (motionActive && wsClientCount > 0) {
-    cmd = activeMotionCommand;
-    active = !cmd.isEmpty();
-  } else if (motionActive) {
-    // 控制端已经全部断开，清状态并补一条停止
+  if (motionActive && (int32_t)(holdDeadline - now) <= 0) {
+    // 租约过期：浏览器没再确认“还按着”（停止消息丢失/页面卡死/断网）
     motionActive = false;
     activeMotionCommand = "";
+    holdDeadline = 0;
     needStop = true;
+  } else if (motionActive) {
+    cmd = activeMotionCommand;
+    active = !cmd.isEmpty();
   }
 
   xSemaphoreGive(motionMutex);
@@ -245,7 +277,7 @@ void handleSdcard() {
   file.close();
 }
 
-// 按钮命令处理（HTTP 与 WebSocket 共用）
+// 按钮命令处理（POST /cmd 与 /cmd-button 共用）
 void processCmdButton(const String& key, const String& type) {
   String command;
 
@@ -309,7 +341,7 @@ void handleCmdButton() {
   server.send(200);
 }
 
-// 摇杆命令处理（HTTP 与 WebSocket 共用）
+// 摇杆命令处理（POST /cmd 与 /cmd-stick 共用）
 void processCmdStick(const String& stickId, const String& direct, const String& stepValue) {
   String command;
 
@@ -373,70 +405,62 @@ void handleStatus() {
   char json[256];
   snprintf(json, sizeof(json),
            "{\"uptime_ms\":%lu,\"free_heap\":%u,\"free_psram\":%u,"
-           "\"camera\":%u,\"sdcard\":%u,\"ws_clients\":%d}",
+           "\"camera\":%u,\"sdcard\":%u,\"motion_active\":%u}",
            (unsigned long)millis(),
            (unsigned)ESP.getFreeHeap(),
            (unsigned)ESP.getFreePsram(),
            cameraReady ? 1U : 0U,
            sdcardReady ? 1U : 0U,
-           (int)wsClientCount);
+           isMotionActive() ? 1U : 0U);
   server.send(200, "application/json", String(json));
 }
 
-// WebSocket 事件回调
-void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
-  switch (type) {
-    case WStype_CONNECTED: {
-      IPAddress ip = webSocket.remoteIP(num);
-      Serial.printf("[WS] Client #%u connected from %s\n", num, ip.toString().c_str());
-      wsClientCount++;
-      // 新连接先置停止，避免沿用上一次的残留运动状态
-      clearMotionState();
-      sendToSTM32("0");
-      break;
+// 解析一条控制消息（POST /cmd 的 body）
+void dispatchControlMessage(const String& msg) {
+  //   hold                                  按住期间续租
+  //   button:<key>:<type>                   例如 button:up:down
+  //   stick:<stickId>:<direct>:<stepValue>  例如 stick:left-analog:up:5
+  if (msg == "hold") {
+    refreshMotionHold();
+  } else if (msg.startsWith("button:")) {
+    int first = msg.indexOf(':', 7);
+    if (first > 0) {
+      String key = msg.substring(7, first);
+      String eventType = msg.substring(first + 1);
+      processCmdButton(key, eventType);
     }
-    case WStype_DISCONNECTED:
-      Serial.printf("[WS] Client #%u disconnected\n", num);
-      if (wsClientCount > 0) {
-        wsClientCount--;
-      }
-      // 任何一个控制端断开都立即清持续运动并停车；安全优先，避免
-      // 多个客户端时某个客户端断开后还在执行它最后的运动命令。
-      clearMotionState();
-      sendToSTM32("0");
-      break;
-    case WStype_TEXT: {
-      if (payload == nullptr || length == 0) {
-        break;
-      }
-      // payload 不保证以 \0 结尾，必须按 length 构造
-      String msg((const char*)payload, length);
-
-      // 消息格式：
-      //   button:<key>:<type>         例如 button:up:down
-      //   stick:<stickId>:<direct>:<stepValue>  例如 stick:left-analog:up:5
-      if (msg.startsWith("button:")) {
-        int first = msg.indexOf(':', 7);
-        if (first > 0) {
-          String key = msg.substring(7, first);
-          String eventType = msg.substring(first + 1);
-          processCmdButton(key, eventType);
-        }
-      } else if (msg.startsWith("stick:")) {
-        int first = msg.indexOf(':', 6);
-        int second = msg.indexOf(':', first + 1);
-        if (first > 0 && second > first) {
-          String stickId = msg.substring(6, first);
-          String direct = msg.substring(first + 1, second);
-          String stepValue = msg.substring(second + 1);
-          processCmdStick(stickId, direct, stepValue);
-        }
-      }
-      break;
+  } else if (msg.startsWith("stick:")) {
+    int first = msg.indexOf(':', 6);
+    int second = msg.indexOf(':', first + 1);
+    if (first > 0 && second > first) {
+      String stickId = msg.substring(6, first);
+      String direct = msg.substring(first + 1, second);
+      String stepValue = msg.substring(second + 1);
+      processCmdStick(stickId, direct, stepValue);
     }
-    default:
-      break;
   }
+}
+
+// 控制入口：POST /cmd，body 为纯文本命令，和网页共用 80 端口。
+// 浏览器每条命令发一个短请求；持续运动由控制任务每 200ms 重发给 STM32。
+void handleCmd() {
+  String msg = server.arg("plain");
+  if (msg.isEmpty() && server.args() > 0) {
+    // 兼容 curl -d（application/x-www-form-urlencoded）：
+    // 这种情况下整条命令会被解析成参数名
+    msg = server.argName(0);
+  }
+  msg.trim();
+  if (msg.isEmpty()) {
+    server.send(400, "text/plain", "empty command");
+    return;
+  }
+  if (msg.length() > 32) {
+    server.send(400, "text/plain", "command too long");
+    return;
+  }
+  dispatchControlMessage(msg);
+  server.send(200, "text/plain", "ok");
 }
 
 // 读取并丢弃 HTTP 请求头，最多等 300ms
@@ -494,7 +518,7 @@ static const char STREAM_UNAVAILABLE[] =
     "Content-Length: 0\r\n"
     "Connection: close\r\n\r\n";
 
-// 摄像头流任务：端口 8080，独立于 HTTP 80 和 WS 81
+// 摄像头流任务：端口 8080，独立于 HTTP 80
 void cameraStreamTask(void* arg) {
   (void)arg;
 

@@ -3,11 +3,16 @@ const voiceBtn = document.getElementById('voice-btn');
 let recognition = null;
 let voiceEnabled = false;
 let voiceStopTimer = null;
+let voiceHoldTimer = null;
 
 function stopVoiceMotion() {
     if (voiceStopTimer) {
         clearTimeout(voiceStopTimer);
         voiceStopTimer = null;
+    }
+    if (voiceHoldTimer) {
+        clearInterval(voiceHoldTimer);
+        voiceHoldTimer = null;
     }
 }
 
@@ -84,6 +89,8 @@ function executeVoiceCommand(command) {
             // 方向键只发一条；ESP32 内部会继续重发给 STM32，2 秒后自动停车
             stopVoiceMotion();
             sendButtonCommand(matched.key, matched.type);
+            // 语音方向是“定时 2s”，期间要持续续租，否则 ESP32 1.5s 就停车了
+            voiceHoldTimer = setInterval(() => postControl('hold'), 500);
             voiceStopTimer = setTimeout(() => {
                 stopVoiceMotion();
                 sendButtonCommand('stop', 'down');
@@ -96,12 +103,12 @@ function executeVoiceCommand(command) {
     return false;
 }
 
-// 发送按钮命令（通过 WebSocket 长连接）
+// 发送按钮命令（通过 80 端口 POST /cmd）
 function sendCommandButton(key, type) {
     sendButtonCommand(key, type);
 }
 
-// 发送方向命令（通过 WebSocket 长连接）
+// 发送方向命令（通过 80 端口 POST /cmd）
 function sendCommand(cmd) {
     sendButtonCommand((cmd === '0' || cmd === 'stop') ? 'stop' : cmd, 'down');
 }

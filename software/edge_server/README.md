@@ -9,13 +9,19 @@
 - **手柄控制**: 完整的PS2风格虚拟手柄控制
 
 ## 端口说明
-- `80`：网页、静态文件、`/sdcard/*`、`/stop`、`/status`
-- `81`：WebSocket 控制通道
-- `8080`：独立 MJPEG 视频流（与 HTTP/WS 分离，避免推流阻塞控制）
+- `80`：网页、静态文件、`/sdcard/*`、`/cmd`（控制）、`/stop`、`/status`
+- `8080`：独立 MJPEG 视频流（与 HTTP 80 分离，避免推流阻塞控制）
 
-`/status` 返回 JSON，包含运行时间、剩余堆/PSRAM、摄像头/SD 状态和 WebSocket 客户端数。
+`/status` 返回 JSON，包含运行时间、剩余堆/PSRAM、摄像头/SD 状态和当前是否有持续运动（`motion_active`）。
 
-控制通道只在按下/松开时各发一条 WebSocket 消息；按住期间由 ESP32 每 200ms 把当前运动命令重发给 STM32，用来喂 STM32 的 800ms 看门狗，浏览器不需要重复发按钮指令。
+控制通道直接复用网页的 80 端口，用 `POST /cmd` 发送纯文本命令（`button:up:down`、`stick:left-analog:up:5`、`hold`），不再占用 81 端口。浏览器只在按下/松开时各发一条命令，按住期间每 500ms 发一条 `hold` 续租；ESP32 每 200ms 把当前运动命令重发给 STM32，用来喂 STM32 的 800ms 看门狗。超过 1.5s 没有续租（松手消息丢失、页面卡死或断网）ESP32 会自动补发停止。
+
+调试时可以直接用 curl 发命令（按住类命令 1.5s 内没有 `hold` 续租会自动停车）：
+
+```bash
+curl -X POST --data 'button:up:down' http://192.168.4.1/cmd
+curl -X POST --data 'button:stop:down' http://192.168.4.1/cmd
+```
 
 
 # 控制按键说明
