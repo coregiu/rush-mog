@@ -62,7 +62,20 @@ char *receive_ps2_command()
 
 uchar uart3_receive_data[DEFAULT_BUFFER_SIZE] = {0};
 int uart3_data_position = 0;
-static int uart3_frame_overflow = 0;
+
+// 拷贝 UART3 接收数据到 cmd_buffer
+void copy_uart3_data(uchar *cmd_buffer, uchar *uart3_receive_data, int uart3_data_position)
+{
+    // 清空目标数组
+    memset(cmd_buffer, 0, sizeof(cmd_buffer));
+    
+    // 拷贝（只拷贝有效长度，不拷贝多余脏数据）
+    memcpy(cmd_buffer, uart3_receive_data, uart3_data_position);
+    
+    // 拷贝完成后，清空接收缓冲区（关键！）
+    memset(uart3_receive_data, 0, sizeof(uart3_receive_data));
+    uart3_data_position = 0;
+}
 
 /*
 ************************************************************
@@ -81,53 +94,40 @@ void USART3_IRQHandler(void)
 {
     if (USART_GetITStatus(USART3, USART_IT_RXNE) != RESET) //接收中断
     {
-        uchar ch = (uchar)USART_ReceiveData(USART3);
-
-        if (ch == '\r')
+        if (uart3_data_position >= DEFAULT_BUFFER_SIZE) //防止数据过多，导致内存溢出
         {
-            // 兼容 CRLF：忽略 CR，只在 LF 时提交一帧
-        }
-        else if (ch == '\n')
-        {
-            if (!uart3_frame_overflow && uart3_data_position > 0)
-            {
-                struct command_context command_context = {0};
-                command_context.commands[0] = uart3_receive_data[0];
-                command_context.cmd_length = 1;
-                command_context.module = MODULE_MOTOR_DIRECT;
-                command_context.time_sleep_milsec = 0;
-                command_context.delay_type = DELAY_AFTER_EXE;
-
-                if (uart3_data_position >= 2)
-                {
-                    command_context.commands[1] = uart3_receive_data[1];
-                    command_context.cmd_length = 2;
-                }
-
-                if (command_context.commands[0] != COMMAND_RESET)
-                {
-                    send_to_queue_isr(&command_context);
-                }
-                else
-                {
-                    send_to_queue_front_isr(&command_context);
-                }
-            }
-
             uart3_data_position = 0;
-            uart3_frame_overflow = 0;
         }
-        else
+        uart3_receive_data[uart3_data_position] = USART_ReceiveData(USART3);
+        uart3_data_position++;
+
+        /* Check if the previous byte was a newline */
+        if (uart3_receive_data[uart3_data_position - 1] == '\n' || uart3_receive_data[uart3_data_position - 1] == '\r')
         {
-            if (uart3_data_position < DEFAULT_BUFFER_SIZE)
+            // 定义一个目标数组（你可以放到全局）
+            struct command_context command_context = {0};
+            command_context.commands[0] = uart3_receive_data[0];
+            command_context.cmd_length = 1;
+            command_context.module = MODULE_MOTOR_DIRECT;
+            command_context.time_sleep_milsec = 0;
+            command_context.delay_type = DELAY_AFTER_EXE;
+
+            if (uart3_data_position > 2)
             {
-                uart3_receive_data[uart3_data_position++] = ch;
+                command_context.commands[1] = uart3_receive_data[1];
+                command_context.cmd_length = 2;
             }
-            else
+
+            
+            if (command_context.commands[0] != COMMAND_RESET)
             {
-                // 超长帧丢弃到下一个 LF，避免半帧被当成命令执行
-                uart3_frame_overflow = 1;
+                send_to_queue_isr(&command_context);
+            } else {
+                send_to_queue_front_isr(&command_context);
             }
+            
+            // execute_commands(uart3_receive_data, uart3_data_position, COMMAND_TYPE_AUTO);
+            uart3_data_position = 0;
         }
 
         USART_ClearFlag(USART3, USART_FLAG_RXNE);
