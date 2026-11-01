@@ -60,10 +60,10 @@
 </head>
 <body class="bg-gray-100 min-h-screen flex items-center justify-center p-2 md:p-4" onselectstart="return false">
     <div class="w-full max-w-[800px] mx-auto">
-        <div class="bg-ps2gray rounded-2xl md:rounded-3xl p-4 md:p-8 shadow-2xl border-4 md:border-8 border-ps2black relative overflow-hidden">       
+        <div class="bg-ps2gray rounded-2xl md:rounded-3xl p-4 md:p-8 shadow-2xl border-4 md:border-8 border-ps2black relative overflow-hidden">
             <div class="absolute top-0 left-0 w-full h-2 md:h-4 bg-ps2black opacity-30"></div>
             <div class="absolute bottom-0 left-0 w-full h-2 md:h-4 bg-ps2black opacity-30"></div>
-            
+
             <div class="flex flex-col md:flex-row gap-0 items-center">
                 <div class="flex flex-col items-center gap-1 w-full md:w-1/3">
                     <div class="d-pad">
@@ -81,7 +81,7 @@
                         </div>
                         <div class="absolute w-12 h-12 md:w-16 md:h-16 bg-ps2black rounded-full top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-10"></div>
                     </div>
-                    
+
                     <div class="flex flex-col items-center">
                         <span class="text-ps2black font-bold mb-1 md:mb-2 text-sm">L3</span>
                         <div id="left-analog" class="analog-stick">
@@ -89,7 +89,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="flex flex-col items-center gap-2 md:gap-6 w-3/4">
                     <div class="flex items-center gap-2 md:gap-4">
                         <div class="vertical-button items-center">
@@ -110,19 +110,19 @@
                     </div>
 
                     <div class="mt-2 border-2 md:border-4 border-ps2black rounded-lg bg-black overflow-hidden relative" style="max-width: 320px; max-height: 205px;">
-                        <img 
-                            id="camera" 
-                            src="unimog.jpeg" 
-                            alt="Camera Stream" 
-                            width="320" 
+                        <img
+                            id="camera"
+                            src="unimog.jpeg"
+                            alt="Camera Stream"
+                            width="320"
                             height="205"
                             class="object-cover"
                             style="max-width: 320px; max-height: 205px; width: auto; height: auto;"
                         />
-                        <canvas 
-                            id="detection-canvas" 
+                        <canvas
+                            id="detection-canvas"
                             style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"
-                            width="320" 
+                            width="320"
                             height="205"
                         ></canvas>
                         <div id="camera-status" class="absolute top-1 right-1 flex items-center gap-1 bg-black bg-opacity-50 px-2 py-0.5 rounded text-xs text-white">
@@ -135,7 +135,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <div class="flex flex-col items-center gap-3 md:gap-6 w-1/3">
                     <div class="relative w-28 h-28 md:w-36 md:h-36">
                         <div id="triangle" class="action-button bg-ps2blue absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-1/4">△</div>
@@ -143,7 +143,7 @@
                         <div id="cross" class="action-button bg-ps2green absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-1/4">×</div>
                         <div id="square" class="action-button bg-ps2yellow absolute left-0 top-1/2 transform -translate-y-1/2 -translate-x-1/4">□</div>
                     </div>
-                    
+
                     <div class="flex flex-col items-center">
                         <span class="text-ps2black font-bold mb-1 text-sm">R3</span>
                         <div id="right-analog" class="analog-stick">
@@ -152,7 +152,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <div class="mt-3 md:mt-4 flex items-stretch w-full gap-2">
                 <div class="flex flex-col h-[60px] md:h-[60px] w-12 md:w-16 shrink-0">
                     <div id="l1" class="h-1/2 bg-ps2black rounded-md flex items-center justify-center text-white font-bold text-sm transition-all duration-100 active:scale-95">L1</div>
@@ -180,102 +180,83 @@
     </div>
 
     <script>
-        // ==================== HTTP 控制通道（80 端口） ====================
-        // 控制命令用 POST /cmd 走网页同一个 80 端口，不再占用 81 端口，
-        // 也不需要 WebSocket。命令串行发送，保证“按下/松开”按顺序到达。
+        // ========== 简化发送：直接 POST 纯文本，只在按下/松开/拖动时发送 ==========
+        // 后端 /cmd 只解析纯文本（button:... / stick:...），不要发 JSON。
         const heldButtons = new Set();
-        const cmdQueue = [];
-        let cmdSending = false;
+        const activeRequests = new Set();
+        let stopDispatch = false;
+        let stopSent = false;
 
-        function postControl(msg) {
-            // 请求积压时丢弃过期的续租，避免卡顿后补发一串旧心跳
-            if (msg === 'hold' && cmdQueue.length > 0) return;
-            if (cmdQueue.length >= 8) cmdQueue.shift();
-            cmdQueue.push(msg);
-            if (!cmdSending) {
-                cmdSending = true;
-                drainControlQueue();
-            }
-        }
-
-        async function sendControlOnce(msg) {
+        async function sendRawCmd(msg) {
             const ctrl = new AbortController();
-            const timer = setTimeout(() => ctrl.abort(), 1200);
+            activeRequests.add(ctrl);
+            const timer = setTimeout(() => ctrl.abort(), 1500);
             try {
-                await fetch('/cmd', {
+                const resp = await fetch('/cmd', {
                     method: 'POST',
                     headers: {'Content-Type': 'text/plain'},
                     body: msg,
                     cache: 'no-store',
                     signal: ctrl.signal
                 });
+                if (!resp.ok) {
+                    const text = await resp.text();
+                    console.warn(`/cmd ${resp.status}: ${text} (${msg})`);
+                }
+            } catch (e) {
+                // 超时/断网静默；ESP32 会保持最后一条运动命令
             } finally {
                 clearTimeout(timer);
+                activeRequests.delete(ctrl);
             }
         }
 
-        async function drainControlQueue() {
-            while (cmdQueue.length > 0) {
-                const msg = cmdQueue.shift();
-                try {
-                    await sendControlOnce(msg);
-                } catch (e) {
-                    // 网络抖动时忽略；ESP32 的按住租约到期会自动停车
-                }
-            }
-            cmdSending = false;
+        // 兼容旧缓存 audio.js：旧版可能会调用 postControl('hold')，这里直接忽略心跳
+        function postControl(msg) {
+            if (msg === 'hold') return;
+            stopSent = false;
+            sendRawCmd(msg);
         }
 
-        // 按住期间每 500ms 给 ESP32 发一条 hold 续租（不下发命令，只续租）。
-        // ESP32 收到续租后才会继续把当前方向重发给 STM32；如果这里停了
-        // （松手消息丢失、页面卡死），ESP32 1.5s 后会自动补发停止。
-        let holdTimer = null;
-        let stickHeld = 0;
-
-        function startHoldKeepalive() {
-            if (holdTimer) return;
-            holdTimer = setInterval(() => postControl('hold'), 500);
+        // 页面隐藏/关闭时 fetch 会被浏览器取消，停止必须用 beacon 兜底
+        function sendStopBeacon() {
+            const msg = 'button:stop:down';
+            return !!(navigator.sendBeacon && navigator.sendBeacon('/cmd', msg));
         }
 
-        function stopHoldKeepalive() {
-            if (holdTimer) {
-                clearInterval(holdTimer);
-                holdTimer = null;
-            }
-        }
-
-        function updateHoldKeepalive() {
-            const holding = stickHeld > 0 ||
-                [...heldButtons].some(k => directionButtons.has(k));
-            if (holding) startHoldKeepalive();
-            else stopHoldKeepalive();
-        }
-
-        // 统一的停车入口：清空按键/摇杆状态并发 stop
-        // 持续运动由 ESP32 内部重发给 STM32，浏览器只发续租心跳
+        // 统一停车入口：取消在途命令，避免 stop 之后又有旧的 down 到达
         function sendStop() {
+            if (stopSent) return;
+            stopSent = true;
+            activeRequests.forEach(ctrl => ctrl.abort());
+            activeRequests.clear();
+            heldButtons.forEach(id => {
+                const btn = document.getElementById(id);
+                if (btn) btn.classList.remove('button-press');
+            });
             heldButtons.clear();
-            // 让所有摇杆也复位
-            window.dispatchEvent(new Event('rush-stop'));
-            stopHoldKeepalive();
-            // 丢弃还没发出的旧命令，保证停止是最后一个动作
-            cmdQueue.length = 0;
-            // 页面即将卸载时 fetch 可能被取消，用 beacon 兜底（失败也没关系，
-            // ESP32 的租约到期后会自动停车）
-            if (!navigator.sendBeacon ||
-                !navigator.sendBeacon('/cmd', 'button:stop:down')) {
-                postControl('button:stop:down');
+            const beaconed = sendStopBeacon();
+            // 只复位摇杆 UI，不再额外发 stick stop；beacon 的全局 stop 已覆盖
+            stopDispatch = true;
+            try {
+                window.dispatchEvent(new Event('rush-stop'));
+            } finally {
+                stopDispatch = false;
+            }
+            if (!beaconed) {
+                sendRawCmd('button:stop:down');
             }
         }
 
-        // 通过 80 端口发送按钮命令
         function sendButtonCommand(key, type) {
-            postControl(`button:${key}:${type}`);
+            stopSent = false;
+            sendRawCmd(`button:${key}:${type}`);
         }
 
-        // 通过 80 端口发送摇杆命令
         function sendStickCommand(stickId, direct, stepValue) {
-            postControl(`stick:${stickId}:${direct}:${stepValue}`);
+            if (stopDispatch) return;
+            stopSent = false;
+            sendRawCmd(`stick:${stickId}:${direct}:${stepValue}`);
         }
 
         // 页面加载后先置停止，避免沿用上一次的残留运动状态
@@ -284,7 +265,7 @@
         const statusElement = document.getElementById('status');
         const maxStatusEntries = 4;
         let statusEntries = [];
-        
+
         function updateStatus(button) {
             statusEntries.unshift(`${button}`);
             if (statusEntries.length > maxStatusEntries) {
@@ -298,7 +279,7 @@
                 statusElement.appendChild(el);
             });
         }
-        
+
         const buttons = ['up','down','left','right','triangle','circle','cross','square','select','start','l1','r1','l2','r2'];
         // 真正改变行驶方向的键；松开这些键时才需要判断是否停车
         const directionButtons = new Set(['up','down','left','right','l1','r1','l2','r2']);
@@ -311,7 +292,6 @@
             updateStatus(buttonId.toUpperCase()+"-down");
             // 只在按下时发一条；持续运动由 ESP32 内部对 STM32 重发
             sendButtonCommand(buttonId, 'down');
-            updateHoldKeepalive();
         }
 
         function releaseButton(buttonId) {
@@ -335,7 +315,6 @@
             } else {
                 sendButtonCommand(buttonId, 'up');
             }
-            updateHoldKeepalive();
         }
 
         buttons.forEach(buttonId => {
@@ -367,7 +346,7 @@
                 releaseButton(buttonId);
             }, {passive: false});
         });
-        
+
         function setupAnalogStick(stickId, dotId) {
             const stick = document.getElementById(stickId);
             const dot = document.getElementById(dotId);
@@ -409,16 +388,12 @@
             function start(e) {
                 if (!e || isDragging) return;
                 isDragging = true;
-                stickHeld++;
-                updateHoldKeepalive();
                 drag(e);
             }
 
             function end() {
                 if (!isDragging) return;
                 isDragging = false;
-                if (stickHeld > 0) stickHeld--;
-                updateHoldKeepalive();
                 dot.style.transform = 'translate(-50%,-50%)';
                 updateStatus(stickId.split('-')[0].toUpperCase()+'3 (stop, 0)');
                 sendStickCommand(stickId, 'stop', 0);
@@ -456,7 +431,8 @@
             function getDir(x, y) {
                 x = parseFloat(x);
                 y = parseFloat(y);
-                let tan = Math.abs(y / x) || 99;
+                // x=0 时不能走除法；y=0 时 tan 必须是 0，不能再用 || 99
+                let tan = x === 0 ? Infinity : Math.abs(y / x);
                 let d;
                 if (tan > 2.414) d = y < 0 ? 'up' : 'down';
                 else if (tan < 0.414) d = x < 0 ? 'left' : 'right';
@@ -469,15 +445,19 @@
                 return {direct: d, stepValue: Math.round(Math.hypot(x, y) * 9)};
             }
         }
-        
+
         setupAnalogStick('left-analog','left-analog-dot');
         setupAnalogStick('right-analog','right-analog-dot');
 
-        // 页面隐藏/关闭/系统手势打断时兜底停车
+        // 页面关闭/切后台兜底停车
         window.addEventListener('pagehide', sendStop);
         window.addEventListener('beforeunload', sendStop);
+        window.addEventListener('pageshow', () => {
+            stopSent = false;
+        });
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) sendStop();
+            else stopSent = false;
         });
 
         const cameraImg = document.getElementById('camera');
@@ -562,6 +542,6 @@
         });
     </script>
     <script src="yolo.js"></script>
-    <script src="audio.js"></script>
+    <script src="audio.js?v=3"></script>
 </body>
 </html>

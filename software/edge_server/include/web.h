@@ -37,7 +37,8 @@ void handleSdcard();
 void processCmdButton(const String& key, const String& type);
 void processCmdStick(const String& stickId, const String& direct, const String& stepValue);
 // 解析一条控制消息：
-//   button:<key>:<type> / stick:<stickId>:<direct>:<stepValue> / hold
+//   button:<key>:<type> / stick:<stickId>:<direct>:<stepValue>
+// 旧页面的 hold 心跳已废弃，收到会被忽略。
 void dispatchControlMessage(const String& msg);
 
 // 视频流任务：独立端口 + 独立任务，避免阻塞控制

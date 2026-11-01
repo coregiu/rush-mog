@@ -14,14 +14,16 @@
 
 `/status` 返回 JSON，包含运行时间、剩余堆/PSRAM、摄像头/SD 状态和当前是否有持续运动（`motion_active`）。
 
-控制通道直接复用网页的 80 端口，用 `POST /cmd` 发送纯文本命令（`button:up:down`、`stick:left-analog:up:5`、`hold`），不再占用 81 端口。浏览器只在按下/松开时各发一条命令，按住期间每 500ms 发一条 `hold` 续租；ESP32 每 200ms 把当前运动命令重发给 STM32，用来喂 STM32 的 800ms 看门狗。超过 1.5s 没有续租（松手消息丢失、页面卡死或断网）ESP32 会自动补发停止。
+控制通道直接复用网页的 80 端口，用 `POST /cmd` 发送纯文本命令（`button:up:down`、`stick:left-analog:up:5`），不再占用 81 端口。浏览器只在按下/松开（摇杆为按下/拖动/松开）时发命令，按住期间不再发心跳；ESP32 每 200ms 把当前运动命令重发给 STM32，用来喂 STM32 的 800ms 看门狗，直到收到松开/停止命令。
 
-调试时可以直接用 curl 发命令（按住类命令 1.5s 内没有 `hold` 续租会自动停车）：
+调试时可以直接用 curl 发命令（按住类命令会一直保持，直到发送停止命令）：
 
 ```bash
 curl -X POST --data 'button:up:down' http://192.168.4.1/cmd
 curl -X POST --data 'button:stop:down' http://192.168.4.1/cmd
 ```
+
+松手、页面隐藏或关闭时页面会发停止命令。如果手机与 ESP32 断网且页面没有机会发停止，ESP32 会保持最后一条运动命令；重新打开页面（加载时会自动置停）或 `POST /stop` 即可停车。
 
 
 # 控制按键说明

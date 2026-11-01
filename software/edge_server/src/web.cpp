@@ -17,19 +17,12 @@ WebServer server(80);
 
 bool sdcardReady = false;
 
-// 当前持续运动命令。浏览器只在按下/松开时各发一条 HTTP 命令；
-// 按住期间 ESP32 按 200ms 把它重发给 STM32，喂 STM32 的 800ms 看门狗。
-//
-// 租约机制：HTTP 没有“连接断开”事件可依赖，所以用按住租约做失效保护。
-// 浏览器按住期间每 500ms POST 一条 hold 续租；超过 kHoldLeaseMs 没有续租
-// （松手消息丢失、页面卡死、断网）就当作已松手，主动补发停止。
-// 否则一条 "1" 会被 200ms 保活无限重发，只有 "0" 才能停下来。
-static const uint32_t kHoldLeaseMs = 1500;
-
+// 当前持续运动命令。按钮只在按下/松开时各发一条 HTTP 命令，摇杆在
+// 按下/拖动/松开时发；按住期间不再发心跳。ESP32 按 200ms 把当前运动
+// 命令重发给 STM32，喂 STM32 的 800ms 看门狗，直到收到松开/停止命令。
 static SemaphoreHandle_t motionMutex = nullptr;
 static String activeMotionCommand;
 static bool motionActive = false;
-static TickType_t holdDeadline = 0; // 租约到期时刻，由 motionMutex 保护
 
 void initWebControl() {
   if (motionMutex == nullptr) {
@@ -60,11 +53,10 @@ static void updateMotionState(const String& cmd) {
     // 停止 / 复位 / 测试模式：清掉持续运动
     motionActive = false;
     activeMotionCommand = "";
-    holdDeadline = 0;
   } else if (isSustainedMotionCommand(cmd)) {
+    // 按下后一直保持，直到收到松开/停止命令
     motionActive = true;
     activeMotionCommand = cmd;
-    holdDeadline = xTaskGetTickCount() + pdMS_TO_TICKS(kHoldLeaseMs);
   }
 
   xSemaphoreGive(motionMutex);
@@ -77,20 +69,6 @@ static void clearMotionState() {
   }
   motionActive = false;
   activeMotionCommand = "";
-  holdDeadline = 0;
-  xSemaphoreGive(motionMutex);
-}
-
-// 浏览器按住期间每 500ms 发一条 "hold"：只续租，不直接下发命令。
-// 收到新的按下命令时 updateMotionState() 也会顺带续租一次。
-static void refreshMotionHold() {
-  if (motionMutex == nullptr ||
-      xSemaphoreTake(motionMutex, pdMS_TO_TICKS(20)) != pdTRUE) {
-    return;
-  }
-  if (motionActive) {
-    holdDeadline = xTaskGetTickCount() + pdMS_TO_TICKS(kHoldLeaseMs);
-  }
   xSemaphoreGive(motionMutex);
 }
 
@@ -105,7 +83,8 @@ static bool isMotionActive() {
   return active;
 }
 
-// 由控制任务周期调用：浏览器不重复发，ESP32 对 STM32 做重发/保活
+// 由控制任务周期调用：浏览器只在按下/松开时发命令，ESP32 负责把当前
+// 运动命令持续重发给 STM32（喂 800ms 看门狗），直到收到松开/停止命令。
 void serviceMotionKeepalive() {
   static TickType_t last = 0;
   TickType_t now = xTaskGetTickCount();
@@ -120,31 +99,19 @@ void serviceMotionKeepalive() {
   }
 
   String cmd;
-  bool active = false;
-  bool needStop = false;
-
-  if (motionActive && (int32_t)(holdDeadline - now) <= 0) {
-    // 租约过期：浏览器没再确认“还按着”（停止消息丢失/页面卡死/断网）
-    motionActive = false;
-    activeMotionCommand = "";
-    holdDeadline = 0;
-    needStop = true;
-  } else if (motionActive) {
+  if (motionActive) {
     cmd = activeMotionCommand;
-    active = !cmd.isEmpty();
   }
 
   xSemaphoreGive(motionMutex);
 
-  if (active) {
+  if (!cmd.isEmpty()) {
     // 摇杆命令形如 "15"（方向1 + 速度5）。保活只重发方向，避免把用户
     // 后来按三角/方块调过的速度/微调又覆盖掉。
     if (cmd.length() == 2) {
       cmd = cmd.substring(0, 1);
     }
     sendToSTM32(cmd);
-  } else if (needStop) {
-    sendToSTM32("0");
   }
 }
 
@@ -417,12 +384,10 @@ void handleStatus() {
 
 // 解析一条控制消息（POST /cmd 的 body）
 void dispatchControlMessage(const String& msg) {
-  //   hold                                  按住期间续租
   //   button:<key>:<type>                   例如 button:up:down
   //   stick:<stickId>:<direct>:<stepValue>  例如 stick:left-analog:up:5
-  if (msg == "hold") {
-    refreshMotionHold();
-  } else if (msg.startsWith("button:")) {
+  // 旧页面的 "hold" 心跳已废弃，收到后直接忽略（不匹配下面的前缀）。
+  if (msg.startsWith("button:")) {
     int first = msg.indexOf(':', 7);
     if (first > 0) {
       String key = msg.substring(7, first);
@@ -442,7 +407,7 @@ void dispatchControlMessage(const String& msg) {
 }
 
 // 控制入口：POST /cmd，body 为纯文本命令，和网页共用 80 端口。
-// 浏览器每条命令发一个短请求；持续运动由控制任务每 200ms 重发给 STM32。
+// 按钮只在按下/松开时发短请求，摇杆在按下/拖动/松开时发；持续运动由控制任务每 200ms 重发给 STM32。
 void handleCmd() {
   String msg = server.arg("plain");
   if (msg.isEmpty() && server.args() > 0) {
