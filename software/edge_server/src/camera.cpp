@@ -36,7 +36,9 @@ bool initCamera() {
   //config.frame_size = FRAMESIZE_CIF;    // 400x296
   //config.frame_size = FRAMESIZE_VGA;    // 640x480
 
-  config.jpeg_quality = 10;    // 越小越清晰，越大越小越快
+  // QVGA 已经够网页 320px 宽显示；quality 12 比 10 的帧更小，
+  // 在 20 FPS 推流时能明显降低 WiFi 带宽和发送阻塞。
+  config.jpeg_quality = 12;    // 越小越清晰但帧越大；越大越糊但越流畅
   config.fb_count = 2;         // 双缓冲
   config.fb_location = CAMERA_FB_IN_PSRAM;
 
@@ -59,7 +61,7 @@ bool initCamera() {
 
   // 额外优化参数
   s->set_brightness(s, 1);    // 稍微提亮，减少噪点
-  s->set_quality(s, 10);
+  s->set_quality(s, 12);
 
   Serial.println("------------------------");
   Serial.print("摄像头型号: ");

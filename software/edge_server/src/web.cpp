@@ -494,7 +494,12 @@ void cameraStreamTask(void* arg) {
   WiFiClient client;
   TickType_t lastFrame = 0;
   int failCount = 0;
-  const TickType_t frameInterval = pdMS_TO_TICKS(100); // 10 FPS
+  const TickType_t frameInterval = pdMS_TO_TICKS(50); // 20 FPS；网络弱可改 66ms(15FPS) 或 100ms(10FPS)
+
+  // 每 5 秒打印一次实际推流 FPS / 平均帧大小，便于按网络情况调参
+  uint32_t framesSent = 0;
+  uint32_t bytesSent = 0;
+  uint32_t fpsWindowStart = millis();
 
   for (;;) {
     // 新连接到来时接管；旧连接直接关闭，避免多路流抢帧
@@ -561,6 +566,7 @@ void cameraStreamTask(void* arg) {
     failCount = 0;
 
     char frameHeader[128];
+    size_t frameLen = fb->len;
     int headerLen = snprintf(frameHeader, sizeof(frameHeader),
                              "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n",
                              (unsigned)fb->len);
@@ -579,6 +585,19 @@ void cameraStreamTask(void* arg) {
       client.stop();
       client = WiFiClient();
       continue;
+    }
+
+    framesSent++;
+    bytesSent += (uint32_t)frameLen;
+    uint32_t nowMs = millis();
+    if (nowMs - fpsWindowStart >= 5000) {
+      uint32_t elapsed = nowMs - fpsWindowStart;
+      Serial.printf("MJPEG: %lu FPS, %lu B/frame\n",
+                    (unsigned long)(framesSent * 1000UL / elapsed),
+                    (unsigned long)(bytesSent / framesSent));
+      framesSent = 0;
+      bytesSent = 0;
+      fpsWindowStart = nowMs;
     }
 
     vTaskDelay(pdMS_TO_TICKS(1));
