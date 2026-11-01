@@ -3,9 +3,9 @@
 
 #include <HardwareSerial.h>
 
-// STM32 串口: GPIO43=TX, GPIO44=RX
+// STM32 串口: ESP32 TX=GPIO19, RX=GPIO20 (对端 STM32 USART3)
 extern HardwareSerial SerialSTM32;
-// 激光雷达串口: GPIO19=TX, GPIO20=RX
+// 激光雷达串口: ESP32 TX=GPIO1, RX=GPIO2
 extern HardwareSerial SerialLiDAR;
 
 void initSerialPorts();

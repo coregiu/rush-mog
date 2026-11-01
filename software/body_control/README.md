@@ -10,6 +10,7 @@ ubuntu下安装： apt install arm-none-eabi-gcc
 - 烧录软件1: stlink
 ```shell
 # 安装依赖
+$ sudo apt install gcc-arm-none-eabi
 $ sudo apt-get install libusb-1.0
 $ sudo apt-get install cmake
 $ sudo apt-get install libgtk-3-dev
@@ -79,6 +80,8 @@ $ 如果在wsl中执行烧录，需要的windows terminal中执行：
 NVIC_PriorityGroupConfig(NVIC_PriorityGroup_4);           /* 设置优先级分组为4组，即抢占优先级范围为0-15 */
 ```
 - 2 使用串口工具进行命令下发调试时，注意一定要在命令后面带上换行符，因为命令接收以换行符为结束标识，没有换行符会一直收集命令。
+- 3 默认关闭 ASR-Pro 接收（`USE_ASR_RECEIVER=0`，见 `src/inc/audio_receiver.h`）。当前方案用网页语音，ASR 与 JQ6500 共用 USART2，关闭后可避免 PA3 浮空噪声被当成运动命令；如果仍然接着 ASR-Pro，把该宏改成 1。
+- 4 控制任务带失败安全：超过 800ms 没有新的运动命令会自动停车。ESP32 端按住方向键/摇杆时会周期重发，不要随意把重发间隔调大。
 
 # 参考
 https://github.com/larriti/stm32f10x-template

@@ -6,7 +6,6 @@
     <title>RUSH-MOG</title>
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <script src="ps2.js"></script>
-    <link href="ps2.css" rel="stylesheet">
     <script>
         tailwind.config = {
             theme: {
@@ -185,6 +184,38 @@
         let ws = null;
         let wsReconnectTimer = null;
         const wsUrl = `ws://${location.hostname}:81`;
+        const heldButtons = new Set();
+        let motionRepeatTimer = null;
+
+        // 按住方向键时周期性重发，既保持手感也喂 STM32 看门狗
+        function startMotionRepeat() {
+            if (motionRepeatTimer) return;
+            motionRepeatTimer = setInterval(() => {
+                const keys = [...heldButtons].filter(k => repeatButtons.has(k));
+                if (keys.length === 0) {
+                    clearInterval(motionRepeatTimer);
+                    motionRepeatTimer = null;
+                    return;
+                }
+                sendButtonCommand(keys[keys.length - 1], 'down');
+            }, 200);
+        }
+
+        function stopMotionRepeat() {
+            if (motionRepeatTimer) {
+                clearInterval(motionRepeatTimer);
+                motionRepeatTimer = null;
+            }
+        }
+
+        // 统一的停车入口：清空按键/摇杆状态并发 stop
+        function sendStop() {
+            heldButtons.clear();
+            stopMotionRepeat();
+            // 让所有摇杆也复位，避免页面隐藏后定时器继续发方向
+            window.dispatchEvent(new Event('rush-stop'));
+            sendButtonCommand('stop', 'down');
+        }
 
         function connectWebSocket() {
             if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
@@ -197,9 +228,12 @@
                     clearTimeout(wsReconnectTimer);
                     wsReconnectTimer = null;
                 }
+                // 新连接先置停止，避免沿用上一次的残留运动状态
+                sendButtonCommand('stop', 'down');
             };
             ws.onclose = () => {
                 console.log('WebSocket disconnected, reconnecting...');
+                sendStop();
                 if (!wsReconnectTimer) {
                     wsReconnectTimer = setTimeout(connectWebSocket, 2000);
                 }
@@ -245,100 +279,206 @@
         }
         
         const buttons = ['up','down','left','right','triangle','circle','cross','square','select','start','l1','r1','l2','r2'];
+        // 需要按住重复发送的键：方向/转向 + 左右微调
+        const repeatButtons = new Set(['up','down','left','right','l1','r1','l2','r2','square','circle']);
+        // 真正改变行驶方向的键；松开这些键时才需要判断是否停车
+        const directionButtons = new Set(['up','down','left','right','l1','r1','l2','r2']);
+
+        function pressButton(buttonId) {
+            if (heldButtons.has(buttonId)) return;
+            heldButtons.add(buttonId);
+            const btn = document.getElementById(buttonId);
+            if (btn) btn.classList.add('button-press');
+            updateStatus(buttonId.toUpperCase()+"-down");
+            sendButtonCommand(buttonId, 'down');
+            if (repeatButtons.has(buttonId)) startMotionRepeat();
+        }
+
+        function releaseButton(buttonId) {
+            if (!heldButtons.has(buttonId)) return;
+            heldButtons.delete(buttonId);
+            const btn = document.getElementById(buttonId);
+            if (btn) btn.classList.remove('button-press');
+            updateStatus(buttonId.toUpperCase()+"-up");
+
+            if (buttonId === 'square' || buttonId === 'circle') {
+                // 微调键松开是“恢复直行 I”，不能按停止处理
+                sendButtonCommand(buttonId, 'up');
+                const remaining = [...heldButtons].filter(k => repeatButtons.has(k));
+                if (remaining.length === 0) stopMotionRepeat();
+            } else if (directionButtons.has(buttonId)) {
+                // 多方向键同时按住时，松开一个不应立即停车
+                const remaining = [...heldButtons].filter(k => directionButtons.has(k));
+                if (remaining.length > 0) {
+                    sendButtonCommand(remaining[remaining.length - 1], 'down');
+                } else {
+                    stopMotionRepeat();
+                    sendButtonCommand('stop', 'down');
+                }
+            } else {
+                sendButtonCommand(buttonId, 'up');
+            }
+        }
+
         buttons.forEach(buttonId => {
             const btn = document.getElementById(buttonId);
             if(!btn) return;
-            
-            btn.addEventListener('mousedown', () => {
-                btn.classList.add('button-press');
-                updateStatus(buttonId.toUpperCase()+"-down");
-                sendButtonCommand(buttonId, 'down');
+
+            btn.addEventListener('mousedown', e => {
+                if (e) e.preventDefault();
+                pressButton(buttonId);
             });
-            btn.addEventListener('mouseup', () => {
-                btn.classList.remove('button-press');
-                updateStatus(buttonId.toUpperCase()+"-up");
-                sendButtonCommand(buttonId, 'up');
+            btn.addEventListener('mouseup', e => {
+                if (e) e.preventDefault();
+                releaseButton(buttonId);
             });
-            btn.addEventListener('mouseleave', () => btn.classList.remove('button-press'));
-            
+            btn.addEventListener('mouseleave', () => {
+                if (heldButtons.has(buttonId)) releaseButton(buttonId);
+            });
+
             btn.addEventListener('touchstart', e => {
                 e.preventDefault();
-                btn.classList.add('button-press');
-                updateStatus(buttonId.toUpperCase()+"-down");
-                sendButtonCommand(buttonId, 'down');
-            });
+                pressButton(buttonId);
+            }, {passive: false});
             btn.addEventListener('touchend', e => {
                 e.preventDefault();
-                btn.classList.remove('button-press');
-                updateStatus(buttonId.toUpperCase()+"-up");
-                sendButtonCommand(buttonId, 'up');
-            });
+                releaseButton(buttonId);
+            }, {passive: false});
+            btn.addEventListener('touchcancel', e => {
+                e.preventDefault();
+                releaseButton(buttonId);
+            }, {passive: false});
         });
         
         function setupAnalogStick(stickId, dotId) {
             const stick = document.getElementById(stickId);
             const dot = document.getElementById(dotId);
             let isDragging = false;
+            let lastStickCommand = null;
+            let stickRepeatTimer = null;
             const stickRect = stick.getBoundingClientRect();
             const centerX = stickRect.width/2, centerY = stickRect.height/2;
             const maxDist = centerX - 10;
             let throttle = false;
-            
+
             stick.addEventListener('mousedown', start);
             document.addEventListener('mousemove', drag);
             document.addEventListener('mouseup', end);
-            
-            dot.addEventListener('touchstart', e => {e.preventDefault(); start(getTouch(e));});
-            document.addEventListener('touchmove', e => {e.preventDefault(); drag(getTouch(e));});
-            document.addEventListener('touchend', e => {e.preventDefault(); end();});
-            
-            function getTouch(e) {const t=e.touches[0]; return {clientX:t.clientX, clientY:t.clientY};}
-            function start(e) {isDragging=true; drag(e);}
-            function end() {if(!isDragging) return; isDragging=false; dot.style.transform='translate(-50%,-50%)'; updateStatus(stickId.split('-')[0].toUpperCase()+'3 (stop, 0)'); sendStickCommand(stickId, 'stop', 0);}
-            
+            window.addEventListener('rush-stop', end);
+
+            // 整个摇杆区域都可拖动，不再要求必须按到小圆点
+            stick.addEventListener('touchstart', e => {
+                e.preventDefault();
+                start(getTouch(e));
+            }, {passive: false});
+            document.addEventListener('touchmove', e => {
+                if (!isDragging) return;
+                e.preventDefault();
+                drag(getTouch(e));
+            }, {passive: false});
+            document.addEventListener('touchend', e => {
+                if (!isDragging) return;
+                e.preventDefault();
+                end();
+            }, {passive: false});
+            document.addEventListener('touchcancel', () => {
+                if (isDragging) end();
+            });
+
+            function getTouch(e) {
+                const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]);
+                return t ? {clientX: t.clientX, clientY: t.clientY} : null;
+            }
+
+            function start(e) {
+                if (!e) return;
+                isDragging = true;
+                if (!stickRepeatTimer) {
+                    // 手指停住不动时也要继续发，否则 STM32 800ms 看门狗会停车
+                    stickRepeatTimer = setInterval(() => {
+                        if (!isDragging || !lastStickCommand || document.hidden) return;
+                        sendStickCommand(stickId, lastStickCommand.direct, lastStickCommand.stepValue);
+                    }, 200);
+                }
+                drag(e);
+            }
+
+            function end() {
+                if (!isDragging) return;
+                isDragging = false;
+                lastStickCommand = null;
+                if (stickRepeatTimer) {
+                    clearInterval(stickRepeatTimer);
+                    stickRepeatTimer = null;
+                }
+                dot.style.transform = 'translate(-50%,-50%)';
+                updateStatus(stickId.split('-')[0].toUpperCase()+'3 (stop, 0)');
+                sendStickCommand(stickId, 'stop', 0);
+            }
+
             function drag(e) {
-                if(!isDragging || throttle) return;
-                throttle=true; setTimeout(()=>throttle=false, 200);
-                
+                if (!e || !isDragging || throttle) return;
+                throttle = true;
+                // 20Hz，比原来的 5Hz 跟手；服务端有看门狗兜底
+                setTimeout(() => throttle = false, 50);
+
                 const rect = stick.getBoundingClientRect();
-                const x = e.clientX - (rect.left+centerX);
-                const y = e.clientY - (rect.top+centerY);
-                const dist = Math.hypot(x,y);
-                const fx = dist>maxDist ? x/dist*maxDist : x;
-                const fy = dist>maxDist ? y/dist*maxDist : y;
+                const x = e.clientX - (rect.left + centerX);
+                const y = e.clientY - (rect.top + centerY);
+                const dist = Math.hypot(x, y);
+                const fx = dist > maxDist ? x / dist * maxDist : x;
+                const fy = dist > maxDist ? y / dist * maxDist : y;
                 dot.style.transform = `translate(-50%,-50%) translate(${fx}px,${fy}px)`;
-                
-                const nx = (fx/maxDist).toFixed(2);
-                const ny = (fy/maxDist).toFixed(2);
-                const dir = getDir(nx,ny);
+
+                // 中心死区：避免手指微动就以 0 档 PWM 设置方向
+                if (dist < maxDist * 0.15) {
+                    lastStickCommand = null;
+                    updateStatus(`${stickId.split('-')[0].toUpperCase()}3 (stop, 0)`);
+                    sendStickCommand(stickId, 'stop', 0);
+                    return;
+                }
+
+                const nx = (fx / maxDist).toFixed(2);
+                const ny = (fy / maxDist).toFixed(2);
+                const dir = getDir(nx, ny);
+                lastStickCommand = dir;
                 updateStatus(`${stickId.split('-')[0].toUpperCase()}3 (${dir.direct}, ${dir.stepValue})`);
                 sendStickCommand(stickId, dir.direct, dir.stepValue);
             }
-            
-            function getDir(x,y) {
-                x=parseFloat(x); y=parseFloat(y);
-                let tan = Math.abs(y/x) || 99;
+
+            function getDir(x, y) {
+                x = parseFloat(x);
+                y = parseFloat(y);
+                let tan = Math.abs(y / x) || 99;
                 let d;
-                if(tan>2.414) d=y<0?'up':'down';
-                else if(tan<0.414) d=x<0?'left':'right';
+                if (tan > 2.414) d = y < 0 ? 'up' : 'down';
+                else if (tan < 0.414) d = x < 0 ? 'left' : 'right';
                 else {
-                    if(x<0&&y<0)d='uple';
-                    else if(x>0&&y<0)d='uprt';
-                    else if(x<0&&y>0)d='dnle';
-                    else d='dnrt';
+                    if (x < 0 && y < 0) d = 'uple';
+                    else if (x > 0 && y < 0) d = 'uprt';
+                    else if (x < 0 && y > 0) d = 'dnle';
+                    else d = 'dnrt';
                 }
-                return {direct:d, stepValue: Math.round(Math.hypot(x,y)*9)};
+                return {direct: d, stepValue: Math.round(Math.hypot(x, y) * 9)};
             }
         }
         
         setupAnalogStick('left-analog','left-analog-dot');
         setupAnalogStick('right-analog','right-analog-dot');
 
+        // 页面隐藏/关闭/系统手势打断时兜底停车
+        window.addEventListener('pagehide', sendStop);
+        window.addEventListener('beforeunload', sendStop);
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) sendStop();
+        });
+
         const cameraImg = document.getElementById('camera');
         const statusDot = document.getElementById('camera-status-dot');
         const statusText = document.getElementById('camera-status-text');
         const defaultImage = 'unimog.jpeg';
-        const streamUrl = '/stream';
+        // 视频流走独立端口 8080，HTTP 80 和控制 WS 81 不再被推流阻塞
+        const streamUrl = `http://${location.hostname}:8080/stream`;
         let isStreaming = false;
         let retryCount = 0;
         const maxRetries = 3;

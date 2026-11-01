@@ -39,9 +39,6 @@ const char command_module_map[COMMANDS_LENGTH][2] = {{COMMAND_STOP,          MOD
                                                       {COMMAND_AUDIO_PLAY,   MODULE_AUDIO},
                                                       {COMMAND_UNKNOWN,      MODULE_UNKNOWN}};
 
-static BaseType_t priority = 2;
-static BaseType_t *const pxHigherPriorityTaskWoken = &priority;
-
 void init_protocols()
 {
     init_command_led_module();
@@ -54,7 +51,9 @@ void init_protocols()
  */
 void init_modules()
 {
+#if USE_ASR_RECEIVER
     audio_receiver.init();
+#endif
     ps2_receiver.init();
     motor_direct_executor.init();
 
@@ -152,11 +151,13 @@ void send_to_queue_isr(struct command_context *command)
     }
     // BaseType_t xStatus = xQueueSend(command_queue, command, pdMS_TO_TICKS(100));
     // BaseType_t xStatus = xQueueSendFromISR(command_queue, &(command->command), xTicksToWait);
-    BaseType_t xStatus = xQueueSendFromISR(command_queue, command, pxHigherPriorityTaskWoken);
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    BaseType_t xStatus = xQueueSendFromISR(command_queue, command, &xHigherPriorityTaskWoken);
     if (xStatus != pdPASS)
     {
         uart_log_start_info("failed to send data"); //如果发送数据失败在这里进行错误处理
     }
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
 void send_to_queue(struct command_context *command)
@@ -183,11 +184,13 @@ void send_to_queue_front_isr(struct command_context *command)
         return;
     }
 
-    BaseType_t xStatus = xQueueSendToFrontFromISR(command_queue, command, pxHigherPriorityTaskWoken);
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    BaseType_t xStatus = xQueueSendToFrontFromISR(command_queue, command, &xHigherPriorityTaskWoken);
     if (xStatus != pdPASS)
     {
         uart_log_start_info("failed to send data"); //如果发送数据失败在这里进行错误处理
     }
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
 

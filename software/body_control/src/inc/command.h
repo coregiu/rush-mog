@@ -28,11 +28,12 @@
 
 #define COMMANDS_LENGTH 28
 
-#define DEFAULT_BUFFER_SIZE 4
+#define DEFAULT_BUFFER_SIZE 8
 
 #define DEFAULT_BOUND_RATE 9600
 
-#define MAX_COMMAND_QUEUE_SIZE 1000
+// 控制命令只需要保留很短的最新窗口；1000 项会积压旧命令并占用 10KB 堆
+#define MAX_COMMAND_QUEUE_SIZE 16
 
 
 // 命令处理队列，用于任务间通信

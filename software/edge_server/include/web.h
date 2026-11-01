@@ -20,19 +20,27 @@ extern WebServer server;
 extern WebSocketsServer webSocket;
 
 #define WS_PORT 81
+#define STREAM_PORT 8080
 
 bool initFS();
 bool initSdcard();
 void handleWebRequest();
 void handleCmdButton();
 void handleCmdStick();
-void handleCameraStream();
+void handleStop();
+void handleStatus();
 void handleSdcard();
 
 // 命令处理（HTTP 与 WebSocket 共用）
-void processCmdButton(String key, String type);
-void processCmdStick(String stickId, String direct, String stepValue);
+void processCmdButton(const String& key, const String& type);
+void processCmdStick(const String& stickId, const String& direct, const String& stepValue);
 // WebSocket 事件回调
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length);
+
+// 视频流任务：独立端口 + 独立任务，避免阻塞控制
+void cameraStreamTask(void* arg);
+
+// SD 卡是否挂载成功
+extern bool sdcardReady;
 
 #endif // WEB_H

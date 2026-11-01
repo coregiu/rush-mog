@@ -2,6 +2,19 @@
 const voiceBtn = document.getElementById('voice-btn');
 let recognition = null;
 let voiceEnabled = false;
+let voiceStopTimer = null;
+let voiceRepeatTimer = null;
+
+function stopVoiceMotion() {
+    if (voiceRepeatTimer) {
+        clearInterval(voiceRepeatTimer);
+        voiceRepeatTimer = null;
+    }
+    if (voiceStopTimer) {
+        clearTimeout(voiceStopTimer);
+        voiceStopTimer = null;
+    }
+}
 
 // 语音命令映射表（支持中英文）
 const voiceCommands = {
@@ -61,19 +74,28 @@ function executeVoiceCommand(command) {
     
     if (matched) {
         if (matched.type === 'stop') {
-            // 停止所有动作
-            sendCommand('0');
+            // 停止所有动作（服务端已支持 button:stop:down）
+            stopVoiceMotion();
+            sendButtonCommand('stop', 'down');
             updateStatus('🎙️ 停止');
         } else if (matched.type === 'press') {
             // 瞬时按键（按下后立即松开）
-            sendCommandButton(matched.key, 'down');
+            sendButtonCommand(matched.key, 'down');
             setTimeout(() => {
-                sendCommandButton(matched.key, 'up');
+                sendButtonCommand(matched.key, 'up');
             }, 200);
             updateStatus(`🎙️ ${matched.key.toUpperCase()}`);
         } else {
-            // 方向键（按下）
-            sendCommandButton(matched.key, matched.type);
+            // 方向键：语音没有“松开”事件，2 秒后自动停车，期间周期重发喂看门狗
+            stopVoiceMotion();
+            sendButtonCommand(matched.key, matched.type);
+            voiceRepeatTimer = setInterval(() => {
+                sendButtonCommand(matched.key, matched.type);
+            }, 200);
+            voiceStopTimer = setTimeout(() => {
+                stopVoiceMotion();
+                sendButtonCommand('stop', 'down');
+            }, 2000);
             updateStatus(`🎙️ ${matched.key.toUpperCase()}`);
         }
         return true;
@@ -89,7 +111,7 @@ function sendCommandButton(key, type) {
 
 // 发送方向命令（通过 WebSocket 长连接）
 function sendCommand(cmd) {
-    sendButtonCommand(cmd, 'down');
+    sendButtonCommand((cmd === '0' || cmd === 'stop') ? 'stop' : cmd, 'down');
 }
 
 // 初始化语音识别
@@ -181,6 +203,9 @@ function toggleVoiceControl() {
         if (recognition) {
             recognition.stop();
         }
+        stopVoiceMotion();
+        // 关闭语音时兜底停车，避免上一条方向命令一直生效
+        sendButtonCommand('stop', 'down');
         voiceBtn.style.backgroundColor = ''; // 恢复蓝色
         voiceBtn.classList.remove('animate-pulse');
         updateStatus('🎙️ Voice OFF');

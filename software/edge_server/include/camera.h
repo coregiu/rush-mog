@@ -24,6 +24,9 @@
 #define HREF_GPIO_NUM       7
 #define PCLK_GPIO_NUM      13
 
-void initCamera();
+// 摄像头是否初始化成功；视频任务在推流前会检查
+extern bool cameraReady;
+
+bool initCamera();
 
 #endif // CAMERA_H

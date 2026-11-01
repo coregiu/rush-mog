@@ -7,7 +7,7 @@ const ctx = detectionCanvas.getContext('2d');
 
 let yoloEnabled = false;
 let yoloModel = null;
-let yoloDetectionInterval = null;
+let yoloDetectionTimer = null;
 let yoloLoading = false;
 
 // 颜色映射表（为不同类别分配不同颜色）
@@ -170,6 +170,15 @@ async function performDetection() {
     }
 }
 
+// 串行检测：上一次 detect 完成后再排下一次，避免重入把手机 CPU 打满
+async function yoloDetectionLoop() {
+    if (!yoloEnabled) return;
+    await performDetection();
+    if (yoloEnabled) {
+        yoloDetectionTimer = setTimeout(yoloDetectionLoop, 500);
+    }
+}
+
 // 切换YOLO开关
 async function toggleYolo() {
     if (yoloLoading) return;
@@ -186,8 +195,8 @@ async function toggleYolo() {
         yoloStatusDot.className = 'w-2 h-2 rounded-full bg-green-500 animate-pulse';
         yoloStatusText.textContent = 'YOLO On';
         
-        // 开始定时检测（每500ms一次）
-        yoloDetectionInterval = setInterval(performDetection, 500);
+        // 开始串行检测（每 500ms 一次，但不会重叠）
+        yoloDetectionTimer = setTimeout(yoloDetectionLoop, 0);
         
         updateStatus('🎯 YOLO ON');
         console.log('YOLO detection enabled');
@@ -198,10 +207,10 @@ async function toggleYolo() {
         yoloStatusDot.className = 'w-2 h-2 rounded-full bg-gray-500';
         yoloStatusText.textContent = 'YOLO Off';
         
-        // 停止定时检测
-        if (yoloDetectionInterval) {
-            clearInterval(yoloDetectionInterval);
-            yoloDetectionInterval = null;
+        // 停止检测
+        if (yoloDetectionTimer) {
+            clearTimeout(yoloDetectionTimer);
+            yoloDetectionTimer = null;
         }
         
         // 清除Canvas
@@ -244,9 +253,9 @@ stopCameraStream = function() {
         yoloBtn.style.backgroundColor = '';
         yoloStatusDot.className = 'w-2 h-2 rounded-full bg-gray-500';
         yoloStatusText.textContent = 'YOLO Off';
-        if (yoloDetectionInterval) {
-            clearInterval(yoloDetectionInterval);
-            yoloDetectionInterval = null;
+        if (yoloDetectionTimer) {
+            clearTimeout(yoloDetectionTimer);
+            yoloDetectionTimer = null;
         }
         ctx.clearRect(0, 0, detectionCanvas.width, detectionCanvas.height);
     }
