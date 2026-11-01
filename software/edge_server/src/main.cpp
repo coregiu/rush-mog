@@ -37,6 +37,7 @@ static void wsControlTask(void* arg)
   (void)arg;
   for (;;) {
     webSocket.loop();
+    serviceMotionKeepalive();
     vTaskDelay(pdMS_TO_TICKS(2));
   }
 }
@@ -46,6 +47,7 @@ void setup()
   Serial.begin(115200); // 调试口提速，避免日志阻塞控制
   delay(100);
   initSerialPorts();
+  initWebControl();
 
   // 先起网络和控制，再初始化摄像头/SD；摄像头或 SD 异常不影响控制可用性
   initFS();
@@ -77,7 +79,8 @@ void setup()
   // WebSocket 控制服务（端口 81）
   webSocket.begin();
   webSocket.onEvent(webSocketEvent);
-  webSocket.enableHeartbeat(5000, 3000, 2);
+  // 客户端不再重复发按钮，缩短心跳以便掉线后尽快发现并停车
+  webSocket.enableHeartbeat(1000, 1000, 2);
 
   BaseType_t ok = xTaskCreatePinnedToCore(
       wsControlTask, "ws_ctrl", 6144, nullptr, 4, nullptr, 1);

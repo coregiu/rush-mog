@@ -24,6 +24,8 @@ extern WebSocketsServer webSocket;
 
 bool initFS();
 bool initSdcard();
+void initWebControl();
+void serviceMotionKeepalive();
 void handleWebRequest();
 void handleCmdButton();
 void handleCmdStick();

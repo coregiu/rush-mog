@@ -185,34 +185,12 @@
         let wsReconnectTimer = null;
         const wsUrl = `ws://${location.hostname}:81`;
         const heldButtons = new Set();
-        let motionRepeatTimer = null;
-
-        // 按住方向键时周期性重发，既保持手感也喂 STM32 看门狗
-        function startMotionRepeat() {
-            if (motionRepeatTimer) return;
-            motionRepeatTimer = setInterval(() => {
-                const keys = [...heldButtons].filter(k => repeatButtons.has(k));
-                if (keys.length === 0) {
-                    clearInterval(motionRepeatTimer);
-                    motionRepeatTimer = null;
-                    return;
-                }
-                sendButtonCommand(keys[keys.length - 1], 'down');
-            }, 200);
-        }
-
-        function stopMotionRepeat() {
-            if (motionRepeatTimer) {
-                clearInterval(motionRepeatTimer);
-                motionRepeatTimer = null;
-            }
-        }
 
         // 统一的停车入口：清空按键/摇杆状态并发 stop
+        // 持续运动由 ESP32 内部重发给 STM32，浏览器不再定时重发按钮指令
         function sendStop() {
             heldButtons.clear();
-            stopMotionRepeat();
-            // 让所有摇杆也复位，避免页面隐藏后定时器继续发方向
+            // 让所有摇杆也复位
             window.dispatchEvent(new Event('rush-stop'));
             sendButtonCommand('stop', 'down');
         }
@@ -279,8 +257,6 @@
         }
         
         const buttons = ['up','down','left','right','triangle','circle','cross','square','select','start','l1','r1','l2','r2'];
-        // 需要按住重复发送的键：方向/转向 + 左右微调
-        const repeatButtons = new Set(['up','down','left','right','l1','r1','l2','r2','square','circle']);
         // 真正改变行驶方向的键；松开这些键时才需要判断是否停车
         const directionButtons = new Set(['up','down','left','right','l1','r1','l2','r2']);
 
@@ -290,8 +266,8 @@
             const btn = document.getElementById(buttonId);
             if (btn) btn.classList.add('button-press');
             updateStatus(buttonId.toUpperCase()+"-down");
+            // 只在按下时发一条；持续运动由 ESP32 内部对 STM32 重发
             sendButtonCommand(buttonId, 'down');
-            if (repeatButtons.has(buttonId)) startMotionRepeat();
         }
 
         function releaseButton(buttonId) {
@@ -304,15 +280,12 @@
             if (buttonId === 'square' || buttonId === 'circle') {
                 // 微调键松开是“恢复直行 I”，不能按停止处理
                 sendButtonCommand(buttonId, 'up');
-                const remaining = [...heldButtons].filter(k => repeatButtons.has(k));
-                if (remaining.length === 0) stopMotionRepeat();
             } else if (directionButtons.has(buttonId)) {
                 // 多方向键同时按住时，松开一个不应立即停车
                 const remaining = [...heldButtons].filter(k => directionButtons.has(k));
                 if (remaining.length > 0) {
                     sendButtonCommand(remaining[remaining.length - 1], 'down');
                 } else {
-                    stopMotionRepeat();
                     sendButtonCommand('stop', 'down');
                 }
             } else {
@@ -354,8 +327,6 @@
             const stick = document.getElementById(stickId);
             const dot = document.getElementById(dotId);
             let isDragging = false;
-            let lastStickCommand = null;
-            let stickRepeatTimer = null;
             const stickRect = stick.getBoundingClientRect();
             const centerX = stickRect.width/2, centerY = stickRect.height/2;
             const maxDist = centerX - 10;
@@ -393,24 +364,12 @@
             function start(e) {
                 if (!e) return;
                 isDragging = true;
-                if (!stickRepeatTimer) {
-                    // 手指停住不动时也要继续发，否则 STM32 800ms 看门狗会停车
-                    stickRepeatTimer = setInterval(() => {
-                        if (!isDragging || !lastStickCommand || document.hidden) return;
-                        sendStickCommand(stickId, lastStickCommand.direct, lastStickCommand.stepValue);
-                    }, 200);
-                }
                 drag(e);
             }
 
             function end() {
                 if (!isDragging) return;
                 isDragging = false;
-                lastStickCommand = null;
-                if (stickRepeatTimer) {
-                    clearInterval(stickRepeatTimer);
-                    stickRepeatTimer = null;
-                }
                 dot.style.transform = 'translate(-50%,-50%)';
                 updateStatus(stickId.split('-')[0].toUpperCase()+'3 (stop, 0)');
                 sendStickCommand(stickId, 'stop', 0);
@@ -419,7 +378,7 @@
             function drag(e) {
                 if (!e || !isDragging || throttle) return;
                 throttle = true;
-                // 20Hz，比原来的 5Hz 跟手；服务端有看门狗兜底
+                // 只在手指移动时发 20Hz；手指停住后由 ESP32 继续重发给 STM32
                 setTimeout(() => throttle = false, 50);
 
                 const rect = stick.getBoundingClientRect();
@@ -432,7 +391,6 @@
 
                 // 中心死区：避免手指微动就以 0 档 PWM 设置方向
                 if (dist < maxDist * 0.15) {
-                    lastStickCommand = null;
                     updateStatus(`${stickId.split('-')[0].toUpperCase()}3 (stop, 0)`);
                     sendStickCommand(stickId, 'stop', 0);
                     return;
@@ -441,7 +399,7 @@
                 const nx = (fx / maxDist).toFixed(2);
                 const ny = (fy / maxDist).toFixed(2);
                 const dir = getDir(nx, ny);
-                lastStickCommand = dir;
+                // 手指停住不动时不再重复发；ESP32 会继续把最后方向重发给 STM32
                 updateStatus(`${stickId.split('-')[0].toUpperCase()}3 (${dir.direct}, ${dir.stepValue})`);
                 sendStickCommand(stickId, dir.direct, dir.stepValue);
             }

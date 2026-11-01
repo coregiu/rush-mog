@@ -4,6 +4,7 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <freertos/semphr.h>
 #include <Esp.h>
 #include <stdio.h>
 #include <string.h>
@@ -19,6 +20,101 @@ bool sdcardReady = false;
 
 // WebSocket 客户端计数由事件回调维护，避免 HTTP 任务直接遍历 WS 内部客户端列表
 static volatile int wsClientCount = 0;
+
+// 当前持续运动命令。浏览器只在按下/松开时发一条 WS 消息；
+// ESP32 内部按 200ms 把它重发给 STM32，喂 STM32 的 800ms 看门狗。
+static SemaphoreHandle_t motionMutex = nullptr;
+static String activeMotionCommand;
+static bool motionActive = false;
+
+void initWebControl() {
+  if (motionMutex == nullptr) {
+    motionMutex = xSemaphoreCreateMutex();
+  }
+}
+
+static bool isSustainedMotionCommand(const String& cmd) {
+  // 按钮：1~9 / A / B / C；摇杆："15" 这类两字节命令
+  if (cmd.length() == 1) {
+    char c = cmd[0];
+    return (c >= '1' && c <= '9') || c == 'A' || c == 'B' || c == 'C';
+  }
+  if (cmd.length() == 2) {
+    char c = cmd[0];
+    return c >= '1' && c <= '8';
+  }
+  return false;
+}
+
+static void updateMotionState(const String& cmd) {
+  if (motionMutex == nullptr ||
+      xSemaphoreTake(motionMutex, portMAX_DELAY) != pdTRUE) {
+    return;
+  }
+
+  if (cmd == "0" || cmd == "J" || cmd == "D") {
+    // 停止 / 复位 / 测试模式：清掉持续运动
+    motionActive = false;
+    activeMotionCommand = "";
+  } else if (isSustainedMotionCommand(cmd)) {
+    motionActive = true;
+    activeMotionCommand = cmd;
+  }
+
+  xSemaphoreGive(motionMutex);
+}
+
+static void clearMotionState() {
+  if (motionMutex == nullptr ||
+      xSemaphoreTake(motionMutex, portMAX_DELAY) != pdTRUE) {
+    return;
+  }
+  motionActive = false;
+  activeMotionCommand = "";
+  xSemaphoreGive(motionMutex);
+}
+
+// 由控制任务周期调用：浏览器不重复发，ESP32 对 STM32 做重发/保活
+void serviceMotionKeepalive() {
+  static TickType_t last = 0;
+  TickType_t now = xTaskGetTickCount();
+  if (now - last < pdMS_TO_TICKS(200)) {
+    return;
+  }
+  last = now;
+
+  if (motionMutex == nullptr ||
+      xSemaphoreTake(motionMutex, pdMS_TO_TICKS(20)) != pdTRUE) {
+    return;
+  }
+
+  String cmd;
+  bool active = false;
+  bool needStop = false;
+
+  if (motionActive && wsClientCount > 0) {
+    cmd = activeMotionCommand;
+    active = !cmd.isEmpty();
+  } else if (motionActive) {
+    // 控制端已经全部断开，清状态并补一条停止
+    motionActive = false;
+    activeMotionCommand = "";
+    needStop = true;
+  }
+
+  xSemaphoreGive(motionMutex);
+
+  if (active) {
+    // 摇杆命令形如 "15"（方向1 + 速度5）。保活只重发方向，避免把用户
+    // 后来按三角/方块调过的速度/微调又覆盖掉。
+    if (cmd.length() == 2) {
+      cmd = cmd.substring(0, 1);
+    }
+    sendToSTM32(cmd);
+  } else if (needStop) {
+    sendToSTM32("0");
+  }
+}
 
 // 初始化 LittleFS
 bool initFS()
@@ -198,6 +294,7 @@ void processCmdButton(const String& key, const String& type) {
 
   if (!command.isEmpty()) {
     sendToSTM32(command);
+    updateMotionState(command);
   }
 }
 
@@ -249,6 +346,7 @@ void processCmdStick(const String& stickId, const String& direct, const String& 
 
   if (!command.isEmpty()) {
     sendToSTM32(command);
+    updateMotionState(command);
   }
 }
 
@@ -266,6 +364,7 @@ void handleCmdStick() {
 
 // 显式停车接口：浏览器 pagehide/断线兜底可以用
 void handleStop() {
+  clearMotionState();
   sendToSTM32("0");
   server.send(200, "text/plain", "stopped");
 }
@@ -292,6 +391,7 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
       Serial.printf("[WS] Client #%u connected from %s\n", num, ip.toString().c_str());
       wsClientCount++;
       // 新连接先置停止，避免沿用上一次的残留运动状态
+      clearMotionState();
       sendToSTM32("0");
       break;
     }
@@ -300,10 +400,10 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length)
       if (wsClientCount > 0) {
         wsClientCount--;
       }
-      // 最后一个控制端断开时立即停车；多客户端时避免误停另一个客户端
-      if (wsClientCount == 0) {
-        sendToSTM32("0");
-      }
+      // 任何一个控制端断开都立即清持续运动并停车；安全优先，避免
+      // 多个客户端时某个客户端断开后还在执行它最后的运动命令。
+      clearMotionState();
+      sendToSTM32("0");
       break;
     case WStype_TEXT: {
       if (payload == nullptr || length == 0) {

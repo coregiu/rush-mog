@@ -3,13 +3,8 @@ const voiceBtn = document.getElementById('voice-btn');
 let recognition = null;
 let voiceEnabled = false;
 let voiceStopTimer = null;
-let voiceRepeatTimer = null;
 
 function stopVoiceMotion() {
-    if (voiceRepeatTimer) {
-        clearInterval(voiceRepeatTimer);
-        voiceRepeatTimer = null;
-    }
     if (voiceStopTimer) {
         clearTimeout(voiceStopTimer);
         voiceStopTimer = null;
@@ -86,12 +81,9 @@ function executeVoiceCommand(command) {
             }, 200);
             updateStatus(`🎙️ ${matched.key.toUpperCase()}`);
         } else {
-            // 方向键：语音没有“松开”事件，2 秒后自动停车，期间周期重发喂看门狗
+            // 方向键只发一条；ESP32 内部会继续重发给 STM32，2 秒后自动停车
             stopVoiceMotion();
             sendButtonCommand(matched.key, matched.type);
-            voiceRepeatTimer = setInterval(() => {
-                sendButtonCommand(matched.key, matched.type);
-            }, 200);
             voiceStopTimer = setTimeout(() => {
                 stopVoiceMotion();
                 sendButtonCommand('stop', 'down');
