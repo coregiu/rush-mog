@@ -92,6 +92,9 @@ void copy_uart3_data(uchar *cmd_buffer, uchar *uart3_receive_data, int uart3_dat
 */
 void USART3_IRQHandler(void)
 {
+    // 定义一个目标数组
+    struct command_context command_context = {0};
+
     if (USART_GetITStatus(USART3, USART_IT_RXNE) != RESET) //接收中断
     {
         if (uart3_data_position >= DEFAULT_BUFFER_SIZE) //防止数据过多，导致内存溢出
@@ -104,8 +107,6 @@ void USART3_IRQHandler(void)
         /* Check if the previous byte was a newline */
         if (uart3_receive_data[uart3_data_position - 1] == '\n' || uart3_receive_data[uart3_data_position - 1] == '\r')
         {
-            // 定义一个目标数组（你可以放到全局）
-            struct command_context command_context = {0};
             command_context.commands[0] = uart3_receive_data[0];
             command_context.cmd_length = 1;
             command_context.module = MODULE_MOTOR_DIRECT;
