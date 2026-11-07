@@ -1,0 +1,1841 @@
+openapi: 3.0.3
+
+info:
+  title: Rush-MOG 模块接口
+  version: 1.0.0
+  description: |
+    Rush-MOG 各模块接口归档，按模块分组：
+
+    | 模块 | 传输 | 入口 | 说明 |
+    | --- | --- | --- | --- |
+    | **Edge Server** | HTTP | `http://192.168.4.1`（80） | ESP32-S3 网页手柄、控制命令、状态、静态资源、MJPEG 图传 |
+    | **Center Server** | HTTP | `http://127.0.0.1:8000` | SmolVLA 多模态推理、健康检查、模型信息 |
+    | **Body Control** | UART | STM32 USART3，9600 8N1 | ESP32-S3 → STM32 的 ASCII 运动/音频命令，无 ACK |
+
+    > **ROS 说明**：`software/ros` 的 ROS 2 话题/服务/Action 不是 HTTP，
+    > 未纳入本 OpenAPI 文件，详见 `software/ros/README.md`。
+    >
+    > **UART 说明**：OpenAPI/Swagger 只原生描述 HTTP。本文档用
+    > `/body-control/uart/command` 作为**虚拟归档路径**，并在
+    > `x-body-control-uart` 中给出完整 UART 帧格式、命令表和 ACK 行为。
+    > 该路径不是 HTTP 端点，请勿用 Swagger “Try it out” 调用。
+
+    详细文档：
+    - Edge Server：`software/edge_server/README.md`
+    - Center Server：`software/center_server/README.md`、`DESIGN.md`
+    - Body Control：`software/body_control/README.md`
+
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+
+servers:
+  - url: "http://192.168.4.1"
+    description: Edge Server（ESP32-S3 AP，HTTP 80）
+
+# Edge/UART/健康检查默认匿名；Center 受保护端点在各 operation 上覆盖为可选鉴权
+security: []
+
+tags:
+  - name: Edge Server
+    description: |
+      ESP32-S3 车载上位机。手机连接 `RUSH-MOG` Wi-Fi 后访问
+      `http://192.168.4.1`。80 端口负责网页/静态文件/控制/状态，
+      8080 端口负责 MJPEG 图传。控制命令最终通过 UART 转发给 STM32。
+    x-docs: "./edge_server/README.md"
+  - name: Center Server
+    description: |
+      独立部署的 SmolVLA 中心推理服务，默认监听 `0.0.0.0:8000`。
+      车载 ROS 通过 `POST /v1/infer` 发送语言指令/图像/本体状态，
+      服务返回动作块及第一步映射后的底盘/机械臂命令。
+      本服务不直接控制 STM32。
+
+      中心服务的 `GET /` 服务信息因与 Edge Server 的 `GET /` 冲突，
+      不单独占用 path，见 `x-center-server.root_response`；CORS 见
+      `x-center-server.cors`。
+    x-docs: "./center_server/README.md"
+  - name: Body Control (UART)
+    description: |
+      STM32F103C8T6 车体控制器的 UART 命令协议。ESP32-S3 UART1
+      （GPIO19 TX / GPIO20 RX）连接 STM32 USART3（PB10 TX / PB11 RX），
+      9600 8N1，命令以 `\n` 结束。命令无 ACK/无遥测返回。
+    x-docs: "./body_control/README.md"
+
+x-tagGroups:
+  - name: 车载控制
+    tags:
+      - Edge Server
+      - Body Control (UART)
+  - name: 中心推理
+    tags:
+      - Center Server
+
+x-modules:
+  - id: edge_server
+    name: Edge Server
+    transport: http
+    base_url: "http://192.168.4.1"
+    ports:
+      http: 80
+      mjpeg: 8080
+    source:
+      - "edge_server/src/main.cpp"
+      - "edge_server/src/web.cpp"
+      - "edge_server/src/serial.cpp"
+  - id: center_server
+    name: Center Server
+    transport: http
+    base_url: "http://127.0.0.1:8000"
+    source:
+      - "center_server/center_server/http_api.py"
+      - "center_server/center_server/service.py"
+      - "center_server/center_server/engine.py"
+  - id: body_control
+    name: Body Control
+    transport: uart
+    source:
+      - "body_control/src/src/ps2_receiver.c"
+      - "body_control/src/src/controller.c"
+      - "body_control/src/inc/command.h"
+
+x-edge-network:
+  mode: AP
+  ssid: "RUSH-MOG"
+  ip: "192.168.4.1"
+  gateway: "192.168.4.1"
+  subnet: "255.255.255.0"
+  channel: 6
+  max_clients: 2
+  ports:
+    http: 80
+    mjpeg: 8080
+  note: "手机连接该 AP 后打开 http://192.168.4.1 进入 PS2 手柄页面。"
+
+x-edge-http:
+  method_filtering: |
+    只有 `POST /cmd` 在 ESP32 代码中限定为 POST；`/cmd-button`、`/cmd-stick`、
+    `/stop`、`/status`、`/stream` 使用 `server.on(uri, handler)` 注册，
+    未限制 HTTP 方法。本文档按页面实际用法记录为 GET。
+  note: "控制类请求建议仍使用文档中的方法，避免中间代理/浏览器行为差异。"
+
+x-edge-motion-keepalive:
+  interval_ms: 200
+  sustained_commands:
+    - "1..9"
+    - "A"
+    - "B"
+    - "C"
+    - "two-byte stick commands, e.g. 15"
+  clear_commands:
+    - "0"
+    - "J"
+    - "D"
+  behavior: |
+    ESP32 保存当前持续运动命令，每 200ms 重发给 STM32；两字节摇杆命令
+    只重发方向位（如 15 → 1），避免覆盖之后调整的 PWM/微调。
+    收到 0 / J / D 或调用 POST /stop 后清除。
+  warning: |
+    如果客户端只发送按下命令而未发送松开/停止命令，ESP32 会保持最后一条
+    运动命令；页面隐藏/关闭时应发送 button:stop:down 或 POST /stop。
+
+x-edge-command-mapping:
+  note: |
+    HTTP 控制消息到 STM32 UART 命令的映射（与 edge_server/src/web.cpp 一致）。
+    `down` 为按下事件，`up` 为松开事件；null 表示松开时不发送命令。
+  button:
+    up:
+      down: "1"
+      up: "0"
+    down:
+      down: "2"
+      up: "0"
+    left:
+      down: "3"
+      up: "0"
+    right:
+      down: "4"
+      up: "0"
+    triangle:
+      down: "E"
+      up: null
+    cross:
+      down: "F"
+      up: null
+    square:
+      down: "G"
+      up: "I"
+    circle:
+      down: "H"
+      up: "I"
+    l1:
+      down: "9"
+      up: "0"
+    r1:
+      down: "A"
+      up: "0"
+    l2:
+      down: "B"
+      up: "0"
+    r2:
+      down: "C"
+      up: "0"
+    start:
+      down: "D"
+      up: null
+    select:
+      down: "J"
+      up: null
+    stop:
+      down: "0"
+      up: "0"
+  stick:
+    stickId: "left-analog"
+    format: "{direction_prefix}{stepValue}"
+    directions:
+      up: "1"
+      down: "2"
+      left: "3"
+      right: "4"
+      uple: "5"
+      uprt: "6"
+      dnle: "7"
+      dnrt: "8"
+    stop: "0"
+    zero_step: "0"
+
+x-edge-mjpeg:
+  port: 8080
+  path: "/stream"
+  content_type: "multipart/x-mixed-replace; boundary=frame"
+  frame:
+    headers:
+      - "Content-Type: image/jpeg"
+      - "Content-Length: <jpeg_bytes>"
+    prefix: '--frame\r\n'
+    separator: '\r\n\r\n'
+    trailer: '\r\n'
+  resolution: "320x240 (QVGA)"
+  jpeg_quality: 12
+  target_fps: 20
+  notes:
+    - "端口 80 的 /stream 返回 302 到 8080。"
+    - "摄像头未就绪时端口 8080 返回 503，无响应体。"
+    - "新连接会接管旧连接，避免多路流抢帧。"
+
+x-center-server:
+  service: "rush-mog-center-server"
+  version: "0.1.0"
+  default_base_url: "http://127.0.0.1:8000"
+  transport: http-json
+  auth:
+    optional: true
+    note: "仅当 server.api_key 非空时启用；支持 Bearer 或 X-API-Key。"
+    schemes:
+      - centerBearer
+      - centerApiKey
+    protected_paths:
+      - "/v1/infer"
+      - "/v1/reset"
+      - "/v1/warmup"
+      - "/v1/model"
+    public_paths:
+      - "/v1/health"
+      - "/v1/healthz"
+      - "/health"
+      - "/v1/ready"
+      - "/readyz"
+      - "/healthz"
+      - "/livez"
+  limits:
+    instruction_max_chars: 512
+    max_images: 8
+    max_body_bytes: 16777216
+    max_image_bytes: 6291456
+    max_image_pixels: 25000000
+    chunk_size:
+      min: 1
+      max: 1000
+    inference_concurrency: "单进程串行（引擎 RLock）"
+  cors:
+    allow_methods: ["GET", "POST", "OPTIONS"]
+    allow_headers: ["Content-Type", "Authorization", "X-API-Key", "X-Request-ID"]
+    expose_headers: ["X-Request-ID"]
+    allow_origin: "server.cors_allow_origin（默认 *）"
+  root_response:
+    description: "GET / 的服务信息响应；为避免与 Edge Server 的 GET / 冲突，不单独占用 OpenAPI path。"
+    value:
+      ok: true
+      service: "rush-mog-center-server"
+      version: "0.1.0"
+      status: "ok"
+      endpoints:
+        health: "GET /v1/health"
+        ready: "GET /v1/ready"
+        model: "GET /v1/model"
+        infer: "POST /v1/infer"
+        reset: "POST /v1/reset"
+        warmup: "POST /v1/warmup"
+
+x-body-control-uart:
+  module: Body Control
+  mcu: STM32F103C8T6
+  link:
+    stm32_usart: USART3
+    stm32_pins: "PB10 TX / PB11 RX"
+    peer: "ESP32-S3 UART1"
+    peer_pins: "GPIO19 TX / GPIO20 RX"
+    baudrate: 9600
+    data_bits: 8
+    parity: none
+    stop_bits: 1
+    flow_control: none
+    electrical: "3.3V TTL（共地）"
+  framing:
+    format: "<command_id>[<second_byte>]\\n"
+    terminators: ["\\n", "\\r"]
+    recommended_terminator: "\\n"
+    warning: "不要发送 \\r\\n：固件在 \\r 或 \\n 处都会结束当前帧。"
+    max_command_bytes: 2
+    receive_buffer_bytes: 4
+    note: "命令超过 2 字节时固件只取前 2 字节；超过 4 字节接收缓冲会回绕。"
+  ack:
+    supported: false
+    response: "无"
+    note: |
+      STM32 不在 USART3 上返回 ACK/状态/遥测，uart_log 输出也被关闭。
+      命令是否生效只能通过车体动作、Edge /status（仅 ESP32 状态）或后续
+      ROS 底盘反馈确认。
+  second_byte:
+    motion_direct: "0-9/A/B/C/D 命令可带 1 位 PWM：0=停，1..9 对应约 11%..100% 占空比。"
+    audio_play: "P 命令可带 1 位曲目索引 1..9；不带则播放 V8_STOP（索引 1）。"
+    audio_other: "K/L/M/N/O 的第二字节被忽略。"
+    speed_trim: "E/F/G/H/I 的第二字节被忽略。"
+    reset: "J 的第二字节被忽略。"
+  implementation_notes:
+    - "K-P 音频命令由 Body Control 支持，但当前 edge_server 的 /cmd 映射未使用这些命令。"
+    - "MODULE_ARM_BOT 在命令表中没有对应命令 ID；arm_roboot_executor.update_state 当前为空实现。"
+  related_uarts:
+    - name: "JQ6500 音频模块"
+      usart: "USART2"
+      baudrate: 9600
+      direction: "STM32 → JQ6500"
+      note: "内部音频链路，不属于整车控制接口。"
+  commands:
+    - id: "0"
+      name: "stop"
+      module: "motor_direct"
+      description: "停止；清空持续运动。"
+      second_byte: "PWM 0-9（一般不带）"
+    - id: "1"
+      name: "forward"
+      module: "motor_direct"
+      description: "前进。"
+      second_byte: "PWM 0-9"
+    - id: "2"
+      name: "backward"
+      module: "motor_direct"
+      description: "后退。"
+      second_byte: "PWM 0-9"
+    - id: "3"
+      name: "strafe_left"
+      module: "motor_direct"
+      description: "向左横向移动。"
+      second_byte: "PWM 0-9"
+    - id: "4"
+      name: "strafe_right"
+      module: "motor_direct"
+      description: "向右横向移动。"
+      second_byte: "PWM 0-9"
+    - id: "5"
+      name: "forward_left"
+      module: "motor_direct"
+      description: "向左前斜向移动。"
+      second_byte: "PWM 0-9"
+    - id: "6"
+      name: "forward_right"
+      module: "motor_direct"
+      description: "向右前斜向移动。"
+      second_byte: "PWM 0-9"
+    - id: "7"
+      name: "backward_left"
+      module: "motor_direct"
+      description: "向左后斜向移动。"
+      second_byte: "PWM 0-9"
+    - id: "8"
+      name: "backward_right"
+      module: "motor_direct"
+      description: "向右后斜向移动。"
+      second_byte: "PWM 0-9"
+    - id: "9"
+      name: "turn_left"
+      module: "motor_direct"
+      description: "向左转。"
+      second_byte: "PWM 0-9"
+    - id: "A"
+      name: "turn_right"
+      module: "motor_direct"
+      description: "向右转。"
+      second_byte: "PWM 0-9"
+    - id: "B"
+      name: "turn_out_left"
+      module: "motor_direct"
+      description: "从左侧调头。"
+      second_byte: "PWM 0-9"
+    - id: "C"
+      name: "turn_out_right"
+      module: "motor_direct"
+      description: "从右侧调头。"
+      second_byte: "PWM 0-9"
+    - id: "D"
+      name: "test_vehicle"
+      module: "motor_direct"
+      description: "测试模式：向命令队列追加一组前进/后退/转向序列（每步约 1s）。"
+      second_byte: "PWM 0-9（通常不带）"
+    - id: "E"
+      name: "faster"
+      module: "motor_pwm"
+      description: "速度加一档。"
+      second_byte: "忽略"
+    - id: "F"
+      name: "slower"
+      module: "motor_pwm"
+      description: "速度减一档。"
+      second_byte: "忽略"
+    - id: "G"
+      name: "left_micro"
+      module: "motor_pwm"
+      description: "向左微调（左电机降一档）。"
+      second_byte: "忽略"
+    - id: "H"
+      name: "right_micro"
+      module: "motor_pwm"
+      description: "向右微调（右电机降一档）。"
+      second_byte: "忽略"
+    - id: "I"
+      name: "straight"
+      module: "motor_pwm"
+      description: "恢复直行（左右电机回到当前 PWM）。"
+      second_byte: "忽略"
+    - id: "J"
+      name: "reset"
+      module: "reset"
+      description: "复位：清空命令队列并复位电机 PWM/方向、机械臂、音频；插入队首优先执行。"
+      second_byte: "忽略"
+    - id: "K"
+      name: "audio_next"
+      module: "audio"
+      description: "JQ6500 下一曲。"
+      second_byte: "忽略"
+    - id: "L"
+      name: "audio_prev"
+      module: "audio"
+      description: "JQ6500 上一曲。"
+      second_byte: "忽略"
+    - id: "M"
+      name: "audio_volume_up"
+      module: "audio"
+      description: "音量加。"
+      second_byte: "忽略"
+    - id: "N"
+      name: "audio_volume_down"
+      module: "audio"
+      description: "音量减。"
+      second_byte: "忽略"
+    - id: "O"
+      name: "audio_stop"
+      module: "audio"
+      description: "停止播放。"
+      second_byte: "忽略"
+    - id: "P"
+      name: "audio_play"
+      module: "audio"
+      description: "播放指定曲目；不带第二字节时播放 V8_STOP（索引 1）。"
+      second_byte: "曲目索引 1-9"
+    - id: "Z"
+      name: "unknown"
+      module: "unknown"
+      description: "未知命令，固件不执行动作。"
+      second_byte: "忽略"
+
+x-docs:
+  edge_server: "./edge_server/README.md"
+  center_server: "./center_server/README.md"
+  center_server_design: "./center_server/DESIGN.md"
+  body_control: "./body_control/README.md"
+  software: "./README.md"
+
+paths:
+  /:
+    get:
+      tags: [Edge Server]
+      summary: PS2 手柄网页入口
+      description: |
+        `GET /` 由 `handleWebRequest()` 映射到 LittleFS 的 `/index.html`。
+        页面包含虚拟 PS2 手柄、摄像头画面、语音控制和 YOLO 开关。
+        `index.html` 使用 `Cache-Control: no-cache`。
+      operationId: edgeIndex
+      responses:
+        '200':
+          description: PS2 手柄页面
+          content:
+            text/html:
+              schema:
+                type: string
+        '404':
+          description: LittleFS 中没有 index.html
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "File Not Found - index.html!"
+        '500':
+          description: 文件打开失败
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "Failed to open file"
+
+  /{asset}:
+    get:
+      tags: [Edge Server]
+      summary: LittleFS 静态资源
+      description: |
+        返回 LittleFS 中的静态文件，Content-Type 按扩展名推断：
+        `.html`、`.css`、`.js`、`.json`、`.png`、`.jpg/.jpeg`、`.svg`、
+        `.ico`、`.wasm`、`.woff2`、`.bin`。
+        路径包含 `..` 时返回 400。未知文件返回 404。
+      operationId: edgeGetAsset
+      parameters:
+        - name: asset
+          in: path
+          required: true
+          description: 已知资源名；也支持 LittleFS 中上传的其它单段文件名。
+          schema:
+            type: string
+            enum:
+              - index.html
+              - ps2.css
+              - ps2.js
+              - audio.js
+              - yolo.js
+              - unimog.jpeg
+              - favicon.ico
+      responses:
+        '200':
+          description: 静态文件
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: 路径包含非法字符
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "Bad Request"
+        '404':
+          description: 文件不存在
+          content:
+            text/plain:
+              schema:
+                type: string
+        '500':
+          description: 文件打开失败
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /sdcard/{path}:
+    get:
+      tags: [Edge Server]
+      summary: SD 卡静态资源（YOLO 模型/依赖）
+      description: |
+        从 SD 卡读取文件，例如：
+        - `/sdcard/tf.min.js`
+        - `/sdcard/coco-ssd.js`
+        - `/sdcard/models/coco-ssd/model.json`
+        - `/sdcard/models/coco-ssd/group1-shard1of1.bin`
+
+        `path` 是相对 SD 卡根目录的路径，允许包含 `/`；实际请求 URL 中
+        需要保留路径分隔符。SD 卡未挂载时返回 503。
+      operationId: edgeGetSdcardAsset
+      parameters:
+        - name: path
+          in: path
+          required: true
+          description: 相对 SD 卡根目录的文件路径，可包含子目录。
+          schema:
+            type: string
+          example: "models/coco-ssd/model.json"
+      responses:
+        '200':
+          description: 文件内容
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: 路径为空或包含 `..`
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "Bad Request"
+        '404':
+          description: 文件不存在
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "Sdcard Not Found The File"
+        '500':
+          description: 文件打开失败
+          content:
+            text/plain:
+              schema:
+                type: string
+        '503':
+          description: SD 卡未挂载
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "SD card not mounted"
+
+  /stream:
+    get:
+      tags: [Edge Server]
+      summary: MJPEG 图传（8080）；80 端口返回 302
+      description: |
+        **8080 端口** `/stream` 返回 `multipart/x-mixed-replace` MJPEG 流，
+        每帧 JPEG，boundary 为 `frame`。新连接会关闭旧连接，避免抢帧。
+
+        **80 端口** `/stream` 仅做兼容重定向：
+        `302 Location: http://<AP_IP>:8080/stream`。
+        页面实际使用 `http://<host>:8080/stream`。
+      operationId: edgeMjpegStream
+      servers:
+        - url: "http://192.168.4.1:8080"
+          description: Edge Server MJPEG 端口
+      responses:
+        '200':
+          description: 持续 MJPEG 流
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              example: "no-cache, no-store, must-revalidate"
+            Pragma:
+              schema:
+                type: string
+              example: "no-cache"
+            Connection:
+              schema:
+                type: string
+              example: "close"
+          content:
+            multipart/x-mixed-replace:
+              schema:
+                type: string
+                format: binary
+        '302':
+          description: 仅 80 端口；重定向到 8080 的 `/stream`
+          headers:
+            Location:
+              schema:
+                type: string
+              example: "http://192.168.4.1:8080/stream"
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: ""
+        '503':
+          description: 摄像头未就绪（8080）
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: ""
+
+  /cmd:
+    post:
+      tags: [Edge Server]
+      summary: 统一控制命令入口（纯文本）
+      description: |
+        请求体是一条纯文本控制消息，最大 32 字符；支持：
+
+        - `button:<key>:<type>`
+        - `stick:left-analog:<direct>:<stepValue>`
+
+        示例：`button:up:down`、`button:stop:down`、
+        `stick:left-analog:up:5`。
+
+        也兼容 `curl -d` 的 `application/x-www-form-urlencoded`：
+        当 `plain` 参数为空且存在参数时，使用第一个参数名作为命令。
+        无法识别的消息前缀会被忽略，但仍返回 200。
+
+        按键/摇杆到 UART 命令的完整映射见 `x-edge-command-mapping`。
+        持续运动命令由 ESP32 每 200ms 重发给 STM32，直到收到停止/松开。
+      operationId: edgeCmd
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              $ref: '#/components/schemas/EdgeControlMessage'
+            examples:
+              forward:
+                summary: 前进按下
+                value: "button:up:down"
+              stop:
+                summary: 停止
+                value: "button:stop:down"
+              stick:
+                summary: 左摇杆向前，速度档 5
+                value: "stick:left-analog:up:5"
+          application/x-www-form-urlencoded:
+            schema:
+              type: string
+              description: 兼容 curl -d；整个请求体被解析为第一个参数名。
+            example: "button:up:down"
+      responses:
+        '200':
+          description: 命令已接收（即使前缀无法识别；不代表 STM32 已执行）
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "ok"
+        '400':
+          description: 空命令或命令超过 32 字符
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                empty:
+                  value: "empty command"
+                too_long:
+                  value: "command too long"
+
+  /cmd-button:
+    get:
+      tags: [Edge Server]
+      summary: 按钮命令（查询参数形式）
+      description: |
+        旧页面使用的按钮接口；与 `POST /cmd` 的 `button:` 消息共用
+        `processCmdButton()`。ESP32 WebServer 注册时未限制方法，GET 是
+        页面实际使用的方法。
+
+        有效 key：up/down/left/right/triangle/cross/square/circle/
+        l1/r1/l2/r2/start/select/stop。type 为 down/up（`stop` 为兼容写法）。
+        未知 key/type 会被忽略，但仍返回 200。
+      operationId: edgeCmdButton
+      deprecated: true
+      parameters:
+        - name: key
+          in: query
+          required: true
+          description: 按钮名称
+          schema:
+            type: string
+            enum:
+              - up
+              - down
+              - left
+              - right
+              - triangle
+              - cross
+              - square
+              - circle
+              - l1
+              - r1
+              - l2
+              - r2
+              - start
+              - select
+              - stop
+        - name: type
+          in: query
+          required: true
+          description: 按下/松开；`stop` 仅作为 `stop` 键的兼容写法
+          schema:
+            type: string
+            enum: [down, up, stop]
+      responses:
+        '200':
+          description: 已处理（未知 key/type 也会返回 200）
+        '400':
+          description: 缺少 key 或 type
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "400 Bad Request - Missing 'key' or 'type' parameter"
+
+  /cmd-stick:
+    get:
+      tags: [Edge Server]
+      summary: 左摇杆命令（查询参数形式）
+      description: |
+        旧页面使用的摇杆接口；与 `POST /cmd` 的 `stick:` 消息共用
+        `processCmdStick()`。仅接受 `stickId=left-analog`；
+        `stepValue` 必须是单个 0-9 数字。未知 stickId/direct 会静默忽略，
+        但仍返回 200。direct=stop 或 stepValue=0 时发送停止命令。
+      operationId: edgeCmdStick
+      deprecated: true
+      parameters:
+        - name: stickId
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [left-analog]
+        - name: direct
+          in: query
+          required: true
+          description: 摇杆方向；8 个斜向/直向 + stop
+          schema:
+            type: string
+            enum:
+              - stop
+              - up
+              - down
+              - left
+              - right
+              - uple
+              - uprt
+              - dnle
+              - dnrt
+        - name: stepValue
+          in: query
+          required: true
+          description: 速度/PWM 档位 0-9；0 等价停止
+          schema:
+            type: string
+            pattern: '^[0-9]$'
+      responses:
+        '200':
+          description: 已处理（未知方向也会返回 200）
+        '400':
+          description: 缺少 stickId/direct/stepValue
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "400 Bad Request - Missing 'stickId', 'direct' or 'stepValue' parameter"
+
+  /stop:
+    get:
+      tags: [Edge Server]
+      summary: 显式停车
+      description: |
+        清除 ESP32 的持续运动状态，并向 STM32 发送 `0`。
+        页面 pagehide/断线兜底可调用；返回 `stopped`。
+      operationId: edgeStop
+      responses:
+        '200':
+          description: 已停车
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "stopped"
+
+  /status:
+    get:
+      tags: [Edge Server]
+      summary: ESP32 运行状态
+      description: |
+        返回 ESP32 的 uptime、剩余堆/PSRAM、摄像头/SD 卡状态和当前是否有
+        持续运动。**不包含 STM32 的编码器/IMU/电池等底盘遥测。**
+      operationId: edgeStatus
+      responses:
+        '200':
+          description: 状态 JSON
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgeStatus'
+              example:
+                uptime_ms: 123456
+                free_heap: 180000
+                free_psram: 6500000
+                camera: 1
+                sdcard: 1
+                motion_active: 0
+
+  /v1/infer:
+    servers:
+      - url: "http://127.0.0.1:8000"
+        description: Center Server（默认端口；部署时替换为实际地址）
+    post:
+      tags: [Center Server]
+      summary: SmolVLA 多模态推理
+      description: |
+        发送语言指令、图像和本体状态，返回 SmolVLA 动作块及第一步映射结果。
+
+        - 首次请求可能触发模型加载（懒加载），耗时较长；生产环境建议
+          `model.preload: true` 或先调用 `/v1/warmup`。
+        - `images` 相机名可用 `model.image_aliases` 映射到 checkpoint 相机键；
+          缺失相机按 `model.missing_image_policy` 补齐。
+        - `state` 顺序必须与微调数据一致；不足可补零，超出会截断。
+        - 模型动作语义由 `action.mode` 决定：`base_twist`/`hybrid`/`joint`/`raw`。
+        - `base_cmd`/`arm_cmd` 只对应动作块第一步；后续步骤见 `actions`。
+        - SmolVLA 不提供校准置信度；执行门控（急停/避障/低置信度）由 ROS 负责。
+      operationId: centerInfer
+      security:
+        - {}
+        - centerBearer: []
+        - centerApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CenterInferRequest'
+            examples:
+              pick_cup:
+                summary: 抓取杯子
+                value:
+                  instruction: "把红色杯子拿起来"
+                  images:
+                    front: "data:image/jpeg;base64,/9j/4AAQSkZJRg..."
+                  state: [0.0, 0.0, 0.0, 0.0, 1.57, 0.0]
+                  task_id: "pick-cup-001"
+                  session_id: "robot-01"
+                  reset: false
+                  options:
+                    chunk_size: 8
+                    return_mapped: false
+      responses:
+        '200':
+          description: 推理成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterInferResponse'
+              examples:
+                ok:
+                  summary: base_twist 模式
+                  value:
+                    ok: true
+                    request_id: "8f0c..."
+                    task_id: "pick-cup-001"
+                    session_id: "robot-01"
+                    instruction: "把红色杯子拿起来"
+                    actions: [[0.12, -0.03, 0.05], [0.10, -0.02, 0.04]]
+                    action: [0.12, -0.03, 0.05]
+                    action_dim: 3
+                    chunk_size: 2
+                    base_cmd:
+                      linear: {x: 0.06, y: -0.012, z: 0.0}
+                      angular: {x: 0.0, y: 0.0, z: 0.05}
+                    arm_cmd: null
+                    mapped:
+                      mode: "base_twist"
+                      raw: [0.12, -0.03, 0.05]
+                      base_cmd:
+                        linear: {x: 0.06, y: -0.012, z: 0.0}
+                        angular: {x: 0.0, y: 0.0, z: 0.05}
+                      arm_cmd: null
+                      clipped: false
+                    model:
+                      backend: "smolvla"
+                      path: "lerobot/smolvla_base"
+                      device: "cuda"
+                      dtype: "float16"
+                    latency_ms: 42.7
+                    model_latency_ms: 39.1
+                    timestamp: "2026-11-07T11:30:00+00:00"
+                    warnings: []
+        '400':
+          $ref: '#/components/responses/CenterBadRequest'
+        '401':
+          $ref: '#/components/responses/CenterUnauthorized'
+        '413':
+          $ref: '#/components/responses/CenterPayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/CenterUnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/CenterUnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/CenterInferenceError'
+        '503':
+          $ref: '#/components/responses/CenterModelUnavailable'
+
+  /v1/reset:
+    servers:
+      - url: "http://127.0.0.1:8000"
+        description: Center Server（默认端口）
+    post:
+      tags: [Center Server]
+      summary: 清理策略动作队列/回合状态
+      description: |
+        调用 `policy.reset()`（若存在）。当前服务无跨请求会话状态，
+        `session_id` 仅回显；动作块推理本身是无状态的。
+      operationId: centerReset
+      security:
+        - {}
+        - centerBearer: []
+        - centerApiKey: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CenterResetRequest'
+      responses:
+        '200':
+          description: 已重置
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterResetResponse'
+        '400':
+          $ref: '#/components/responses/CenterBadRequest'
+        '401':
+          $ref: '#/components/responses/CenterUnauthorized'
+        '503':
+          $ref: '#/components/responses/CenterModelUnavailable'
+
+  /v1/warmup:
+    servers:
+      - url: "http://127.0.0.1:8000"
+        description: Center Server（默认端口）
+    post:
+      tags: [Center Server]
+      summary: 空推理预热
+      description: |
+        用黑色 64×64 图像和全零 state 执行一次推理，触发模型加载/编译/显存分配。
+        首次调用可能很慢。
+      operationId: centerWarmup
+      security:
+        - {}
+        - centerBearer: []
+        - centerApiKey: []
+      responses:
+        '200':
+          description: 预热完成
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterWarmupResponse'
+        '400':
+          $ref: '#/components/responses/CenterBadRequest'
+        '401':
+          $ref: '#/components/responses/CenterUnauthorized'
+        '503':
+          $ref: '#/components/responses/CenterModelUnavailable'
+
+  /v1/model:
+    servers:
+      - url: "http://127.0.0.1:8000"
+        description: Center Server（默认端口）
+    get:
+      tags: [Center Server]
+      summary: 模型/动作 schema 信息
+      description: |
+        返回 backend、checkpoint 路径、设备、动作模式、相机键、state/action
+        维度、chunk 大小等。该接口不触发模型加载；未加载时部分字段来自配置。
+      operationId: centerModel
+      security:
+        - {}
+        - centerBearer: []
+        - centerApiKey: []
+      responses:
+        '200':
+          description: 模型信息
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterModelEnvelope'
+        '401':
+          $ref: '#/components/responses/CenterUnauthorized'
+
+  /v1/health:
+    servers:
+      - url: "http://127.0.0.1:8000"
+        description: Center Server（默认端口）
+    get:
+      tags: [Center Server]
+      summary: 详细健康状态
+      description: |
+        返回服务状态、模型加载状态、设备、错误信息等。
+        模型加载失败时仍返回 200，但 `status=degraded`、`ready=false`。
+      operationId: centerHealth
+      responses:
+        '200':
+          description: 健康状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterHealth'
+
+  /health:
+    servers:
+      - url: "http://127.0.0.1:8000"
+        description: Center Server（默认端口）
+    get:
+      tags: [Center Server]
+      summary: 详细健康状态（别名）
+      operationId: centerHealthAlias
+      responses:
+        '200':
+          description: 健康状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterHealth'
+
+  /v1/healthz:
+    servers:
+      - url: "http://127.0.0.1:8000"
+        description: Center Server（默认端口）
+    get:
+      tags: [Center Server]
+      summary: 详细健康状态（别名）
+      operationId: centerHealthzAlias
+      responses:
+        '200':
+          description: 健康状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterHealth'
+
+  /healthz:
+    servers:
+      - url: "http://127.0.0.1:8000"
+        description: Center Server（默认端口）
+    get:
+      tags: [Center Server]
+      summary: 存活探针
+      description: 进程存活即返回 200，不检查模型。
+      operationId: centerLiveness
+      responses:
+        '200':
+          description: 存活
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterLive'
+
+  /livez:
+    servers:
+      - url: "http://127.0.0.1:8000"
+        description: Center Server（默认端口）
+    get:
+      tags: [Center Server]
+      summary: 存活探针（别名）
+      operationId: centerLivenessAlias
+      responses:
+        '200':
+          description: 存活
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterLive'
+
+  /v1/ready:
+    servers:
+      - url: "http://127.0.0.1:8000"
+        description: Center Server（默认端口）
+    get:
+      tags: [Center Server]
+      summary: 就绪探针
+      description: |
+        模型已加载（或 stub 后端）返回 200；否则返回 503。
+        默认懒加载时，首次推理前 `/v1/ready` 为 503；使用 readiness 探针时
+        建议设置 `model.preload: true`，或改用 `/healthz`。
+      operationId: centerReady
+      responses:
+        '200':
+          description: 就绪
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterReady'
+        '503':
+          description: 未就绪
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterReady'
+
+  /readyz:
+    servers:
+      - url: "http://127.0.0.1:8000"
+        description: Center Server（默认端口）
+    get:
+      tags: [Center Server]
+      summary: 就绪探针（别名）
+      operationId: centerReadyAlias
+      responses:
+        '200':
+          description: 就绪
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterReady'
+        '503':
+          description: 未就绪
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterReady'
+
+  /body-control/uart/command:
+    post:
+      tags: [Body Control (UART)]
+      summary: UART 命令（虚拟归档路径，非 HTTP）
+      description: |
+        **这不是 HTTP 端点，请勿通过 HTTP 调用。**
+
+        该路径仅用于在 Swagger/OpenAPI 中展示 Body Control 的 UART 命令，
+        实际传输为 STM32 USART3：9600 8N1，命令以 `\n` 结束。
+        完整的帧格式、命令表、PWM/曲目第二字节语义见
+        `x-body-control-uart`。
+
+        固件不在 USART3 上返回 ACK 或遥测；发送成功仅表示字节已写入
+        UART，不能证明 STM32 已接收/执行。
+      operationId: bodyControlUartCommand
+      deprecated: true
+      servers:
+        - url: "uart://stm32-usart3"
+          description: 虚拟 UART 端点（非 HTTP，仅归档）
+      x-transport: uart
+      x-not-http: true
+      x-try-it-out: false
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              $ref: '#/components/schemas/BodyControlUartCommand'
+            examples:
+              forward:
+                summary: 前进
+                value: "1"
+              forward_pwm5:
+                summary: 前进 + PWM 档 5
+                value: "15"
+              stop:
+                summary: 停止
+                value: "0"
+              reset:
+                summary: 复位
+                value: "J"
+              audio_play_track2:
+                summary: 播放曲目 2
+                value: "P2"
+      responses:
+        '200':
+          description: |
+            仅文档占位：UART 为 fire-and-forget，没有 HTTP 响应。
+            真实链路不返回 ACK/响应体。
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: "no HTTP response; fire-and-forget UART"
+
+components:
+  securitySchemes:
+    centerBearer:
+      type: http
+      scheme: bearer
+      description: "Center Server 可选的 Bearer Token（server.api_key）"
+    centerApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: "Center Server 可选的 API Key（server.api_key）"
+
+  responses:
+    CenterBadRequest:
+      description: 请求格式错误（JSON/图像/base64/长度）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/CenterErrorResponse'
+          examples:
+            invalid_json:
+              value:
+                ok: false
+                request_id: "..."
+                error:
+                  code: "invalid_json"
+                  message: "JSON 解析失败: ..."
+    CenterUnauthorized:
+      description: 缺少或错误的 API Key
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/CenterErrorResponse'
+          example:
+            ok: false
+            request_id: "..."
+            error:
+              code: "unauthorized"
+              message: "无效或缺失的 API Key"
+    CenterPayloadTooLarge:
+      description: 请求体/图像超限
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/CenterErrorResponse'
+          example:
+            ok: false
+            request_id: "..."
+            error:
+              code: "payload_too_large"
+              message: "请求体超过 16777216 字节"
+    CenterUnsupportedMediaType:
+      description: Content-Type 不是 application/json
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/CenterErrorResponse'
+          example:
+            ok: false
+            request_id: "..."
+            error:
+              code: "unsupported_media_type"
+              message: "Content-Type 必须是 application/json"
+    CenterUnprocessableEntity:
+      description: 请求语义错误（instruction/图像/state/chunk/相机名等）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/CenterErrorResponse'
+          examples:
+            missing_instruction:
+              value:
+                ok: false
+                request_id: "..."
+                error:
+                  code: "instruction_required"
+                  message: "instruction 不能为空；SmolVLA 需要语言指令"
+            missing_image:
+              value:
+                ok: false
+                request_id: "..."
+                error:
+                  code: "missing_image"
+                  message: "缺少图像输入"
+            unknown_image:
+              value:
+                ok: false
+                request_id: "..."
+                error:
+                  code: "unknown_image_key"
+                  message: "未知相机名: rear"
+                  details:
+                    allowed: ["camera1", "camera2", "camera3"]
+    CenterInferenceError:
+      description: 模型推理内部错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/CenterErrorResponse'
+          example:
+            ok: false
+            request_id: "..."
+            error:
+              code: "inference_error"
+              message: "SmolVLA 推理失败: ..."
+    CenterModelUnavailable:
+      description: torch/lerobot/权重/预处理器不可用，或模型加载失败
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/CenterErrorResponse'
+          example:
+            ok: false
+            request_id: "..."
+            error:
+              code: "model_unavailable"
+              message: "未安装 PyTorch，无法加载 SmolVLA"
+              details:
+                install: "pip install -r requirements-vla.txt"
+
+  schemas:
+    EdgeStatus:
+      type: object
+      description: ESP32-S3 运行状态（不含 STM32 底盘遥测）
+      required:
+        - uptime_ms
+        - free_heap
+        - free_psram
+        - camera
+        - sdcard
+        - motion_active
+      properties:
+        uptime_ms:
+          type: integer
+          format: int64
+          description: ESP32 启动后的毫秒数
+        free_heap:
+          type: integer
+          format: int64
+          description: 剩余内部堆
+        free_psram:
+          type: integer
+          format: int64
+          description: 剩余 PSRAM；无 PSRAM 时为 0
+        camera:
+          type: integer
+          enum: [0, 1]
+          description: 摄像头是否就绪
+        sdcard:
+          type: integer
+          enum: [0, 1]
+          description: SD 卡是否挂载
+        motion_active:
+          type: integer
+          enum: [0, 1]
+          description: 是否正在持续重发运动命令
+
+    EdgeButtonMessage:
+      type: string
+      description: |
+        按钮消息：`button:<key>:<type>`。
+        `stop` 键无论 type 如何都映射到停止命令。
+      pattern: '^button:(up|down|left|right|triangle|cross|square|circle|l1|r1|l2|r2|start|select|stop):(down|up|stop)$'
+      maxLength: 32
+      example: "button:up:down"
+
+    EdgeStickMessage:
+      type: string
+      description: |
+        摇杆消息：`stick:left-analog:<direct>:<stepValue>`。
+        `direct=stop` 或 `stepValue=0` 等价停止。
+      pattern: '^stick:left-analog:(stop|up|down|left|right|uple|uprt|dnle|dnrt):[0-9]$'
+      maxLength: 32
+      example: "stick:left-analog:up:5"
+
+    EdgeControlMessage:
+      description: 纯文本控制消息；两条命令族二选一
+      oneOf:
+        - $ref: '#/components/schemas/EdgeButtonMessage'
+        - $ref: '#/components/schemas/EdgeStickMessage'
+
+    CenterImagePayload:
+      type: object
+      description: |
+        图像对象。可直接传 base64/data URI 字符串，也可用对象形式。
+        `data`、`base64`、`image` 三选一；`format` 仅为兼容字段，服务端按
+        实际图像内容解码。
+      properties:
+        data:
+          type: string
+          description: base64 或 `data:image/...;base64,...`
+        base64:
+          type: string
+          description: "`data` 的别名"
+        image:
+          type: string
+          description: "`data` 的别名"
+        format:
+          type: string
+          description: 可选的格式提示（png/jpeg），当前不强制使用
+      anyOf:
+        - type: object
+          properties:
+            data:
+              type: string
+          required: [data]
+        - type: object
+          properties:
+            base64:
+              type: string
+          required: [base64]
+        - type: object
+          properties:
+            image:
+              type: string
+          required: [image]
+
+    CenterInferOptions:
+      type: object
+      properties:
+        chunk_size:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          description: 只返回动作块前 N 步；默认返回完整 chunk
+        return_mapped:
+          type: boolean
+          default: false
+          description: 为 true 时额外返回每一步的映射结果 `mapped_actions`
+
+    CenterInferRequest:
+      type: object
+      required: [instruction]
+      properties:
+        instruction:
+          type: string
+          maxLength: 512
+          description: 语言指令；也接受别名 `task`/`language_instruction`
+        images:
+          type: object
+          maxProperties: 8
+          description: |
+            `{相机名: base64 | data URI | CenterImagePayload}`。
+            相机名可用 `model.image_aliases` 映射到 checkpoint 相机键；
+            缺失相机按 `model.missing_image_policy` 处理。
+          additionalProperties:
+            oneOf:
+              - type: string
+              - $ref: '#/components/schemas/CenterImagePayload'
+        state:
+          type: array
+          items:
+            type: number
+          description: 本体状态向量；不足补零，超出截断，顺序需与训练数据一致
+        task_id:
+          type: string
+          maxLength: 128
+          description: 回显；为空时使用 request_id
+        session_id:
+          type: string
+          maxLength: 128
+          description: 回显；当前无跨请求会话状态
+        reset:
+          type: boolean
+          default: false
+          description: 为 true 时先调用 policy.reset()
+        options:
+          $ref: '#/components/schemas/CenterInferOptions'
+
+    CenterVector3:
+      type: object
+      properties:
+        x:
+          type: number
+        y:
+          type: number
+        z:
+          type: number
+
+    CenterBaseCmd:
+      type: object
+      description: 与 ROS geometry_msgs/Twist 对应的速度命令
+      properties:
+        linear:
+          $ref: '#/components/schemas/CenterVector3'
+        angular:
+          $ref: '#/components/schemas/CenterVector3'
+
+    CenterMappedAction:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [raw, base_twist, hybrid, joint]
+          description: 动作解释模式
+        raw:
+          type: array
+          items:
+            type: number
+          description: 该步模型原始动作
+        base_cmd:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/CenterBaseCmd'
+        arm_cmd:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: number
+          description: 关节名 -> 角度/位置；raw/base_twist 模式为 null
+        clipped:
+          type: boolean
+          description: 是否发生速度/关节限幅
+
+    CenterModelRef:
+      type: object
+      properties:
+        backend:
+          type: string
+          enum: [smolvla, stub]
+        path:
+          type: string
+          description: HF 仓库名或本地 checkpoint 目录
+        device:
+          type: string
+          example: "cuda"
+        dtype:
+          type: string
+          example: "float16"
+
+    CenterModelInfo:
+      type: object
+      description: 模型/动作 schema 与加载状态
+      properties:
+        backend:
+          type: string
+          enum: [smolvla, stub]
+        path:
+          type: string
+        loaded:
+          type: boolean
+        loading:
+          type: boolean
+        device:
+          type: string
+        dtype:
+          type: string
+        action_dim:
+          type: integer
+          nullable: true
+        state_dim:
+          type: integer
+        chunk_size:
+          type: integer
+        image_keys:
+          type: array
+          items:
+            type: string
+        processors:
+          type: boolean
+          description: 是否成功构建 LeRobot 预处理器/后处理器
+        error:
+          type: string
+          nullable: true
+          description: 最近一次加载失败摘要
+        configured_image_keys:
+          type: array
+          items:
+            type: string
+        image_aliases:
+          type: object
+          additionalProperties:
+            type: string
+        action_mode:
+          type: string
+          enum: [raw, base_twist, hybrid, joint]
+
+    CenterInferResponse:
+      type: object
+      required:
+        - ok
+        - request_id
+        - actions
+        - action
+        - action_dim
+        - chunk_size
+        - latency_ms
+        - timestamp
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        request_id:
+          type: string
+        task_id:
+          type: string
+        session_id:
+          type: string
+        instruction:
+          type: string
+        actions:
+          type: array
+          minItems: 1
+          description: 动作块，每个元素是一步动作
+          items:
+            type: array
+            items:
+              type: number
+        action:
+          type: array
+          items:
+            type: number
+          description: 动作块第一步
+        action_dim:
+          type: integer
+        chunk_size:
+          type: integer
+        base_cmd:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/CenterBaseCmd'
+        arm_cmd:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: number
+        mapped:
+          $ref: '#/components/schemas/CenterMappedAction'
+        mapped_actions:
+          type: array
+          description: 仅 options.return_mapped=true 时返回
+          items:
+            $ref: '#/components/schemas/CenterMappedAction'
+        model:
+          $ref: '#/components/schemas/CenterModelRef'
+        latency_ms:
+          type: number
+          description: 服务端总耗时
+        model_latency_ms:
+          type: number
+          description: 模型调用耗时
+        timestamp:
+          type: string
+          format: date-time
+        warnings:
+          type: array
+          items:
+            type: string
+
+    CenterHealth:
+      type: object
+      required: [ok, status, ready, service, version, uptime_sec, model, request_id]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        status:
+          type: string
+          enum: [ok, degraded]
+        ready:
+          type: boolean
+        service:
+          type: string
+          example: "rush-mog-center-server"
+        version:
+          type: string
+          example: "0.1.0"
+        uptime_sec:
+          type: number
+        model:
+          $ref: '#/components/schemas/CenterModelInfo'
+        request_id:
+          type: string
+
+    CenterReady:
+      type: object
+      required: [ok, status, model, request_id]
+      properties:
+        ok:
+          type: boolean
+        status:
+          type: string
+          enum: [ready, not_ready]
+        model:
+          $ref: '#/components/schemas/CenterModelInfo'
+        request_id:
+          type: string
+
+    CenterLive:
+      type: object
+      required: [ok, status, request_id]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        status:
+          type: string
+          enum: [ok]
+        request_id:
+          type: string
+
+    CenterModelEnvelope:
+      type: object
+      required: [ok, model, request_id]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        model:
+          $ref: '#/components/schemas/CenterModelInfo'
+        request_id:
+          type: string
+
+    CenterResetRequest:
+      type: object
+      properties:
+        session_id:
+          type: string
+          maxLength: 128
+
+    CenterResetResponse:
+      type: object
+      required: [ok, session_id, message, timestamp, request_id]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        session_id:
+          type: string
+        message:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        request_id:
+          type: string
+
+    CenterWarmupResponse:
+      type: object
+      required: [ok, latency_ms, model_latency_ms, model, timestamp, request_id]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        latency_ms:
+          type: number
+        model_latency_ms:
+          type: number
+        model:
+          $ref: '#/components/schemas/CenterModelInfo'
+        timestamp:
+          type: string
+          format: date-time
+        request_id:
+          type: string
+
+    CenterError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: 机器可读错误码
+          example: "model_unavailable"
+        message:
+          type: string
+          description: 人类可读错误信息
+        details:
+          type: object
+          additionalProperties: true
+          description: 可选的上下文信息
+
+    CenterErrorResponse:
+      type: object
+      required: [ok, error, request_id]
+      properties:
+        ok:
+          type: boolean
+          enum: [false]
+        error:
+          $ref: '#/components/schemas/CenterError'
+        request_id:
+          type: string
+
+    BodyControlUartCommand:
+      type: string
+      description: |
+        ASCII 命令，不含结尾 `\n`。格式：`<command_id>[<second_byte>]`。
+        第二字节语义见 `x-body-control-uart.second_byte`。
+      pattern: '^[0-9A-PZ][0-9]?$'
+      example: "15"

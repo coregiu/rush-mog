@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rush-mog-center-server"
+version = "0.1.0"
+description = "Rush-MOG Center Server: SmolVLA inference over HTTP"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.21",
+    "Pillow>=9.0",
+    "PyYAML>=5.4",
+]
+
+[project.optional-dependencies]
+vla = [
+    "torch>=2.2",
+    "torchvision>=0.17",
+    "lerobot[smolvla]>=0.4.0",
+    "huggingface_hub>=0.24",
+    "safetensors>=0.4",
+    "accelerate>=0.30",
+]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+rush-mog-center-server = "center_server.server:main"
+
+[tool.setuptools.packages.find]
+include = ["center_server*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

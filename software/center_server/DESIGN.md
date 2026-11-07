@@ -1,882 +1,422 @@
-# center_server 详细设计（ROS2：VLA + SLAM + 导航 + 目标搜索）
+# Center Server 详细设计（SmolVLA HTTP 推理）
 
-> 版本：v2.0（2026-11）
-> 对应硬件目标：树莓派 4B/5 或 Jetson Orin Nano + STM32 + 2D 激光 + ICM-20948 + 4 路编码器。
-> 硬件缺口分析与选型见 [`hardware/SLAM_NAV.md`](../../hardware/SLAM_NAV.md)。
+> 版本：0.1.0（2026-11）  
+> 对应上位机文档：[README.md](README.md)  
+> 对应机载 ROS 包：[`software/ros`](../ros/README.md)
 
 ---
 
-## 0. 版本与验证状态
+## 0. 范围与状态
 
 | 项目 | 状态 |
 |---|---|
-| 代码 | `software/center_server`（ament_python，ROS2 Humble） |
-| 消息/动作 | `software/custom_msgs`（v0.2.0） |
-| 构建 | `colcon build --packages-select custom_msgs center_server` 通过 |
-| 单元测试 | `pytest tests -q`：35 passed |
-| VLA/安全端到端 | `end_to_end_check.py`：7/7 passed |
-| SLAM/导航/搜索联调 | `slam_nav_check.py` + `fake_slam_robot.py`：6/6 passed |
-| 真实 VLA 模型 | 未包含权重；规则桩，接口固定 |
-| STM32 二进制协议固件 | 主机侧已实现；固件仍为 ASCII 命令，需按 §6.13 升级 |
+| 代码 | `software/center_server`（纯 Python，标准库 HTTP） |
+| 推理后端 | SmolVLA（LeRobot）+ `stub` 联调后端 |
+| 接口 | HTTP/JSON，`/v1/infer`、`/v1/health`、`/v1/model`、`/v1/reset`、`/v1/warmup` |
+| 测试 | `pytest tests -q`：36 passed（无 GPU/torch） |
+| 真实权重 | 不随仓库分发；默认 `lerobot/smolvla_base` 或本地微调 checkpoint |
+| 实车验证 | 未做硬件在环；需联调相机、Wi-Fi、GPU 延迟 |
+
+本文描述的是**中心推理服务**，不包含机载 ROS 的 SLAM/导航/速度仲裁；
+那部分在 `software/ros` 的 center_server v2 包中。
 
 ---
 
 ## 1. 设计目标
 
-`center_server` 是 Rush-MOG 的**决策与任务中心**，在 v1 的 VLA 推理/安全/反向操作之上，
-增加四类能力：
+1. **职责单一**：只做“多模态输入 → SmolVLA 动作块 → 底盘/机械臂语义映射”，
+   不直接发布 `/cmd_vel`、不直接操作串口。
+2. **协议稳定**：HTTP/JSON 字段固定，ROS 侧可独立升级；错误码可区分
+   “请求错误 / 模型未就绪 / 推理失败”。
+3. **可降级**：模型/GPU/torch 不可用时返回 503，绝不伪造动作；规则桩仍由
+   机载 ROS 保留，作为网络或模型故障时的降级路径。
+4. **可测试**：HTTP 路由与业务层解耦，模型层可替换为 `stub`，CI 不需要 GPU。
+5. **可移植**：基础服务只依赖 `numpy`/`Pillow`/`PyYAML`；`torch`/`lerobot`
+   仅在真实后端加载时导入。
+6. **安全边界清晰**：服务端只做速度限幅；急停、避障、仲裁、看门狗必须在
+   机载 ROS/STM32 完成。
 
-1. **SLAM 建图**：消费 2D 激光与里程计，控制 slam_toolbox 建图、保存/加载地图、发布前沿。
-2. **定位**：消费 ICM-20948、轮式里程计、AMCL/TF，输出定位健康度与 map 系位姿，门控导航。
-3. **自主导航**：把“去某点/探索/回家”转成 Nav2 或内置直航的速度指令，带目标校验、停滞检测、超时。
-4. **目标搜索**：相机检测 + 激光测距 + 地图投影 + 前沿探索 + 目标确认 + 接近，返回目标位姿。
+非目标：
 
-设计原则：
-
-- **分层**：任务层（mission）→ 导航层（nav）→ 速度层（mux）→ 执行器（STM32）。
-- **单一速度出口**：所有来源经 `velocity_mux_node` 仲裁后只发布一个 `/cmd_vel`。
-- **可降级**：没有 Nav2 用内置直航；没有 slam_toolbox 用内置 PGM/YAML 存图；没有深度相机用激光/bbox 估距。
-- **可观测**：每个子系统都有状态话题，便于 HMI/日志/故障定位。
-- **安全优先**：急停、障碍、数据超时、低电量、定位丢失都能覆盖普通任务。
+- 不做 SLAM/建图/导航/目标检测（在 `software/ros`）；
+- 不做多机器人调度、模型热切换、训练；
+- 不做 TLS 终止（交给反向代理）。
 
 ---
 
-## 2. 目标硬件与部署拓扑
-
-### 2.1 三层
+## 2. 部署拓扑
 
 ```text
-┌──────────────────────────────────────────────────────────────┐
-│ 云端 / PC（可选）                                             │
-│   center_server：VLA、任务编排、HMI、日志、地图管理             │
-└──────────────────────────┬───────────────────────────────────┘
-                           │ DDS / Wi-Fi（建议 5GHz 或有线）
-┌──────────────────────────▼───────────────────────────────────┐
-│ 机载 Linux（Pi 4B/5 或 Orin Nano）                             │
-│   ROS2 Humble：激光/相机驱动、base_bridge、EKF、slam_toolbox、  │
-│   Nav2、center_server 的导航/搜索/定位节点                     │
-└───────┬──────────────────┬──────────────────┬────────────────┘
-        │ USB/UART         │ USB/CSI          │ I2C
-┌───────▼────────┐ ┌───────▼────────┐ ┌───────▼────────┐
-│ LD19/LD06 激光  │ │ USB/CSI 相机    │ │ ICM-20948      │
-└────────────────┘ └────────────────┘ └────────────────┘
-        │
-┌───────▼──────────────────────────────────────────────────────┐
-│ STM32F103RCT6/F411：4 路编码器 + 4 路 PWM + 轮速 PID + 看门狗  │
-└───────┬──────────────────────────────────────────────────────┘
-        │
-┌───────▼──────────────────────────────────────────────────────┐
-│ TB6612/DRV8871/BTS7960 + 12V 电池 + 5V/5A + 6V/5A + 急停      │
-└──────────────────────────────────────────────────────────────┘
+┌──────────────────────────────┐
+│ 训练/模型准备（可选）          │
+│ LeRobot + Rush-MOG 演示数据    │
+│ -> checkpoint (HF / 本地)      │
+└──────────────┬───────────────┘
+               │ copy / download
+┌──────────────▼───────────────┐         HTTP          ┌──────────────────────────────┐
+│ Center Server（GPU/PC）       │ ◄──────────────────── │ 车载 ROS2（Pi 4B/5 / Orin）   │
+│ FastAPI 无关，stdlib HTTP      │                       │ 相机/激光/里程计/关节         │
+│ SmolVLA policy + processors   │ ────────────────────► │ vla_inference_node / bridge   │
+│ action mapper                 │  actions/base_cmd     │ safety + velocity_mux         │
+└──────────────────────────────┘                       └──────────────┬───────────────┘
+                                                                      │ UART
+                                                               ┌──────▼───────┐
+                                                               │ STM32 + 底盘  │
+                                                               └──────────────┘
 ```
 
-### 2.2 部署选项
+部署选项：
 
-| 选项 | 车上 | 云端/PC | 说明 |
-|---|---|---|---|
-| A（推荐） | Pi 跑驱动/EKF/SLAM/Nav2/搜索 | VLA/任务编排可远程 | 实时闭环在车上，网络差也可用 |
-| B | Orin Nano 跑全部 | 无 | 本地 VLA，成本高 |
-| C | 仅 ESP32/STM32 | center_server 远程 | 仅演示；Wi-Fi 抖动会影响导航 |
-
-代码对 A/B/C 相同；区别只是节点放在哪台机器、DDS 网络怎么配。
-
-### 2.3 与 edge_server 的边界
-
-`edge_server`（ESP32-S3）保留：
-
-- Wi-Fi AP、网页手柄、MJPEG 图传；
-- 遥控串口桥（ESP32 UART3 ↔ STM32）；
-- 可选 OV2640 图传。
-
-`center_server` 不依赖 ESP32 的算力。实车推荐：
-
-- 激光、相机、IMU 直接接 Pi；
-- Pi 通过 UART 与 STM32 通信（`base_bridge_node`）；
-- ESP32 只做图传/遥控/备用通道；
-- 手机连 Pi 的 AP 或独立路由器，而不是 ESP32 AP。
-
----
-
-## 3. 核心能力边界
-
-### 3.1 输入
-
-| 类型 | 话题 | 说明 |
+| 选项 | 推理位置 | 说明 |
 |---|---|---|
-| 激光 | `/scan` 或 `/edge/radar` | 2D LaserScan，10Hz+ |
-| 图像 | `/camera/image_raw` 或 `/edge/video` | bgr8，目标检测/VLA |
-| 音频 | `/edge/audio` 或 `/audio/raw` | 可选，缺失不阻塞 |
-| 里程计 | `/odom` 或 `/robot/odometry` | 轮式/EKF |
-| IMU | `/imu/data` | ICM-20948，100Hz |
-| 关节 | `/joint_states` | 机械臂/轮子 |
-| 电池 | `/battery_state` | 电压/百分比 |
-| 地图 | `/map` | OccupancyGrid |
-| 定位 | `/amcl_pose`、TF | map→odom→base_link |
-| 任务 | `/center/execute_task`、`/center/execute_mission`、`/center/mission_request` | 用户/HMI/语音 |
+| A | 局域网 GPU 主机 | 推荐；ROS 只发图像/状态，收动作块 |
+| B | Orin Nano 本机 | 无网络依赖，但 GPU 资源与 ROS 竞争 |
+| C | CPU 主机 | 仅演示/低速；延迟可能不可接受 |
 
-### 3.2 输出
+服务对 A/B/C 代码相同，只改 `server.host` 与 ROS 的 URL。
 
-| 类型 | 话题/动作 | 说明 |
+---
+
+## 3. 模块划分
+
+| 模块 | 职责 | 关键点 |
 |---|---|---|
-| 底盘速度 | `/cmd_vel` | 唯一最终速度出口 |
-| VLA 原始速度 | `/cmd_vel_raw` | 经 mux 仲裁 |
-| 导航速度 | `/nav/cmd_vel` | Nav2/直航 |
-| 反向速度 | `/reverse/cmd_vel` | 回退/手动 |
-| 安全覆盖 | `/safety/cmd_vel_override` | 最高优先级 |
-| 机械臂 | `/arm/trajectory` | JointTrajectory |
-| 任务请求 | `/task/request`、`/center/mission_request` | 内部/外部 |
-| 状态 | `/center/status`、`/center/mission_status`、`/center/nav_status`、`/center/search_status`、`/center/localization_status`、`/center/safety_state`、`/center/velocity_status`、`/center/map_info`、`/center/frontiers`、`/center/target_detections` | 可观测性 |
-| 位姿 | `/center/pose` | map 系，供导航/搜索/目标投影 |
+| `config.py` | YAML 加载、默认值合并、环境变量覆盖、校验 | 路径不存在/端口非法/未知 backend 直接失败 |
+| `images.py` | base64/data URI/对象 → RGB float32 CHW | 解压炸弹与像素上限；EXIF 旋转 |
+| `action_mapper.py` | 动作向量 → `base_cmd`/`arm_cmd` | `raw`/`base_twist`/`hybrid`/`joint`；限幅/取反/死区/关节限位 |
+| `engine.py` | SmolVLA 生命周期与推理 | 懒加载、RLock、processor 兼容、`predict_action_chunk`/`select_action` |
+| `service.py` | 请求校验、图像/状态补齐、响应组装 | 先加载模型确定 schema，再校验图像键/state 维度 |
+| `http_api.py` | 路由、鉴权、CORS、JSON/大小限制 | 纯函数 `dispatch()`，便于单测 |
+| `server.py` | `ThreadingHTTPServer` + CLI/信号 | 每请求独立线程；引擎串行 |
+| `clients/http_client.py` | ROS/调试客户端 | 标准库 urllib；图像自动编码 |
 
----
-
-## 4. 软件结构
+依赖方向：
 
 ```text
-software/
-├── custom_msgs/                      # 消息/服务/Action（v0.2）
-│   ├── msg/*.msg
-│   ├── srv/*.srv
-│   └── action/*.action
-└── center_server/
-    ├── center_server/
-    │   ├── config/
-    │   │   ├── config.yaml           # 仿真/桌面默认
-    │   │   ├── robot.yaml            # 实车覆盖
-    │   │   ├── ekf.yaml              # robot_localization
-    │   │   ├── slam_toolbox.yaml
-    │   │   └── nav2_params.yaml
-    │   ├── core/
-    │   │   ├── action_planner.py
-    │   │   ├── base_protocol.py      # STM32 二进制帧/CRC
-    │   │   ├── data_preprocessor.py
-    │   │   ├── imu_monitor.py        # ICM-20948 健康度/航向
-    │   │   ├── instruction_parser.py # 文本 -> 任务
-    │   │   ├── nav_supervisor.py     # 目标校验/停滞/直航
-    │   │   ├── object_detector.py    # 颜色/YOLO
-    │   │   ├── object_search.py      # 探索/搜索状态机
-    │   │   ├── occupancy_map.py      # 栅格/前沿/PGM+YAML
-    │   │   ├── odometry.py           # 麦轮运动学/里程计
-    │   │   ├── pose_utils.py
-    │   │   ├── reverse_handler.py
-    │   │   ├── safety_checker.py
-    │   │   ├── state_machine.py
-    │   │   ├── target_localizer.py   # bbox/激光 -> map 坐标
-    │   │   ├── target_tracker.py
-    │   │   ├── velocity_mux.py
-    │   │   └── vla_engine.py
-    │   ├── drivers/
-    │   │   └── icm20948.py           # 寄存器级 I2C 驱动
-    │   └── utils/
-    ├── ros_nodes/                    # 14 个节点
-    ├── launch/
-    │   ├── center_server.launch.py
-    │   ├── robot_bringup.launch.py
-    │   ├── slam_stack.launch.py
-    │   └── nav2_stack.launch.py
-    ├── tests/
-    │   ├── test_core.py
-    │   ├── test_vla_engine.py
-    │   ├── test_slam_nav_core.py
-    │   ├── fake_edge_publisher.py
-    │   ├── fake_slam_robot.py
-    │   ├── end_to_end_check.py
-    │   └── slam_nav_check.py
-    ├── DESIGN.md
-    └── README.md
+server -> http_api -> service -> engine -> torch/lerobot
+                         └──> action_mapper
+                         └──> images
+config <- server/http_api/service/engine
+errors <- 所有层
 ```
+
+`engine.py` 不导入 `service`/`http_api`；`http_api.py` 不直接导入 torch。
 
 ---
 
-## 5. 节点总览
+## 4. 请求生命周期
 
-| # | 节点 | 职责 | 关键输入/输出 |
-|---|---|---|---|
-| 1 | `center_bridge_node` | 图像/激光/里程计软同步，缓存音频/关节/IMU | → `/center/synced_data`、`/center/robot_state` |
-| 2 | `vla_inference_node` | 多模态预处理 + VLA 规则桩 | → `/center/action_intent`、`/center/inference_result` |
-| 3 | `action_generator_node` | 单步意图 → `/cmd_vel_raw`，发布前安全校验 | → `/arm/trajectory` |
-| 4 | `reverse_operation_node` | 急停/回退/机械臂复位/任务撤销/手动接管 | → `/reverse/cmd_vel` |
-| 5 | `safety_manager_node` | 障碍/数据/电量/定位/急停 | → `/center/safety_state`、`/safety/cmd_vel_override` |
-| 6 | `task_manager_node` | 状态机、VLA 任务、建图/导航/搜索任务编排 | → `/center/status`、`/center/mission_status` |
-| 7 | `velocity_mux_node` | 多源速度仲裁 | → `/cmd_vel`、`/center/velocity_status` |
-| 8 | `localization_node` | 位姿选择、定位健康度、初始位姿 | → `/center/pose`、`/center/localization_status` |
-| 9 | `map_manager_node` | 地图消费、前沿、存取、建图控制 | → `/center/map_info`、`/center/frontiers` |
-| 10 | `navigation_node` | `/center/navigate_to`，Nav2/直航后端 | → `/nav/cmd_vel`、`/center/nav_status` |
-| 11 | `target_detector_node` | 颜色/YOLO 检测、测距、map 投影、跟踪 | → `/center/target_detections` |
-| 12 | `object_search_node` | 前沿探索、目标确认、接近 | → `/center/search_status` |
-| 13 | `base_bridge_node` | Pi ↔ STM32 串口、里程计、电池、IMU 转发 | ↔ `/odom`、`/imu/data`、`/battery_state` |
-| 14 | `imu_node` | Pi I2C 直连 ICM-20948 | → `/imu/data` |
-
-启动：
-
-```bash
-# 仿真/桌面（默认 config.yaml）
-ros2 launch center_server center_server.launch.py
-
-# 实车（robot.yaml + 底盘串口）
-ros2 launch center_server robot_bringup.launch.py
-
-# 可选外部栈
-ros2 launch center_server slam_stack.launch.py
-ros2 launch center_server nav2_stack.launch.py map:=/path/to/map.yaml
+```text
+HTTP request
+  │
+  ├─ 1. Content-Length / body 上限
+  ├─ 2. JSON 解析、Content-Type 校验
+  ├─ 3. API Key 校验（/v1/* 受保护端点）
+  │
+  ▼
+InferenceService.infer
+  ├─ 4. instruction 校验（必填、≤512）
+  ├─ 5. engine.ensure_loaded()          # 首次加载模型，确定最终 schema
+  ├─ 6. 图像解析/别名映射/缺失补齐       # 使用 checkpoint 的 image_keys
+  ├─ 7. state 解析 + 补零/截断            # 使用 checkpoint 的 state_dim
+  ├─ 8. chunk_size 校验
+  ├─ 9. engine.infer()                  # 预处理 -> policy -> 后处理 -> numpy
+  ├─ 10. ActionMapper.map() 每步动作     # 第一步写 base_cmd/arm_cmd
+  └─ 11. 组装响应（actions/action/...）
 ```
+
+### 4.1 模型加载状态机
+
+```text
+        ┌──────────┐  ensure_loaded  ┌──────────┐  success  ┌────────┐
+        │ NOT_LOAD │ ──────────────► │ LOADING  │ ────────► │ LOADED │
+        └──────────┘                 └────┬─────┘           └────────┘
+                                           │ failure
+                                           ▼
+                                     ┌──────────┐  reload_interval 后重试
+                                     │  ERROR   │ ─────────────────────┐
+                                     └──────────┘                      │
+                                           └───────────────────────────┘
+```
+
+- `ensure_loaded()` 用 `RLock` 串行化，避免并发请求重复加载。
+- 加载失败缓存 `error/error_at`；`reload_interval_sec` 内直接 503，避免每个
+  请求都触发昂贵的 import/下载/显存分配。
+- 预加载 `model.preload=true` 失败**不退出进程**：服务仍可提供 `/health`，
+  请求时按间隔重试，便于模型文件晚挂载/网络恢复。
+- 默认懒加载时 `/v1/ready` 在首次推理前为 503；使用 readiness 探针的
+  编排系统应设 `preload: true`，或改用 `/healthz` 仅做存活检查。
+
+### 4.2 为什么先加载再校验图像
+
+不同 checkpoint 的相机键可能不是配置里的 `camera1..3`。`SmolVLAEngine`
+加载后会读取 `policy.config.image_features`/`input_features` 覆盖
+`image_keys`，读取 `observation.state` 覆盖 `state_dim`，读取
+`chunk_size`/`n_action_steps` 覆盖默认值。因此服务必须在解析请求图像之前
+完成加载，否则会按错误 schema 校验。代价是首个非法请求也会触发模型加载；
+生产环境可用 `preload: true` 规避。
 
 ---
 
-## 6. 模块详细设计
+## 5. HTTP 协议
 
-### 6.1 通信与软同步（`center_bridge_node`）
+### 5.1 设计约定
 
-v1 用 5 路严格/近似同步，真实机器人没有麦克风时会阻塞整条链路。v2 改为：
+- JSON 字段使用 `snake_case`；动作/坐标沿用 ROS 习惯。
+- 所有错误返回 `{"ok": false, "error": {"code", "message", "details?"}}`，
+  并带 `request_id`；HTTP 状态码表达类别。
+- 成功的推理响应同时包含原始动作块和**第一步**映射结果，避免 ROS 侧重复
+  实现映射逻辑；后续步骤的映射可按需 `return_mapped`。
+- 不使用 HTTP chunked 请求；客户端必须带 `Content-Length`（urllib/requests
+  默认满足）。
+- 无状态：`session_id` 只回显；策略动作队列由 `policy.reset()` 清理，
+  不做多 session 隔离。多机器人应多进程部署。
 
-- `image + laser + odom` 三路 `ApproximateTimeSynchronizer`（窗口 100–120 ms）；
-- `audio / joint_states / imu` 采用最近值缓存，缺失时填空消息；
-- 以图像帧为主参考，发布 `SyncedSensorData`；
-- `RobotState` 单独发布 odom + joint。
+### 5.2 端点语义
 
-QoS：
-
-- 传感器流 `SensorDataQoS`（best effort），兼容真实驱动；
-- `/center/status`、`/center/safety_state` 用 TRANSIENT_LOCAL，后启动节点也能拿到最后状态；
-- `/map` 发布 TRANSIENT_LOCAL，订阅 VOLATILE（兼容 slam_toolbox 与 map_server）。
-
-### 6.2 多模态预处理（`data_preprocessor.py`）
-
-- 图像：BGR/RGB/gray → 224×224 → float32 CHW [0,1]；
-- 激光：`LaserScan.ranges` → float32 一维；
-- 音频：PCM s16le → log-mel（numpy 实现，避免 librosa 依赖）；
-- 状态：odom `x/y/yaw`、关节字典；
-- 打包为 `SyncedDTO` 给 VLA。
-
-### 6.3 VLA 推理（`vla_engine.py`）
-
-- 规则桩：停止/前进/后退/左转/右转/左移/右移；
-- 任务意图：建图/探索/搜索/导航/回家；
-- `predict(data) -> ActionIntentDTO`，字段：
-  `task_id, target, intent, value, confidence, reverse_request, task_type, object_label, goal_x/y/yaw, waypoint`；
-- 真实模型替换 `_load_model()` 与 `predict()` 即可，接口不变；
-- 置信度 < `confidence_threshold` → `needs_confirmation` → `PAUSED`。
-
-### 6.4 指令解析与任务编排（`instruction_parser.py` + `task_manager_node`）
-
-文本 → `MissionSpec`：
-
-| 关键词 | mission_type | 说明 |
+| 端点 | 幂等 | 说明 |
 |---|---|---|
-| 建图/地图/slam/map | `map` | 建图 + 探索 + 保存 |
-| 探索/巡检/explore | `explore` | 前沿探索到覆盖率 |
-| 找/寻找/搜索/find | `search` | 目标标签从 `object_labels` 提取 |
-| 导航/前往/去/navigate | `navigate` | 命名航点或 `x=.. y=.. yaw=..` |
-| 回家/返回/home | `return_home` | `home_pose` |
-| 其它 | `vla` | 单步动作 |
+| `GET /v1/health` | 是 | 200 返回详细状态；`ready` 表示模型是否可用 |
+| `GET /v1/ready` | 是 | 就绪探针；未加载返回 503 |
+| `GET /v1/model` | 是 | schema/动作模式/错误信息，不触发模型加载 |
+| `POST /v1/infer` | 否 | 推理；`reset=true` 先清策略队列 |
+| `POST /v1/reset` | 是 | 清策略内部队列/回合状态 |
+| `POST /v1/warmup` | 否 | 空推理；首次会加载模型 |
 
-航点支持别名：
+### 5.3 图像传输
 
-```yaml
-instruction:
-  waypoints:
-    kitchen: {x: 1.2, y: 0.8, yaw: 0.0, aliases: ["厨房", "kitchen"]}
+- 客户端发送 base64（可带 `data:image/jpeg;base64,` 前缀）；服务端不接收
+  文件路径/URL，避免 SSRF 与任意文件读取。
+- 解码后统一 RGB、`float32 CHW [0,1]`；缩放/归一化由 LeRobot
+  processor 完成，服务端不硬编码 224/512。
+- 单图默认 6 MiB（`server.max_image_bytes`）、单请求 16 MiB；像素上限
+  2500 万，防止解压炸弹。
+- 缺失相机策略：
+  - `copy_first`：单目部署时把第一路复制到其余相机（默认）；
+  - `zeros`：补黑图；
+  - `error`：422，要求客户端补齐。
+- 图像语义按 RGB。ROS `cv_bridge` 的 `bgr8` 帧需转 RGB 后再编码；自带客户端
+  的 `encode_image_b64` 不做 BGR→RGB 猜测。
+
+### 5.4 状态向量
+
+`state` 是**有序**浮点数组，服务端不猜测语义：
+
+- 长度 < `state_dim`：补 0 并 warning（`pad_state: true`）；
+- 长度 > `state_dim`：截断并 warning；
+- `require_state: true` 时缺失直接 422；
+- 非数字/NaN/Inf/布尔值：422。
+
+推荐在微调数据与 ROS 端使用同一顺序，例如
+`[x, y, yaw, j1, j2, j3, j4, j5]`。SmolVLA checkpoint 的 `state_dim`
+可能被 pad 到 32，服务端以 checkpoint 的 `observation.state` 特征维度为准。
+
+---
+
+## 6. SmolVLA 适配层
+
+### 6.1 加载
+
+```python
+policy = SmolVLAPolicy.from_pretrained(path)   # HF repo id 或本地目录
+policy.to(device)                              # cuda/cpu/mps
+policy.to(dtype=torch.float16)                 # 可选；auto 时保持 checkpoint dtype
+policy.eval()
 ```
 
-任务入口：
+兼容点：
 
-- `ExecuteTask`：VLA 单步；指令命中任务关键词时自动转长任务（已验证“找杯子”）；
-- `ExecuteMission`：显式 `map/explore/search/navigate/return_home`；
-- `/center/mission_request`：HMI/语音后台任务，`TaskRequest` 带 `task_type`/目标字段。
+- 导入路径：`lerobot.policies.smolvla.modeling_smolvla` 或
+  `lerobot.policies.smolvla`；
+- `from_pretrained` 的 `local_files_only`/`trust_remote_code` 参数在新旧版本
+  可能不存在，失败时降级重试；
+- 设备 `auto`：CUDA > MPS > CPU；配置 CUDA 但不可用时回退 CPU 并告警；
+- `dtype: auto` 保持 checkpoint 原始 dtype；显式 `float16` 仅在 CUDA 使用，
+  CPU/MPS 回退 `float32`；
+- 加载失败统一包装为 503，附带安装提示与错误摘要。
 
-状态机（`state_machine.py`）：
+### 6.2 预处理/后处理
 
-```text
-IDLE ──recv_data──> RECEIVING_DATA ──start_infer──> INFERENCING ──infer_ok──> EXECUTING
-  │                       │                              │
-  │                       └──── start_mapping/nav/search ─────> MAPPING / NAVIGATING / SEARCHING
-  │                                                                   │
-  └────────────── reverse_req ────────────────────────────────────────┴──> REVERSING
-                                                                          │
-                                              task_done/task_failed ──────┴──> TASK_SUCCESS / TASK_FAILED
+SmolVLA 需要：
+
+- 图像：checkpoint 相机键对应张量；
+- 语言：`task` 字符串 → tokenizer；
+- 状态：按数据集统计归一化；
+- 动作：按数据集统计反归一化。
+
+这些由 LeRobot 的 `make_pre_post_processors(policy_cfg, pretrained_path)`
+管线完成。`model.require_processors: true` 时缺失该 API 直接 503，不用
+“猜”归一化参数。`preprocessor_overrides={"device_processor": {"device": ...}}`
+把张量搬到目标设备。
+
+batch 形状（单样本）：
+
+```python
+{
+  "observation.images.camera1": Tensor[1, 3, H, W],  # float32 [0,1]
+  "observation.state":          Tensor[1, state_dim],
+  "task":                       str,
+}
 ```
 
-- `MAPPING/NAVIGATING/SEARCHING` 与 `EXECUTING` 互斥；
-- 反向操作/急停/模式切换可抢占；
-- 任务超时/低置信度/数据超时 → `ERROR`/`PAUSED`/`IDLE`。
+processor 输出通常包含 `observation.language.tokens/attention_mask` 等；
+`engine.py` 不假设字段名，直接交给 policy。
 
-### 6.5 SLAM 与地图（`map_manager_node`）
+### 6.3 推理调用
 
-- 订阅 `/map`（slam_toolbox/cartographer/map_server 均可）；
-- 每秒发布 `MapInfo`（分辨率、尺寸、原点、known_ratio、frontier_count、map_file）；
-- 提取 frontier：free 与 unknown 的 8 邻域边界，BFS 聚类，按 `size/(distance+0.5)` 选点；
-  大图自动下采样（`frontier_max_cells`）；
-- `MapControl` 服务：
-  - `start`：进入建图状态；
-  - `stop`：停止建图；
-  - `save`：优先 slam_toolbox `SaveMap`，失败回退内置 PGM+YAML；
-  - `load`：读 PGM+YAML，发布 `/map` 供 AMCL/Nav2；
-  - `reset`：清空并调用 slam_toolbox `Reset`（若可用）。
-- PGM/YAML 与 map_server 兼容：occupied=0、free=254、unknown=205；YAML 含 resolution/origin/thresholds。
-- 地图目录：`map_manager.map_dir`（默认 `~/.ros/rush_mog/maps`，实车 `~/rush_mog/maps`）。
+优先 `policy.predict_action_chunk(batch)`，返回 `(B, T, action_dim)`；
+老版本没有该 API 时退回 `policy.select_action(batch)` 循环 `n_action_steps`
+并堆叠成动作块。随后：
 
-### 6.6 定位与 ICM-20948（`localization_node` + `imu_node` + EKF）
+1. 可选 `postprocessor(actions)`（兼容 dict/tensor 两种返回）；
+2. 转 numpy，处理 `(B,T,D)`/`(T,D)`/`(1,D)`；
+3. 取第一个 batch；
+4. 校验 NaN/Inf、空动作；
+5. 按请求 `chunk_size` 截断；
+6. 转 Python float 并保留 6 位小数。
 
-#### 6.6.1 坐标树
+`predict_action_chunk` 是**无状态**的（不消耗策略内部队列），适合 HTTP
+按需调用；`select_action` 会消耗队列，因此仅作为兼容回退。
 
-```text
-map ──(AMCL / slam_toolbox)──> odom ──(robot_localization EKF)──> base_link
-                                                                  ├── laser_link
-                                                                  ├── camera_link
-                                                                  └── imu_link
-```
+### 6.4 动作语义
 
-- 建图阶段：slam_toolbox 发布 `map→odom`；
-- 定位阶段：AMCL 发布 `map→odom`；
-- EKF 发布 `odom→base_link`，融合 `/odom` + `/imu/data`；
-- 两者不要同时发布 `map→odom`。
+SmolVLA 只输出向量，不携带“这是速度还是关节”的语义。映射完全由
+`action.mode` 决定：
 
-#### 6.6.2 EKF 配置（`config/ekf.yaml`）
-
-- `two_d_mode: true`，`world_frame: odom`；
-- `odom0`：`x,y,yaw,vx,vy,vyaw`；
-- `imu0`：`yaw,vyaw`，`imu0_relative: true`；
-- 磁力计不直接融合；由 `ImuMonitor` 判断 `mag_ok` 后做慢速互补。
-
-#### 6.6.3 ICM-20948 驱动（`drivers/icm20948.py`）
-
-- I2C 地址 0x68/0x69，WHO_AM_I=0xEA；
-- Bank2 配置：GYRO_CONFIG_1/ACCEL_CONFIG、采样率、DLPF；
-- Bank0 读 0x2D 起 14 字节（accel+gyro+temp）；
-- AK09916 通过 `INT_PIN_CFG.BYPASS_EN` 直连 0x0C；CNTL2=0x08（100Hz）；
-- 单位：accel m/s²、gyro rad/s、mag µT、temp °C；
-- 校准：`accel_bias/gyro_bias/mag_bias/mag_scale`；
-- 输出 `sensor_msgs/Imu`，`orientation_covariance[0] = -1`（交给 EKF）。
-
-#### 6.6.4 定位健康度
-
-`ImuMonitor` 计算：
-
-- 频率/gap、加速度模长、陀螺饱和、磁力计模长与基线偏差；
-- 静止时估计 z 轴零偏；
-- 平面航向：陀螺积分 + 磁航向慢速校正（`mag_blend`）；
-- `quality` 0..1，`mag_ok`、`online`、`yaw_variance`。
-
-`localization_node`：
-
-- 位姿来源优先级：`/amcl_pose`（<1s）→ TF `map→base_link` → `/odom`（降级）；
-- 发布 `/center/pose`、`/center/localization_status`；
-- `quality`：amcl 0.95、tf 0.75、odom 0.35，按 IMU/odom 频率扣分；
-- 导航 goal 要求 `quality >= navigation.min_localization_quality`（默认 0.35）；
-- `/center/set_initial_pose` → 转发 `/initialpose`，重置航向估计。
-
-#### 6.6.5 磁力计使用原则
-
-- 电机/电池大电流会让磁力计失真；`mag_ok=false` 时不参与校正；
-- 只用慢速互补，不硬切 yaw；
-- 校准硬铁/软铁；安装远离大电流线；
-- ICM-20948 已 NRND，可用 ICM-42688-P + 磁力计替代。
-
-### 6.7 导航（`navigation_node` + `nav_supervisor.py`）
-
-Action：`/center/navigate_to`（`NavigateTo`）。
-
-后端：
-
-| backend | 行为 |
-|---|---|
-| `nav2` | 转发到 Nav2 `/navigate_to_pose`，反馈/取消/超时 |
-| `direct` | 内置直航，发布 `/nav/cmd_vel`；带目标校验、障碍减速、停滞检测 |
-| `auto` | Nav2 可用则 Nav2，否则 direct |
-
-直航控制：
-
-```text
-dx,dy = goal - pose
-dist = hypot(dx,dy)
-yaw_err = wrap(atan2(dy,dx) - yaw)
-if |yaw_err| > 0.8: 原地转
-else:
-  body = R(-yaw) * (dx,dy)
-  vx = k*body.x*scale, vy = k*body.y*scale (holonomic)
-  wz = k_ang*yaw_err
-  近距离减速；前方障碍停车/减速
-```
-
-安全：
-
-- goal 非有限、容差非法、地图外、占据栅格 → 拒绝；
-- map 系 goal 要求 `map_ready` 且定位质量达标；
-- 目标落在障碍附近时吸附到最近自由栅格；
-- 停滞（`progress_monitor`）、超时、急停、取消 → 回零；
-- 无激光数据且 `require_scan` → 拒绝运动。
-
-Nav2 集成：
-
-- `nav2_msgs` 是可选依赖（懒加载）；未安装时自动 direct；
-- Nav2 最终速度必须重映射到 `/nav/cmd_vel`（`launch/nav2_stack.launch.py` 用 `SetRemap`），
-  否则会和 mux 抢 `/cmd_vel`；
-- `nav2_params.yaml` 为麦轮/2D 激光起步配置，需实车调参。
-
-### 6.8 目标检测与定位（`target_detector_node`）
-
-流程：
-
-```text
-图像 -> 检测器（颜色/YOLO） -> bbox
-     -> 相机模型：bearing = atan((u-cx)/fx)
-     -> 距离：激光方位窗口最近值 / bbox 高度估距
-     -> 目标点 base_link -> 用 /center/pose 投影到 map
-     -> IoU 跟踪器 -> track_id + 稳定性
-     -> TargetList
-```
-
-- 颜色检测：HSV 阈值 + 形态学 + 轮廓；无模型依赖；
-- YOLO：`ultralytics` 可选，`model_path` 配置；
-- 激光窗口默认 ±3°；取最近有效距离（目标更近时优先目标，可能被前景遮挡）；
-- bbox 高度估距：`d = fy * real_height / bbox_height_px`；
-- 目标位置方差：激光 0.05²、bbox 0.20²、无距离 1.0²；
-- 跟踪器：IoU 匹配、`max_age`、`hits`、位置历史；用于“确认不是闪烁检测”。
-
-### 6.9 目标搜索与自主探索（`object_search_node` + `object_search.py`）
-
-Action：
-
-- `/center/search_object`：搜索指定标签；
-- `/center/explore`：纯探索到覆盖率阈值。
-
-状态机：
-
-```text
-WAITING_MAP
-    │ map ready
-    ▼
-EXPLORING ──候选──> CONFIRMING ──确认──> APPROACHING ──到达──> FOUND
-    │                   │                    │
-    │ 无前沿/超时        └──丢失──> EXPLORING  └──不可达──> FAILED / 重试
-    ▼
-FAILED
-```
-
-规则：
-
-- 前沿选择：`size/(distance+0.5)`；过滤太远/太小/黑名单；
-- 确认：同一 track `hits >= confirm_hits` 且持续 `confirm_time`，位置稳定；
-- 发现候选先取消探索导航，停车确认，避免开过去错过；
-- 接近点：目标沿“目标→机器人”方向退 `standoff_distance`，朝向目标；
-- 导航失败的前沿进入黑名单（`blacklist_sec`），换点；
-- 目标丢失超过 `target_lost_timeout` → 回到探索；
-- 到达距离 ≤ `standoff + approach_tolerance` → FOUND；
-- 覆盖率 ≥ `explore_coverage` 或超时 → FAILED/FOUND；
-- 支持 `explore_if_not_found`：无地图时先调用 `map_control start`。
-
-### 6.10 速度仲裁（`velocity_mux_node`）
-
-| 优先级 | 源 | 话题 | 超时 |
-|---|---|---|---|
-| 0 | 安全覆盖 | `/safety/cmd_vel_override` | 0.6s |
-| 1 | 反向/手动 | `/reverse/cmd_vel` | 0.6s |
-| 2 | 遥控 | `/teleop/cmd_vel` | 0.5s |
-| 3 | Nav2/直航 | `/nav/cmd_vel` | 0.6s |
-| 4 | VLA 单步 | `/cmd_vel_raw` | 0.6s |
-
-- 同一时刻只有最高优先级活跃源生效；
-- 所有源超时 → 零速度；
-- 急停状态直接零速度，源名 `emergency`；
-- 输出限幅（`max_linear/max_angular`），防御上游绕过 SafetyChecker；
-- 发布 `/center/velocity_status` 便于调试。
-
-### 6.11 安全（`safety_manager_node`）
-
-检查项：
-
-| 检查 | 触发 | 处理 |
+| mode | `base_cmd` | `arm_cmd` |
 |---|---|---|
-| 前方/后方/侧向障碍 | 最近距离 < `obstacle_stop_distance` | 急停，持续覆盖零速度 |
-| 传感器超时 | `/center/synced_data` 或 `/scan` 超时 | `data_ok=false`，拒绝运动 |
-| 低电量 | `battery_percent < battery_low_percent` | 急停 |
-| 定位丢失 | 导航/搜索阶段 `localization_ok=false` 超过 grace | 急停 |
-| 手动急停 | `/center/emergency_stop` | 急停/解除 |
+| `raw` | null | null |
+| `base_twist` | 前 3 维 → `[vx, vy, wz]` | null |
+| `hybrid` | 前 3 维 | `arm_start` 之后 |
+| `joint` | null | 全部维度 |
 
-- 障碍恢复有滞回：`obstacle_clear_distance > obstacle_stop_distance`；
-- 急停覆盖发布到 `/safety/cmd_vel_override`，由 mux 以最高优先级执行；
-- `SafetyState` 带给 `task_manager`/`action_generator`/`velocity_mux` 门控。
+限幅顺序：归一化缩放 → 取反 → 死区 → 四舍五入。`clipped` 标记任一轴
+超出归一化范围/物理上限或关节限位。
 
-### 6.12 反向操作（`reverse_operation_node`）
+> `lerobot/smolvla_base` 是通用权重，动作空间取决于训练机器人，不是
+> Rush-MOG 底盘策略。生产部署必须用本车数据微调，并在训练时确定动作空间
+> （推荐 3 维速度），再把 `action.mode`/`base_indices`/`normalized` 与训练
+> 配置对齐。
 
-| operation_type | 行为 |
-|---|---|
-| 0 EMERGENCY_STOP | 零速度 + 机械臂保持 |
-| 1 REVERSE_MOVE | 按距离/速度回退，定时停止 |
-| 2 ARM_RESET | 发布回 home 的 JointTrajectory |
-| 3 TASK_CANCEL | 零速度 + 任务取消 |
-| 4 MANUAL_OVERRIDE | 切换手动，暂停自动 |
+---
 
-- 优先级高于 Nav2/VLA；
-- 回退期间按 10Hz 重复发布，覆盖普通速度；
-- `task_manager` 收到反向操作会取消当前 mission 的 sub-action。
+## 7. 配置与错误处理
 
-### 6.13 底盘串口桥（`base_bridge_node` + `base_protocol.py`）
+### 7.1 配置优先级
 
-帧格式：
+1. `--config`；
+2. `CENTER_SERVER_CONFIG`；
+3. 仓库 `config.yaml`（CLI 默认探测）；
+4. 内置默认值。
 
-```text
-magic(0xAA55) | version(1) | type(1) | seq(1) | len(1) | payload(len) | crc16(2)
-crc16: CRC-16/CCITT-FALSE，覆盖 version..payload
-```
+环境变量可覆盖 host/port/api_key/backend/path/device/dtype。配置校验在
+启动时完成，非法值直接退出（exit 2），不会带病运行。
 
-| type | 方向 | payload |
+### 7.2 错误分类
+
+| 层 | 异常 | HTTP |
 |---|---|---|
-| 0x01 CMD_VEL | Pi→STM32 | `vx(mm/s) i16, wz(mrad/s) i16, flags u8` |
-| 0x02 MODE | Pi→STM32 | `mode u8, flags u8` |
-| 0x03 PING | Pi→STM32 | 空 |
-| 0x81 TELEMETRY | STM32→Pi | `seq u32, enc[4] i32, wheel[4] i16 mm/s, battery_mv u16, current_ma i16, flags u8, uptime_ms u32` |
-| 0x82 IMU | STM32→Pi | `seq u32, accel(mg)[3] i16, gyro(0.1dps)[3] i16, mag(0.1uT)[3] i16, stamp_us u32` |
-| 0x83 ACK | STM32→Pi | `ack_type u8` |
-| 0x84 STATUS | STM32→Pi | `status u8` |
+| 配置 | `ConfigError` | 启动失败/exit 2 |
+| HTTP | 长度/JSON/Content-Type/鉴权/路径/方法 | 400/401/404/405/413/415 |
+| 服务 | instruction/图像/状态/chunk/相机名 | 422 |
+| 引擎 | torch/lerobot/checkpoint/processor 不可用 | 503 |
+| 引擎 | 推理异常/NaN/空动作 | 500 `inference_error` |
+| 兜底 | 未捕获异常 | 500 `internal_error`（不泄漏堆栈） |
 
-flags：bit0 ESTOP、bit1 ARMED、bit2 IMU_OK、bit3 ENCODER_OK、bit4 BATTERY_LOW。
+500 日志记录完整堆栈；响应只给异常类型/摘要，避免泄漏路径/环境信息。
 
-主机侧：
+### 7.3 降级
 
-- 30Hz 下发 `CMD_VEL`，0.5s 无新命令回零；
-- 读遥测 → 麦轮运动学 → `/odom`、`/joint_states`、`/battery_state`；
-- 读 IMU → `/imu/data`；
-- 串口断开 2s 重连；
-- 状态 JSON 发 `/base/status`。
-
-注意：现有 STM32 固件仍是 ASCII 命令（`'0'..'Z'` + PWM 档位），没有编码器/IMU 回传。
-要跑 Nav2 必须按上表升级固件；协议解析已做分帧/CRC/坏帧重同步。
-
-### 6.14 配置与日志
-
-- 配置优先级：`config_file` 参数 > `CENTER_SERVER_CONFIG` 环境变量 > 安装目录 `config.yaml`；
-- 所有节点共享 `center_server:` 顶层命名空间；
-- 日志用 `rclpy`/stdlib logging，不依赖 loguru；
-- 提供 `config.yaml`（仿真）与 `robot.yaml`（实车）；
-- `ekf.yaml`/`slam_toolbox.yaml`/`nav2_params.yaml` 为外部栈配置。
+- 模型加载失败：503；不返回固定动作。
+- 推理超时：客户端超时；服务端无法中断 CUDA kernel，需客户端丢弃结果并
+  停车/回退规则桩。
+- `stub` 后端只用于联调，生产配置不得使用。
 
 ---
 
-## 7. 数据流
+## 8. 并发、性能与资源
 
-### 7.1 VLA 单步
-
-```text
-edge/Pi sensors → bridge_node → /center/synced_data
-    → vla_inference_node → /center/action_intent
-    → action_generator_node → /cmd_vel_raw
-    → velocity_mux_node → /cmd_vel → base_bridge_node → STM32
-```
-
-### 7.2 建图
-
-```text
-/scan + /odom + /imu/data → slam_toolbox → /map
-    → map_manager_node → /center/map_info + /center/frontiers
-    → task_manager (map) → object_search (explore) → navigation_node → /nav/cmd_vel
-    → mux → /cmd_vel → STM32
-```
-
-### 7.3 目标搜索
-
-```text
-/camera/image_raw + /scan + /center/pose
-    → target_detector_node → /center/target_detections
-    → object_search_node (SearchCoordinator)
-        ├─ /center/frontiers + /center/map_info → 探索目标
-        ├─ /center/navigate_to → navigation_node → /nav/cmd_vel
-        └─ 确认目标 → 接近 → SearchObject.Result(target_pose)
-    → task_manager → ExecuteTask/ExecuteMission.Result
-```
-
-### 7.4 急停
-
-```text
-急停按钮/服务/障碍/低电量/定位丢失
-    → safety_manager_node → /center/safety_state + /safety/cmd_vel_override
-    → velocity_mux_node → /cmd_vel=0
-    → task_manager/action_generator 门控
-```
+- HTTP：`ThreadingHTTPServer`，每请求一个线程；适合低频（5–15 Hz）推理。
+- 引擎：`RLock` 串行化加载与推理；多请求排队，避免 GPU 并发导致 OOM。
+- 动作块：`chunk_size` 越大，推理频率越低，但客户端开环执行越久；
+  建议 1–8 步，并保证底层速度看门狗/超时。
+- 显存：SmolVLA ~450M 参数，float16 权重约 1 GB；建议 ≥6 GB 显存。
+- CPU：可运行但延迟高；仅用于联调/演示。
+- 请求体：base64 比二进制大约 33%；高分辨率多相机时优先 JPEG + 限流。
+- 日志：每请求一行 method/path/status/latency；不记录图像/Key。
 
 ---
 
-## 8. 接口设计
+## 9. 安全设计
 
-### 8.1 话题
+1. **网络**：默认监听 `0.0.0.0` 便于局域网调试；生产建议绑定内网地址，
+   由 Nginx/Caddy 终止 TLS，公网不直接暴露。
+2. **鉴权**：可选 Bearer/X-API-Key；`/v1/health`、`/v1/ready` 保持开放供
+   探针使用。
+3. **输入限制**：body/图像大小、像素数、图像数量、instruction 长度、
+   state 数值有限性、chunk 上限。
+4. **不接收 URL/文件路径**：只接受 base64，避免 SSRF/任意文件读取。
+5. **模型代码**：`trust_remote_code` 默认 false；只加载可信 checkpoint。
+6. **控制安全**：服务端限幅不是急停；ROS 必须保留 `safety_manager_node`、
+   速度看门狗、硬件急停。网络失败时底盘应自动回零。
 
-| 话题 | 类型 | 方向 | 说明 |
-|---|---|---|---|
-| `/scan`、`/edge/radar` | `sensor_msgs/LaserScan` | 订阅 | 激光 |
-| `/camera/image_raw`、`/edge/video` | `sensor_msgs/Image` | 订阅 | 图像 |
-| `/edge/audio` | `custom_msgs/AudioData` | 订阅 | 音频（可选） |
-| `/odom`、`/robot/odometry` | `nav_msgs/Odometry` | 订阅 | 里程计 |
-| `/imu/data` | `sensor_msgs/Imu` | 订阅 | IMU |
-| `/joint_states` | `sensor_msgs/JointState` | 订阅 | 关节 |
-| `/battery_state` | `sensor_msgs/BatteryState` | 订阅 | 电池 |
-| `/map` | `nav_msgs/OccupancyGrid` | 订阅/发布 | 地图 |
-| `/amcl_pose` | `geometry_msgs/PoseWithCovarianceStamped` | 订阅 | AMCL |
-| `/initialpose` | `geometry_msgs/PoseWithCovarianceStamped` | 发布 | 初始位姿 |
-| `/center/synced_data` | `custom_msgs/SyncedSensorData` | 发布 | 软同步 |
-| `/center/robot_state` | `custom_msgs/RobotState` | 发布 | 状态 |
-| `/center/action_intent` | `custom_msgs/ActionIntent` | 发布 | 意图 |
-| `/center/inference_result` | `custom_msgs/InferenceResult` | 发布 | 推理结果 |
-| `/center/status` | `custom_msgs/SystemStatus` | 发布 | 状态机 |
-| `/center/mission_status` | `custom_msgs/MissionStatus` | 发布 | 长任务进度 |
-| `/center/safety_state` | `custom_msgs/SafetyState` | 发布 | 安全 |
-| `/center/map_info` | `custom_msgs/MapInfo` | 发布 | 地图摘要 |
-| `/center/frontiers` | `custom_msgs/FrontierList` | 发布 | 前沿 |
-| `/center/pose` | `geometry_msgs/PoseWithCovarianceStamped` | 发布 | map 位姿 |
-| `/center/localization_status` | `custom_msgs/LocalizationStatus` | 发布 | 定位健康 |
-| `/center/nav_status` | `custom_msgs/NavStatus` | 发布 | 导航状态 |
-| `/center/target_detections` | `custom_msgs/TargetList` | 发布 | 目标 |
-| `/center/search_status` | `custom_msgs/SearchStatus` | 发布 | 搜索状态 |
-| `/center/velocity_status` | `custom_msgs/VelocityMuxStatus` | 发布 | 速度源 |
-| `/cmd_vel` | `geometry_msgs/Twist` | 发布 | 最终速度 |
-| `/cmd_vel_raw` | `geometry_msgs/Twist` | 发布 | VLA 原始 |
-| `/nav/cmd_vel` | `geometry_msgs/Twist` | 发布 | 导航速度 |
-| `/reverse/cmd_vel` | `geometry_msgs/Twist` | 发布 | 反向速度 |
-| `/safety/cmd_vel_override` | `geometry_msgs/Twist` | 发布 | 安全覆盖 |
-| `/arm/trajectory` | `trajectory_msgs/JointTrajectory` | 发布 | 机械臂 |
-| `/task/request` | `custom_msgs/TaskRequest` | 发布/订阅 | 内部任务 |
-| `/center/mission_request` | `custom_msgs/TaskRequest` | 订阅 | 外部任务 |
+---
 
-### 8.2 服务
+## 10. 测试策略
 
-| 服务 | 类型 | 说明 |
+| 层级 | 测试 | 是否需要 GPU |
 |---|---|---|
-| `/center/set_mode` | `custom_msgs/SetMode` | auto/manual/reverse |
-| `/center/emergency_stop` | `custom_msgs/EmergencyStop` | 急停/解除 |
-| `/center/map_control` | `custom_msgs/MapControl` | start/stop/save/load/reset |
-| `/center/set_initial_pose` | `custom_msgs/SetInitialPose` | 设置初始位姿 |
+| 配置 | 默认值/合并/非法端口/未知 backend | 否 |
+| 图像 | PNG/JPEG、data URI、dict、损坏、超限、round-trip | 否 |
+| 动作 | 归一化/物理单位/限幅/取反/死区/hybrid/joint/raw/NaN | 否 |
+| 服务 | 图像补齐策略、state 补零/截断、未知相机、chunk 校验 | 否 |
+| HTTP | 路由/鉴权/CORS/405/413/422/503、socket 端到端 | 否 |
+| 客户端 | health/model/infer/reset、错误码解析 | 否 |
+| 真实模型 | 加载/推理/动作 shape/延迟 | 是（手工/ nightly） |
 
-### 8.3 Action
-
-| Action | Goal | Result |
-|---|---|---|
-| `/center/execute_task` | task_id, instruction, task_type, target_* | success, info, target_pose, approach_pose, confidence, elapsed |
-| `/center/execute_mission` | mission_id, mission_type, target_*, max_duration, save_map, target_coverage | success, info, target_pose, approach_pose, confidence, elapsed |
-| `/center/navigate_to` | target_pose, tolerance, timeout, goal_id, avoid_obstacles | success, info, final_pose, elapsed |
-| `/center/explore` | mission_id, max_duration, target_coverage | success, info, coverage, elapsed |
-| `/center/search_object` | task_id, target_label, min_confidence, max_duration, standoff, explore_if_not_found, save_map | found, info, target_pose, approach_pose, confidence, elapsed |
-
-### 8.4 消息
-
-`AudioData`、`SyncedSensorData`、`RobotState`、`TaskRequest`、`ActionIntent`、`ReverseOperation`、
-`InferenceResult`、`SafetyState`、`SystemStatus`、`MapInfo`、`Frontier`、`FrontierList`、
-`TargetDetection`、`TargetList`、`LocalizationStatus`、`NavStatus`、`SearchStatus`、
-`MissionStatus`、`VelocityMuxStatus`。
-
----
-
-## 9. 配置设计
-
-### 9.1 文件
-
-| 文件 | 用途 |
-|---|---|
-| `config/config.yaml` | 仿真/桌面默认；`/edge/*` 话题、`perception.enabled=false`、`base.enabled=false` |
-| `config/robot.yaml` | 实车覆盖；`/scan`、`/camera/image_raw`、`base.enabled=true`、目标颜色 |
-| `config/ekf.yaml` | robot_localization |
-| `config/slam_toolbox.yaml` | slam_toolbox |
-| `config/nav2_params.yaml` | Nav2 Humble 起步配置 |
-
-### 9.2 关键参数
-
-| 参数 | 默认 | 说明 |
-|---|---|---|
-| `vla_engine.inference_rate` | 10 | 推理频率 |
-| `vla_engine.confidence_threshold` | 0.6 | 低置信度确认 |
-| `safety.obstacle_stop_distance` | 0.5/0.35 | 障碍急停距离 |
-| `safety.data_timeout_sec` | 2.0 | 传感器超时 |
-| `safety.battery_low_percent` | 15 | 低电量 |
-| `localization.min_quality` | 0.35 | 导航定位门限 |
-| `map_manager.frontier_min_size` | 5 | 前沿最小尺寸 |
-| `navigation.backend` | auto | nav2/direct/auto |
-| `navigation.stuck_timeout_sec` | 6.0 | 停滞判定 |
-| `search.standoff_distance` | 0.6 | 目标前停距 |
-| `search.confirm_hits` | 3 | 目标确认次数 |
-| `velocity_mux.priorities` | safety>reverse>teleop>nav>vla | 仲裁 |
-| `task_manager.execution_hold_sec` | 1.0 | VLA 成功保持窗口 |
-
----
-
-## 10. 异常处理
-
-| 异常 | 检测 | 处理 |
-|---|---|---|
-| 图像为空/损坏 | 预处理异常 | 停止推理，发布 error |
-| 雷达缺失 | `data_ok=false` / scan 超时 | 停止输出/拒绝运动 |
-| IMU 掉线/跳变 | `ImuMonitor` | 降低定位质量；不阻塞 AMCL |
-| 磁力计受扰 | 模长偏差 >35% | `mag_ok=false`，不参与校正 |
-| 定位质量低 | `LocalizationStatus.quality` | 拒绝 map 系目标；导航回零 |
-| 目标点被占 | 栅格/代价地图 | 吸附最近自由点或拒绝 |
-| 导航停滞 | 进度监控 | 取消、失败、重新规划 |
-| 目标丢失 | 跟踪超时 | 回探索，清空确认 |
-| 前沿不可达 | 导航失败 | 黑名单，换点 |
-| 急停 | 服务/障碍/电量/定位 | 零速度覆盖，任务取消 |
-| 地图保存失败 | 服务/IO | 返回失败，保留内存地图 |
-| 串口断开 | 读写异常 | 2s 重连，底盘看门狗回零 |
-
----
-
-## 11. 实时性与安全
-
-- **速度闭环在车上**：`velocity_mux` + `base_bridge` + STM32 看门狗；远程 center_server 断线时底盘自动回零。
-- **急停优先级最高**：安全覆盖 > 反向 > 遥控 > 导航 > VLA。
-- **超时**：每个速度源 0.5–0.6s 超时；STM32 自 0.5s 看门狗。
-- **QoS**：状态用 TRANSIENT_LOCAL；传感器用 best effort；地图发布 TRANSIENT_LOCAL。
-- **不要在 Wi-Fi 上跑底盘闭环**：Nav2 建议在 Pi/Orin 上运行，center_server 远程只做高层任务。
-- **硬件急停**：软件之外必须有常闭急停切断电机驱动。
-
----
-
-## 12. 部署与启动顺序
-
-### 12.1 实车
-
-1. 上电，确认 12V/5V/6V、共地、急停释放。
-2. 启动激光驱动：`ros2 run <lidar_driver> ...`，确认 `/scan` 10Hz。
-3. 启动相机：`/camera/image_raw`。
-4. 启动底盘桥：
-   ```bash
-   ros2 run center_server base_bridge_node --ros-args \
-     --params-file <install>/share/center_server/config/robot.yaml
-   ```
-   确认 `/odom`、`/imu/data`、`/battery_state`。
-5. 启动 EKF：
-   ```bash
-   ros2 run robot_localization ekf_node --ros-args \
-     --params-file <install>/share/center_server/config/ekf.yaml
-   ```
-6. 建图：
-   ```bash
-   ros2 launch center_server slam_stack.launch.py
-   ros2 launch center_server robot_bringup.launch.py
-   ros2 action send_goal /center/execute_mission custom_msgs/action/ExecuteMission \
-     "{mission_id: map1, mission_type: map, target_coverage: 0.9, save_map: true}"
-   ```
-7. 定位：停 slam_toolbox，启动 Nav2 localization（map_server+AMCL）：
-   ```bash
-   ros2 launch center_server nav2_stack.launch.py map:=$HOME/rush_mog/maps/rush_mog.yaml
-   ```
-8. 导航/搜索：
-   ```bash
-   ros2 action send_goal /center/navigate_to custom_msgs/action/NavigateTo \
-     "{target_pose: {header: {frame_id: map}, pose: {position: {x: 1.0, y: 0.0}, orientation: {w: 1.0}}}, goal_id: g1}"
-   ros2 action send_goal /center/execute_task custom_msgs/action/ExecuteTask \
-     "{task_id: find_cup, instruction: 找杯子}"
-   ```
-
-### 12.2 仿真/桌面
-
-```bash
-ros2 launch center_server center_server.launch.py
-python3 tests/fake_edge_publisher.py
-python3 tests/end_to_end_check.py       # 7/7
-```
-
-SLAM/导航/搜索联调：
-
-```bash
-ros2 launch center_server center_server.launch.py \
-  config_file:=<repo>/software/center_server/tests/config_test.yaml \
-  start_perception:=false start_localization:=false
-python3 tests/fake_slam_robot.py
-python3 tests/slam_nav_check.py          # 6/6
-```
-
-> 注意：`fake_slam_robot` 自己发布 `/center/localization_status`，因此联调时关闭
-> `localization_node`，避免两个源覆盖质量值。
-
----
-
-## 13. 性能指标
-
-| 指标 | 目标 |
-|---|---|
-| VLA 推理 | 5–20 Hz |
-| 端到端控制延迟 | < 200 ms（车上闭环） |
-| 激光 | ≥ 10 Hz，360° |
-| IMU | 100 Hz |
-| 编码器/里程计 | 30–50 Hz |
-| 建图 | 室内 30 m²，5–10 分钟 |
-| 导航到点 | 1–5 m，误差 < 0.2 m |
-| 目标检测 | 5–10 Hz（颜色/YOLO-lite） |
-| 目标搜索 | 30–300 s（场景相关） |
-| 急停响应 | < 100 ms（软件）/ 硬件更快 |
-
----
-
-## 14. 测试策略与结果
-
-### 14.1 单元测试
-
-> WSL/容器/沙箱中若 DDS 发现不稳定，测试和节点都加：
-> `ROS_DOMAIN_ID=77 ROS_LOCALHOST_ONLY=1 FASTDDS_BUILTIN_TRANSPORTS=UDPv4`。
+运行：
 
 ```bash
 cd software/center_server
-PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 35 passed
+pip install -r requirements-dev.txt
+python3 -m pytest tests -q
 ```
-
-覆盖：
-
-- 状态机、安全校验、动作规划、预处理、VLA、反向操作（v1）；
-- 指令解析、栅格/前沿/存图、相机/激光定位、跟踪、搜索协调器、导航校验/直航、
-  IMU 监控/航向、速度仲裁、麦轮里程计、串口协议 CRC/分帧、ICM-20948 驱动（v2）。
-
-### 14.2 VLA/安全端到端
-
-```bash
-python3 tests/end_to_end_check.py
-# RESULT: 7/7 passed
-```
-
-覆盖：前进、左转、低置信度、手动模式、急停、障碍物、反向回退。
-
-### 14.3 SLAM/导航/搜索联调
-
-```bash
-python3 tests/slam_nav_check.py
-# RESULT: 6/6 passed
-```
-
-覆盖：
-
-1. `NavigateTo` 到点；
-2. `Explore` 覆盖率；
-3. `SearchObject` 找到 cup；
-4. `MapControl` 保存/加载；
-5. `ExecuteTask "找杯子"` 自动转长任务；
-6. `ExecuteMission map` 建图+保存。
-
-`fake_slam_robot.py` 模拟地图、激光、位姿、定位状态和目标检测，不依赖真实硬件。
 
 ---
 
-## 15. 当前限制与后续工作
+## 11. 与 ROS 的接口契约
 
-1. **VLA 仍是规则桩**：无模型权重；接入真实 VLA 时替换 `_load_model/predict`。
-2. **STM32 固件未升级**：主机侧二进制协议已实现，固件仍 ASCII；需按 §6.13 实现编码器/IMU 回传。
-3. **Nav2 参数是起步值**：`robot_radius`、速度、膨胀半径、DWB critics 需实车调参。
-4. **无深度相机**：目标距离靠激光/bbox 高度；遮挡/高度变化时精度有限。
-5. **ICM-20948 磁力计需实测校准**：硬铁/软铁/安装偏航；电机干扰下只慢速校正。
-6. **单地图/单楼层**：未实现多地图切换/电梯/多层。
-7. **动态目标**：搜索假设目标基本静止；移动目标跟踪需扩展预测/重规划。
-8. **目标检测模型**：颜色检测只适合演示；YOLO 需模型/算力；可接 Orin Nano。
-9. **地图保存回退**：slam_toolbox 不可用时 PGM/YAML 精度取决于当前 `/map`。
-10. **未做硬件在环**：`fake_slam_robot` 验证了软件链路，真实串口/IMU/激光需实车联调。
+ROS 侧应把本服务当作**无状态动作块生成器**：
 
-后续优先级：
+```text
+request:  instruction + images + state
+response: actions[T][D] + base_cmd(第 1 步) + arm_cmd(第 1 步)
+```
 
-1. STM32 固件：4 路编码器 + 4 路 PWM + 轮速 PID + 二进制协议；
-2. 实车 TF/标定：轮半径/CPR、IMU 安装、激光/相机外参；
-3. Nav2 调参 + 真实地图闭环；
-4. YOLO/深度相机接入；
-5. 多地图/动态目标/远程 HMI。
+约定：
+
+1. 发原始相机帧（RGB），不要发 224×224 预处理图；
+2. `state` 顺序与训练数据一致；
+3. 动作块由 ROS 按时间顺序执行，执行期间可并发请求下一块；
+4. `base_cmd` 先写 `/cmd_vel_raw`，经 `velocity_mux`/`safety` 后再到
+   `/cmd_vel`，不得绕过；
+5. HTTP 失败/超时 → 丢弃动作块、停车、回退规则桩；
+6. `confidence` 不由本服务伪造；执行门控由 ROS 基于安全检查/动作一致性实现。
+
+现有 `software/ros/center_server/core/vla_engine.py` 仍是规则桩；正式接入
+建议新增异步 `smolvla_client_node`，保留规则桩作为降级路径，避免在 ROS
+定时器里同步阻塞网络请求。
 
 ---
 
-## 16. 总结
+## 12. 后续工作
 
-`center_server` v2 在 v1 的 VLA 推理、安全、反向操作之上，补齐了 **SLAM 建图、ICM-20948 定位、
-Nav2/直航导航、目标检测/搜索/接近、速度仲裁、底盘串口桥**。软件链路已通过 35 项单元测试、
-7 项 VLA/安全端到端、6 项 SLAM/导航/搜索联调；实车落地还差 STM32 固件升级、硬件选型
-（见 `hardware/SLAM_NAV.md`）和现场标定。
+1. **微调 Rush-MOG 策略**：动作空间 `[vx, vy, wz]`（可选 + 机械臂），
+   采集遥操作/规则控制演示数据，输出可用的 SmolVLA checkpoint。
+2. **动作块执行器**：ROS 侧按时间戳/速度积分执行 chunk，支持随时抢占/急停。
+3. **会话管理**：若策略依赖历史，增加 `session_id` → 状态/队列隔离。
+4. **异步推理**：服务端队列 + 最新帧丢弃，避免旧帧浪费 GPU。
+5. **可观测性**：Prometheus 指标（请求数/延迟/队列/显存）、结构化日志。
+6. **多模型/多租户**：模型注册表、按 `model_id` 路由、GPU 配额。
+7. **安全增强**：mTLS、请求签名、审计日志、模型文件校验和。
+8. **实车压测**：Wi-Fi 抖动、相机断流、GPU 降频、急停优先级。
