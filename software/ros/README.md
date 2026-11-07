@@ -20,7 +20,7 @@
 | 项目 | 结果 |
 |---|---|
 | `colcon build --packages-select custom_msgs center_server` | 通过 |
-| `pytest tests -q` | 59 passed |
+| `pytest tests -q` | 64 passed |
 | `tests/end_to_end_check.py` | 7/7 passed |
 | `tests/slam_nav_check.py` + `fake_slam_robot.py` | 6/6 passed |
 
@@ -251,6 +251,15 @@ curl -s http://127.0.0.1:8090/ros/health/devices/lidar | python3 -m json.tool
 curl -s 'http://127.0.0.1:8090/ros/health?include_metrics=false' | python3 -m json.tool
 ```
 
+参数查看/修改（运行时生效，重启回 YAML）：
+
+```bash
+curl -s http://127.0.0.1:8090/ros/params | python3 -m json.tool
+curl -X POST http://127.0.0.1:8090/ros/params \
+  -H 'Content-Type: application/json' \
+  -d '{"updates":{"publish_rate":2.0,"device.lidar.timeout_sec":2.0}}'
+```
+
 ROS 原生接口：
 
 ```bash
@@ -259,7 +268,8 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
   "{device_ids: [camera, lidar], include_metrics: false}"
 ```
 
-- 默认只监听 `127.0.0.1:8090`；跨机调用改 `health.http.host: 0.0.0.0` 并设置 `health.http.api_key`。
+- 代码默认监听 `127.0.0.1:8090`；仓库 `config.yaml`/`robot.yaml` 配置为 `0.0.0.0` 供 dashboard 经 ESP32 代理访问，跨机建议设置 `health.http.api_key`。
+- 设备参数（频率/超时/必需）与 health monitor 参数可在 dashboard 的 ROS 参数抽屉直接修改。
 - 设备清单在 `health.devices` 配置：camera/lidar/imu/microphone/speaker/arm/base/battery/odom。
 - 音箱 `/body/audio_status`、机械臂 `/arm/joint_states` 当前无反馈时显示 `unknown`，不伪造 `ok`；
   接入后无需改代码。
@@ -314,14 +324,14 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
 ```bash
 cd software/ros
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 59 passed
+# 64 passed
 ```
 
 单独跑健康检查（不依赖 ROS 图）：
 
 ```bash
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests/test_health_monitor.py tests/test_health_http.py -q
-# 24 passed
+# 29 passed
 ```
 
 ### 7.2 VLA/安全端到端

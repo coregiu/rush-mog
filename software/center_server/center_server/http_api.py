@@ -139,6 +139,7 @@ class HttpApi:
                     "health": "GET /v1/health",
                     "ready": "GET /v1/ready",
                     "model": "GET /v1/model",
+                    "params": "GET/POST /v1/params",
                     "infer": "POST /v1/infer",
                     "reset": "POST /v1/reset",
                     "warmup": "POST /v1/warmup",
@@ -169,6 +170,14 @@ class HttpApi:
         if path == "/v1/model":
             self._require_method(method, {"GET"})
             return 200, {"ok": True, "model": self.service.model_info()}
+
+        if path == "/v1/params":
+            if method == "GET":
+                return 200, self.service.params()
+            if method == "POST":
+                payload = self._json_body(headers, body)
+                return 200, self.service.update_params(payload)
+            self._require_method(method, {"GET", "POST"})
 
         if path == "/v1/infer":
             self._require_method(method, {"POST"})

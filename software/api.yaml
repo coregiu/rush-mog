@@ -2,14 +2,14 @@ openapi: 3.0.3
 
 info:
   title: Rush-MOG 模块接口
-  version: 1.1.0
+  version: 1.2.0
   description: |
     Rush-MOG 各模块接口归档，按模块分组：
 
     | 模块 | 传输 | 入口 | 说明 |
     | --- | --- | --- | --- |
-    | **Edge Server** | HTTP | `http://192.168.4.1`（80） | ESP32-S3 网页手柄、控制命令、状态、静态资源、MJPEG 图传 |
-    | **Center Server** | HTTP | `http://127.0.0.1:8000` | SmolVLA 多模态推理、健康检查、模型信息 |
+    | **Edge Server** | HTTP | `http://192.168.4.1`（80） | ESP32-S3 网页手柄、数字孪生监控/配置、模块上报/代理、静态资源、MJPEG 图传 |
+    | **Center Server** | HTTP | `http://127.0.0.1:8000` | SmolVLA 多模态推理、健康检查、模型/参数信息 |
     | **ROS Health Gateway** | HTTP | `http://127.0.0.1:8090` | ROS/设备健康检查，供 edge_center 调用 |
     | **Body Control** | UART | STM32 USART3，9600 8N1 | ESP32-S3 → STM32 的 ASCII 运动/音频命令，无 ACK |
 
@@ -44,8 +44,12 @@ tags:
   - name: Edge Server
     description: |
       ESP32-S3 车载上位机。手机连接 `RUSH-MOG` Wi-Fi 后访问
-      `http://192.168.4.1`。80 端口负责网页/静态文件/控制/状态，
+      `http://192.168.4.1`。80 端口负责网页/静态文件/控制/状态/模块监控 API，
       8080 端口负责 MJPEG 图传。控制命令最终通过 UART 转发给 STM32。
+
+      数字孪生页面：`GET /dashboard.html`（手柄页点 RUSH-MOG TWIN）。
+      ROS/CENTER 连上 AP 后向 `/api/modules/report` 上报，页面通过
+      `/api/modules/{id}/health|params` 由 ESP32 代理访问模块。
     x-docs: "./edge_server/README.md"
   - name: Center Server
     description: |
@@ -129,7 +133,7 @@ x-edge-network:
   gateway: "192.168.4.1"
   subnet: "255.255.255.0"
   channel: 6
-  max_clients: 2
+  max_clients: 4
   ports:
     http: 80
     mjpeg: 8080
@@ -155,7 +159,7 @@ x-edge-motion-keepalive:
     - "J"
     - "D"
   behavior: |
-    ESP32 保存当前持续运动命令，每 200ms 重发给 STM32；两字节摇杆命令
+    ESP32 保存当前持续运动命令，默认每 200ms 重发给 STM32（dashboard 可配 100–600ms）；两字节摇杆命令
     只重发方向位（如 15 → 1），避免覆盖之后调整的 PWM/微调。
     收到 0 / J / D 或调用 POST /stop 后清除。
   warning: |
@@ -539,6 +543,9 @@ paths:
             type: string
             enum:
               - index.html
+              - dashboard.html
+              - dashboard.css
+              - dashboard.js
               - ps2.css
               - ps2.js
               - audio.js
@@ -705,7 +712,7 @@ paths:
         无法识别的消息前缀会被忽略，但仍返回 200。
 
         按键/摇杆到 UART 命令的完整映射见 `x-edge-command-mapping`。
-        持续运动命令由 ESP32 每 200ms 重发给 STM32，直到收到停止/松开。
+        持续运动命令由 ESP32 默认每 200ms 重发给 STM32（可配 100–600ms），直到收到停止/松开。
       operationId: edgeCmd
       requestBody:
         required: true
@@ -895,6 +902,208 @@ paths:
                 sdcard: 1
                 motion_active: 0
 
+  /api/modules:
+    get:
+      tags: [Edge Server]
+      summary: 模块注册表 + Edge 自身状态
+      description: |
+        dashboard.html 的主数据源。返回 Edge 自身状态/参数，以及 ROS、CENTER
+        等模块最近一次通过 `POST /api/modules/report` 上报的缓存。
+        模块超过 15 秒未上报时 `stale=true`。
+      operationId: edgeModules
+      responses:
+        '200':
+          description: 模块注册表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgeModulesResponse'
+
+  /api/modules/report:
+    post:
+      tags: [Edge Server]
+      summary: 模块状态上报（ROS / CENTER）
+      description: |
+        ROS / CENTER 自动连接 RUSH-MOG Wi-Fi 后，由 `software/tools/edge_link.py`
+        周期调用。使用 `application/x-www-form-urlencoded`，字段小，适配
+        ESP32 WebServer。模块 IP 以连接来源 `remoteIP` 为准，不信任客户端传入。
+      operationId: edgeModuleReport
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/EdgeModuleReport'
+      responses:
+        '200':
+          description: 已登记
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          description: module/端口/路径非法
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '507':
+          description: 注册表已满（最多 4 个模块）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /api/modules/{module_id}:
+    get:
+      tags: [Edge Server]
+      summary: 单模块缓存
+      description: 返回模块最近一次上报的缓存；`edge` 返回 ESP32 本地状态。
+      operationId: edgeModule
+      parameters:
+        - name: module_id
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [edge, ros, center]
+      responses:
+        '200':
+          description: 模块状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgeModule'
+        '404':
+          description: 模块尚未上报
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /api/modules/{module_id}/health:
+    get:
+      tags: [Edge Server]
+      summary: 代理模块健康接口
+      description: |
+        ESP32 通过已登记的模块 IP + 端口/路径，代理 `GET /ros/health` 或
+        `GET /v1/health`，返回模块原始 JSON。模块不可达时返回 502。
+      operationId: edgeModuleHealth
+      parameters:
+        - name: module_id
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [edge, ros, center]
+      responses:
+        '200':
+          description: 模块健康 JSON
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '404':
+          description: 模块尚未上报
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '502':
+          description: 模块不可达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /api/modules/{module_id}/params:
+    get:
+      tags: [Edge Server]
+      summary: 参数描述（代理/本地）
+      description: |
+        `edge` 返回 ESP32 本地参数描述；`ros` / `center` 代理模块的
+        `/ros/params` / `/v1/params`。
+      operationId: edgeModuleParams
+      parameters:
+        - name: module_id
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [edge, ros, center]
+      responses:
+        '200':
+          description: 参数描述
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleParams'
+        '404':
+          description: 模块尚未上报
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '502':
+          description: 模块不可达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+    post:
+      tags: [Edge Server]
+      summary: 修改参数（代理/本地）
+      description: |
+        `edge` 使用 `application/x-www-form-urlencoded`（字段为参数 key）；
+        `ros` / `center` 使用 JSON `{"updates": {...}}`，ESP32 原样代理到模块
+        参数接口。模块返回的 JSON 原样透传。
+      operationId: edgeModuleParamsUpdate
+      parameters:
+        - name: module_id
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [edge, ros, center]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModuleParamsUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties:
+                type: string
+      responses:
+        '200':
+          description: 参数已更新
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleParamsUpdateResponse'
+        '400':
+          description: 参数非法/缺少请求体
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '404':
+          description: 模块尚未上报
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '502':
+          description: 模块不可达
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
   /v1/infer:
     servers:
       - url: "http://127.0.0.1:8000"
@@ -1082,6 +1291,64 @@ paths:
                 $ref: '#/components/schemas/CenterModelEnvelope'
         '401':
           $ref: '#/components/responses/CenterUnauthorized'
+
+  /v1/params:
+    servers:
+      - url: "http://127.0.0.1:8000"
+        description: Center Server（默认端口）
+    get:
+      tags: [Center Server]
+      summary: 动作映射/限幅参数描述
+      description: |
+        返回可编辑的 `action.*` 参数：mode、max_linear_x/y、max_angular_z、
+        deadband、normalized、arm_start、round_digits；修改会重建 ActionMapper，
+        下一次推理生效。不重新加载模型。
+      operationId: centerParams
+      security:
+        - {}
+        - centerBearer: []
+        - centerApiKey: []
+      responses:
+        '200':
+          description: 参数描述
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleParams'
+        '401':
+          $ref: '#/components/responses/CenterUnauthorized'
+    post:
+      tags: [Center Server]
+      summary: 修改动作映射/限幅参数
+      description: |
+        请求体 `{"updates": {"action.mode": "raw", "action.max_linear_x": 0.7}}`。
+        只允许 action.* 白名单；非法值返回 422。
+      operationId: centerParamsUpdate
+      security:
+        - {}
+        - centerBearer: []
+        - centerApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModuleParamsUpdate'
+      responses:
+        '200':
+          description: 参数已更新
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleParamsUpdateResponse'
+        '401':
+          $ref: '#/components/responses/CenterUnauthorized'
+        '422':
+          description: 参数非法
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
 
   /v1/health:
     servers:
@@ -1302,6 +1569,88 @@ paths:
                 $ref: '#/components/schemas/CenterErrorResponse'
         '503':
           description: 健康快照尚未生成
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /ros/params:
+    servers:
+      - url: "http://127.0.0.1:8090"
+        description: ROS Health Gateway（默认只监听回环）
+    get:
+      tags: [ROS Health Gateway]
+      summary: ROS 健康监控参数描述
+      description: |
+        返回可编辑的 health monitor 参数（发布频率、宽限期、设备频率/超时/
+        必需标志等）和只读 topic/message_type。参数修改运行时生效，重启后
+        回到 YAML 配置。
+      operationId: rosParams
+      security:
+        - {}
+        - rosHealthBearer: []
+        - rosHealthApiKey: []
+      responses:
+        '200':
+          description: 参数描述
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleParams'
+        '401':
+          $ref: '#/components/responses/RosHealthUnauthorized'
+        '404':
+          description: 该节点未提供参数接口
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '503':
+          description: 参数快照尚未生成
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+    post:
+      tags: [ROS Health Gateway]
+      summary: 修改 ROS 健康监控参数
+      description: |
+        请求体 `{"updates": {"publish_rate": 2.0, "device.lidar.timeout_sec": 2.0}}`；
+        也接受 `application/x-www-form-urlencoded`。只允许 health monitor 参数，
+        topic/message_type 只读。
+      operationId: rosParamsUpdate
+      security:
+        - {}
+        - rosHealthBearer: []
+        - rosHealthApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModuleParamsUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties:
+                type: string
+      responses:
+        '200':
+          description: 参数已更新
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModuleParamsUpdateResponse'
+        '400':
+          description: 参数非法
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '401':
+          $ref: '#/components/responses/RosHealthUnauthorized'
+        '503':
+          description: 参数快照尚未生成
           content:
             application/json:
               schema:
@@ -1581,6 +1930,184 @@ components:
           type: integer
           enum: [0, 1]
           description: 是否正在持续重发运动命令
+
+    EdgeModuleReport:
+      type: object
+      description: ROS/CENTER 通过 `POST /api/modules/report` 提交的表单
+      required: [module, status]
+      properties:
+        module:
+          type: string
+          pattern: '^[A-Za-z0-9_-]{1,16}$'
+          example: "ros"
+        name:
+          type: string
+          maxLength: 48
+        version:
+          type: string
+          maxLength: 24
+        status:
+          type: string
+          enum: [ok, starting, degraded, error, unknown, offline, disabled]
+        summary:
+          type: string
+          maxLength: 240
+        health_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          default: 8090
+        health_path:
+          type: string
+          maxLength: 80
+          default: "/ros/health"
+        params_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          default: 8090
+        params_path:
+          type: string
+          maxLength: 80
+          default: "/ros/params"
+        params_json:
+          type: string
+          maxLength: 2048
+          description: 精简参数 JSON 字符串；ESP32 原样缓存
+
+    EdgeModule:
+      type: object
+      required: [id, name, status, updated_ms, stale]
+      properties:
+        id:
+          type: string
+          example: "ros"
+        name:
+          type: string
+        version:
+          type: string
+        ip:
+          type: string
+          example: "192.168.4.2"
+        status:
+          type: string
+          enum: [ok, starting, degraded, error, unknown, offline, disabled]
+        summary:
+          type: string
+        health_url:
+          type: string
+        params_url:
+          type: string
+        updated_ms:
+          type: integer
+          format: int64
+        age_ms:
+          type: integer
+          format: int64
+        stale:
+          type: boolean
+        params:
+          type: object
+          additionalProperties: true
+
+    EdgeModulesResponse:
+      type: object
+      required: [ok, edge, modules, count]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        server_time_ms:
+          type: integer
+          format: int64
+        edge:
+          $ref: '#/components/schemas/EdgeModule'
+        modules:
+          type: array
+          items:
+            $ref: '#/components/schemas/EdgeModule'
+        count:
+          type: integer
+
+    ModuleParam:
+      type: object
+      required: [key, label, value, type, group, editable]
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        value:
+          nullable: true
+          description: 当前值；数字/布尔/字符串
+        type:
+          type: string
+          enum: [int, float, bool, string, enum]
+        group:
+          type: string
+        unit:
+          type: string
+        min:
+          type: number
+        max:
+          type: number
+        step:
+          type: number
+        options:
+          type: array
+          items:
+            type: string
+        editable:
+          type: boolean
+        requires_restart:
+          type: boolean
+        help:
+          type: string
+
+    ModuleParams:
+      type: object
+      required: [ok, module, params]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        module:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+        editable:
+          type: boolean
+        requires_restart:
+          type: boolean
+        params:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModuleParam'
+
+    ModuleParamsUpdate:
+      type: object
+      required: [updates]
+      properties:
+        updates:
+          type: object
+          additionalProperties: true
+
+    ModuleParamsUpdateResponse:
+      type: object
+      required: [ok, updated]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        updated:
+          type: object
+          additionalProperties: true
+        requires_restart:
+          type: boolean
+        message:
+          type: string
 
     EdgeButtonMessage:
       type: string

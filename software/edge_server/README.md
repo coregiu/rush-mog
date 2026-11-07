@@ -7,14 +7,15 @@
 - **YOLO物体识别**: 支持实时物体检测，自动框选并标注物体名称和置信度
 - **语音控制**: 支持语音识别，通过语音命令控制小车
 - **手柄控制**: 完整的PS2风格虚拟手柄控制
+- **数字孪生监控**: `dashboard.html` 展示 EDGE / ROS / CENTER 模块状态、设备矩阵和参数配置
 
 ## 端口说明
-- `80`：网页、静态文件、`/sdcard/*`、`/cmd`（控制）、`/stop`、`/status`
+- `80`：网页、静态文件、`/sdcard/*`、`/cmd`（控制）、`/stop`、`/status`、`/api/modules*`（监控/配置）
 - `8080`：独立 MJPEG 视频流（与 HTTP 80 分离，避免推流阻塞控制）
 
 `/status` 返回 JSON，包含运行时间、剩余堆/PSRAM、摄像头/SD 状态和当前是否有持续运动（`motion_active`）。
 
-控制通道直接复用网页的 80 端口，用 `POST /cmd` 发送纯文本命令（`button:up:down`、`stick:left-analog:up:5`），不再占用 81 端口。浏览器只在按下/松开（摇杆为按下/拖动/松开）时发命令，按住期间不再发心跳；ESP32 每 200ms 把当前运动命令重发给 STM32，用来喂 STM32 的 800ms 看门狗，直到收到松开/停止命令。
+控制通道直接复用网页的 80 端口，用 `POST /cmd` 发送纯文本命令（`button:up:down`、`stick:left-analog:up:5`），不再占用 81 端口。浏览器只在按下/松开（摇杆为按下/拖动/松开）时发命令，按住期间不再发心跳；ESP32 默认每 200ms 把当前运动命令重发给 STM32（dashboard 可调 100–600ms），用来喂 STM32 的 800ms 看门狗，直到收到松开/停止命令。
 
 调试时可以直接用 curl 发命令（按住类命令会一直保持，直到发送停止命令）：
 
@@ -24,6 +25,62 @@ curl -X POST --data 'button:stop:down' http://192.168.4.1/cmd
 ```
 
 松手、页面隐藏或关闭时页面会发停止命令。如果手机与 ESP32 断网且页面没有机会发停止，ESP32 会保持最后一条运动命令；重新打开页面（加载时会自动置停）或 `POST /stop` 即可停车。
+
+# 上位机监控与配置（数字孪生）
+手柄页顶部的 **RUSH-MOG TWIN** 按钮会打开 `dashboard.html`：
+
+- 以 RUSH-MOG 数字孪生车辆为中心，显示 EDGE / ROS / CENTER 三个模块和
+  摄像头、雷达、IMU、麦克风、音箱、机械臂、底盘、电池、里程计状态；
+- 点击模块“参数”打开参数抽屉，支持修改后立即生效；
+- ROS / CENTER 的信息由它们连接 RUSH-MOG Wi-Fi 后主动上报到 `192.168.4.1`，
+  页面只访问 ESP32，由 ESP32 代理模块接口，避免手机跨域/AP 客户端隔离问题。
+  若 ESP32 主动访问 AP 客户端被网络策略阻止，页面会回退为直连模块地址；
+  直连也失败时仍可显示最近一次上报的缓存状态。
+
+## 模块上报与代理 API
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/modules/report` | ROS / CENTER 上报模块、状态、精简参数（表单） |
+| GET | `/api/modules` | 模块注册表 + Edge 自身状态/参数 |
+| GET | `/api/modules/{id}` | 单个模块缓存 |
+| GET | `/api/modules/{id}/health` | 代理模块健康接口（如 ROS `/ros/health`） |
+| GET | `/api/modules/{id}/params` | 代理/本地参数描述 |
+| POST | `/api/modules/{id}/params` | 代理/本地参数修改 |
+
+- `{id}`：`edge` / `ros` / `center`；`edge` 由 ESP32 本地处理；
+- ESP32 用连接来源 IP 作为模块地址，模块只上报端口和路径；
+- 模块上报示例（`edge_link.py` 自动完成）：
+
+```bash
+curl -X POST http://192.168.4.1/api/modules/report \
+  -d 'module=ros' \
+  -d 'name=ROS 2 center_server' \
+  -d 'version=0.2.0' \
+  -d 'status=ok' \
+  -d 'summary=all devices ok' \
+  -d 'health_port=8090' -d 'health_path=/ros/health' \
+  -d 'params_port=8090' -d 'params_path=/ros/params' \
+  -d 'params_json={"publish_rate":1.0,"device_count":9}'
+```
+
+## 边缘参数（NVS 持久化）
+
+`GET/POST /api/modules/edge/params` 暴露 Edge 自身参数：
+
+| 参数 | 范围 | 说明 |
+|---|---|---|
+| `motion_keepalive_ms` | 100–600 | STM32 运动保活周期；必须小于 800ms 看门狗 |
+| `stream_fps` | 5–20 | MJPEG 推流帧率 |
+
+只读信息包括 `ap_ssid`、`ap_ip`、`ap_channel`、`max_clients`、`wifi_clients`、
+`free_heap`、`free_psram`、`uptime_ms`、`camera`、`sdcard`、`motion_active`。
+
+> AP 最大客户端数已提升到 **4**（`AP_MAX_CLIENTS`）：手机 + ROS + CENTER + 调试机。
+> 需要至少 3 个客户端才能同时完成监控、控制和两个模块上报。
+
+ROS / CENTER 侧自动连接 Wi-Fi 并上报的部署说明见
+[`software/tools/README.md`](../tools/README.md)。
 
 
 # 控制按键说明
@@ -155,8 +212,8 @@ edge://settings/privacy/sitePermissions/allPermissions/microphone
 步骤 3：开发编译：
 点击vscode最下侧 √ 按钮进行编译。（或用 ctrl + alt + B 快捷键）
 
-步骤 4：上传index.html文件
-打开左侧在插件安装下方的PlatformIO头像图标，在di_mini/platform中选择 "Upload Filesystem Image"进行执行，上传文件。
+步骤 4：上传网页文件
+打开左侧在插件安装下方的PlatformIO头像图标，在 di_mini/platform 中选择 "Upload Filesystem Image" 进行执行，上传 `data/` 下的 index.html、dashboard.html、dashboard.css、dashboard.js 等文件。
 
 步骤 5: 烧录程序
 将ESP8266板子使用USB线连接到电脑。

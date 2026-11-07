@@ -17,6 +17,9 @@ Build a 2D occupancy grid with a 2D LiDAR + wheel encoders + ICM-20948, and loca
 #### (4) Object Handling
 Use the VLA model to control vehicle movement: search for, lock onto, and track target objects. Use the robotic arm to grasp, transfer, and place objects within a designated area, implementing object transport. Transport paths can be planned or learned automatically.
 
+#### (5) Digital Twin Monitoring and Configuration
+Open `http://192.168.4.1/dashboard.html` (or tap **RUSH-MOG TWIN** on the controller page) to see an in-vehicle digital twin with EDGE / ROS / CENTER module status, per-device health (camera, LiDAR, IMU, microphone, speaker, arm, base, battery), and runtime parameter editing. ROS and CENTER join the RUSH-MOG Wi-Fi and report to `192.168.4.1`; the page only talks to the ESP32, which proxies module APIs.
+
 
 ## Design Overview
 #### Overall System Architecture

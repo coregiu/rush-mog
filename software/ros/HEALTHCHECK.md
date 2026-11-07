@@ -44,8 +44,10 @@
                         /audio/raw                   /arm/joint_states           /body/audio_status
 ```
 
-- 默认监听 `127.0.0.1:8090`，只允许同机调用。
-- `edge_center` 跨机部署时，把 `health.http.host` 改为 `0.0.0.0`，并设置 `api_key`，同时用防火墙限制来源。
+- 代码默认监听 `127.0.0.1:8090`；仓库的 `config.yaml`/`robot.yaml` 为了 dashboard 经 ESP32 代理访问，配置为 `0.0.0.0`。
+- 同机 `edge_center` 可用 `127.0.0.1`；跨机或 ESP32 代理访问时需要 `0.0.0.0`，并建议设置 `api_key` + 防火墙限制来源。
+- `edge_server` 的 `dashboard.html` 通过 `GET /api/modules/ros/health`、`/api/modules/ros/params`
+  代理本接口；ROS 需监听 `0.0.0.0` 并加入 RUSH-MOG Wi-Fi。
 - HTTP 快照由节点按 `publish_rate`（默认 1 Hz）预计算；HTTP 线程不调用 rclpy。
 - 因此 HTTP 返回的 `age_sec`/`rate_hz` 最多滞后一个发布周期（默认 ≤1 s）。
 
@@ -63,6 +65,8 @@
 | GET | `/v1/health`、`/health`、`/healthcheck` | 详细健康快照（别名） | 200 |
 | GET | `/ros/health/devices/{device_id}` | 单设备健康 | 200 |
 | GET | `/v1/health/{device_id}`、`/healthcheck/{device_id}` | 单设备健康（别名） | 200 |
+| GET | `/ros/params`、`/params` | 健康监控参数描述 | 200 |
+| POST | `/ros/params`、`/params` | 修改健康监控参数（运行时） | 200 |
 | GET | `/ros/healthz` | 存活探针，进程活着即 200 | 200 |
 | GET | `/healthz`、`/livez` | 存活探针（别名） | 200 |
 | GET | `/ros/readyz` | 就绪探针；未就绪返回 503 | 200 / 503 |
@@ -92,10 +96,12 @@
 |---|---|
 | 200 | 请求成功；**整体 `status=error` 时 `/ros/health` 仍返回 200**，由 body 判断 |
 | 204 | `OPTIONS` |
+| 400 | 参数请求体非法/参数校验失败 |
 | 401 | 配置了 `api_key` 但缺失/错误 |
 | 404 | 未知路径，或 `device_id` 不存在 |
-| 405 | 非 GET/HEAD/OPTIONS |
-| 503 | `/ros/readyz` 未就绪；或健康快照尚未生成时请求 `/ros/health` |
+| 405 | 该方法不支持（`/ros/params` 支持 GET/POST） |
+| 413 | 参数请求体超过 65536 字节 |
+| 503 | `/ros/readyz` 未就绪；或健康/参数快照尚未生成 |
 
 > 关键约定：**`/ros/health` 的 HTTP 200 只代表“健康数据可读”**，不代表机器人健康。
 > 机器健康看 body 的 `status` / `healthy` / `ready`；探针看 `/ros/healthz` 和 `/ros/readyz`。
@@ -294,6 +300,80 @@
   "request_id": "..."
 }
 ```
+
+### 3.8 参数：`GET/POST /ros/params`
+
+`GET` 返回参数描述列表，dashboard 直接按 `type/group/min/max/step` 渲染表单：
+
+```json
+{
+  "ok": true,
+  "module": "ros",
+  "name": "ROS 2 center_server",
+  "version": "0.2.0",
+  "editable": true,
+  "requires_restart": false,
+  "params": [
+    {
+      "key": "publish_rate",
+      "label": "健康发布频率",
+      "value": 1.0,
+      "type": "float",
+      "group": "健康检查",
+      "editable": true,
+      "requires_restart": false,
+      "unit": "Hz",
+      "min": 0.2,
+      "max": 10.0,
+      "step": 0.1
+    }
+  ],
+  "request_id": "..."
+}
+```
+
+`POST` 支持 JSON 或表单：
+
+```bash
+curl -X POST http://127.0.0.1:8090/ros/params \
+  -H 'Content-Type: application/json' \
+  -d '{"updates":{"publish_rate":2.0,"device.lidar.timeout_sec":2.0}}'
+```
+
+响应：
+
+```json
+{
+  "ok": true,
+  "module": "ros",
+  "updated": {"publish_rate": 2.0, "device.lidar.timeout_sec": 2.0},
+  "requires_restart": false,
+  "message": "参数已更新",
+  "request_id": "..."
+}
+```
+
+可写参数：
+
+| 参数 | 类型/范围 | 说明 |
+|---|---|---|
+| `publish_rate` | float 0.2–10 | 健康话题/HTTP 快照频率；下一周期应用 |
+| `startup_grace_sec` | float 0–120 | 启动宽限期 |
+| `rate_window_sec` | float 0.5–60 | 频率统计窗口 |
+| `strict_unknown` | bool | 可选设备 unknown 是否降级整体 |
+| `safety_required` | bool | 安全状态超时是否算故障 |
+| `safety_timeout_sec` | float 0.5–60 | 安全状态超时 |
+| `check_nodes` | bool | 是否执行节点发现 |
+| `device.<id>.expected_rate_hz` | float 0–1000 | 设备期望频率 |
+| `device.<id>.timeout_sec` | float 0–60 | 设备数据超时 |
+| `device.<id>.min_rate_ratio` | float 0–1 | 设备最低频率比例 |
+| `device.<id>.required` | bool | 设备是否必需 |
+
+只读项：`device.<id>.topic`、`device.<id>.message_type`。修改 `topic`/`message_type`
+需要改 YAML 并重启节点（涉及重新订阅）。
+
+> 参数是**运行时生效**：重启 `health_monitor_node` 后回到 `config.yaml`/`robot.yaml` 的值。
+> 参数修改接口在配置 `api_key` 时与 `/ros/health` 一样需要鉴权。
 
 ---
 
@@ -640,7 +720,7 @@ center_server:
     service: "/center/healthcheck"
     http:
       enabled: true
-      host: "127.0.0.1"           # 远程调用改 0.0.0.0
+      host: "0.0.0.0"             # dashboard 经 ESP32 代理；仅同机调用可改回 127.0.0.1
       port: 8090
       api_key: ""                 # 非空启用 Bearer/X-API-Key
       cors_allow_origin: "*"
@@ -673,7 +753,7 @@ center_server:
 
 ## 9. 安全
 
-- 默认只监听 `127.0.0.1`，同机 `edge_center` 无需鉴权；
+- 代码默认只监听 `127.0.0.1`；仓库配置为 dashboard/ESP32 代理监听 `0.0.0.0`，同机 `edge_center` 无需鉴权；
 - 跨机部署必须：
   1. `host: "0.0.0.0"`；
   2. 设置 `api_key`（`Authorization: Bearer` 或 `X-API-Key`）；
@@ -692,9 +772,9 @@ center_server:
 ```bash
 cd software/ros
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests/test_health_monitor.py tests/test_health_http.py -q
-# 24 passed
+# 29 passed
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 59 passed（含原有 35 项）
+# 64 passed（含原有 35 项）
 ```
 
 覆盖：

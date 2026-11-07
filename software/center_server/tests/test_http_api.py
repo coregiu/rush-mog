@@ -225,3 +225,54 @@ def test_socket_server_and_client():
         httpd.server_close()
         thread.join(timeout=3)
         svc.close()
+
+
+def test_params_get_and_update(api):
+    status, payload, _ = api.dispatch("GET", "/v1/params")
+    assert status == 200
+    assert payload["module"] == "center"
+    values = {item["key"]: item["value"] for item in payload["params"]}
+    assert values["action.mode"] == "base_twist"
+    assert values["action.max_linear_x"] == pytest.approx(0.5)
+
+    body = _json_body(
+        {"updates": {"action.mode": "raw", "action.max_linear_x": 0.8}}
+    )
+    status, payload, _ = api.dispatch(
+        "POST", "/v1/params", {"content-type": "application/json"}, body
+    )
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["updated"]["action.mode"] == "raw"
+
+    status, payload, _ = api.dispatch("GET", "/v1/model")
+    assert status == 200
+    assert payload["model"]["action_mode"] == "raw"
+
+    status, payload, _ = api.dispatch(
+        "POST",
+        "/v1/params",
+        {"content-type": "application/json"},
+        _json_body({"updates": {"action.mode": "nope"}}),
+    )
+    assert status == 422
+    assert payload["error"]["code"] == "invalid_param"
+
+
+def test_params_rejects_unknown_and_invalid_ranges(api):
+    status, payload, _ = api.dispatch(
+        "POST",
+        "/v1/params",
+        {"content-type": "application/json"},
+        _json_body({"updates": {"action.unknown": 1}}),
+    )
+    assert status == 422
+
+    status, payload, _ = api.dispatch(
+        "POST",
+        "/v1/params",
+        {"content-type": "application/json"},
+        _json_body({"updates": {"action.max_linear_x": 99}}),
+    )
+    assert status == 422
+    assert "action.max_linear_x" in payload["error"]["message"]

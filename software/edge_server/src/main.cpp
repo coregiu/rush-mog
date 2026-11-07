@@ -15,8 +15,8 @@ static bool initWiFi()
     return false;
   }
 
-  // 只调用一次 softAP；信道固定 6，限制连接数，避免其他设备抢空口
-  if (!WiFi.softAP(AP_SSID, AP_PSW, 6, 0, 2)) {
+  // 只调用一次 softAP；手机 + ROS + CENTER 至少 3 个客户端，留 1 个调试余量
+  if (!WiFi.softAP(AP_SSID, AP_PSW, AP_CHANNEL, 0, AP_MAX_CLIENTS)) {
     Serial.println("AP 启动失败");
     return false;
   }
@@ -50,6 +50,7 @@ void setup()
 
   // 先起网络和控制，再初始化摄像头/SD；摄像头或 SD 异常不影响控制可用性
   initFS();
+  initEdgeConfig();
   initWiFi();
 
   server.on("/cmd", HTTP_POST, handleCmd);
@@ -57,6 +58,14 @@ void setup()
   server.on("/cmd-stick", handleCmdStick);
   server.on("/stop", handleStop);
   server.on("/status", handleStatus);
+
+  // 上位机监控/配置 API
+  server.on("/api/modules", HTTP_GET, handleApiRequest);
+  server.on("/api/modules/report", HTTP_POST, handleModuleReport);
+  server.on("/api/modules/edge", HTTP_GET, handleApiRequest);
+  server.on("/api/modules/edge/health", HTTP_GET, handleApiRequest);
+  server.on("/api/modules/edge/params", HTTP_GET, handleApiRequest);
+  server.on("/api/modules/edge/params", HTTP_POST, handleApiRequest);
 
   // 兼容旧页面：旧版本从 80 端口请求 /stream，重定向到独立视频端口
   server.on("/stream", []() {
@@ -67,7 +76,9 @@ void setup()
 
   server.onNotFound([]() {
     String uri = server.uri();
-    if (uri.startsWith("/sdcard/")) {
+    if (uri.startsWith("/api/")) {
+      handleApiRequest();
+    } else if (uri.startsWith("/sdcard/")) {
       handleSdcard();
     } else {
       handleWebRequest();

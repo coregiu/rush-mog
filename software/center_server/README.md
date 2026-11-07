@@ -2,7 +2,7 @@
 
 > 版本：0.1.0  
 > 运行环境：Python 3.10+；真实模型建议 NVIDIA GPU（CPU 可跑但延迟高）  
-> 接口：HTTP/JSON，`POST /v1/infer`
+> 接口：HTTP/JSON，`POST /v1/infer`、`GET/POST /v1/params`
 
 本目录是 Rush-MOG 架构中的**中心推理模块**。机载 ROS（树莓派 4B/5 或 Jetson
 Orin Nano）负责相机/激光/里程计采集与底盘安全控制；中心服务器加载 SmolVLA，
@@ -147,6 +147,8 @@ python -m center_server --config config.yaml --check
 | GET | `/readyz`、`/v1/ready` | 就绪探针；模型未加载返回 503 | 否 |
 | GET | `/v1/health` | 详细健康状态（模型/设备/错误） | 否 |
 | GET | `/v1/model` | 模型 schema（相机键、state/action 维度、动作模式） | 是* |
+| GET | `/v1/params` | 动作映射/限幅参数描述 | 是* |
+| POST | `/v1/params` | 运行时修改动作映射/限幅参数 | 是* |
 | POST | `/v1/infer` | 多模态推理 | 是* |
 | POST | `/v1/reset` | 清理策略内部动作队列/回合状态 | 是* |
 | POST | `/v1/warmup` | 空推理预热（会加载模型） | 是* |
@@ -154,6 +156,43 @@ python -m center_server --config config.yaml --check
 
 \* 仅当 `server.api_key` 非空时要求鉴权。支持
 `Authorization: Bearer <key>` 或 `X-API-Key: <key>`。
+
+### 4.1.1 参数：`GET/POST /v1/params`
+
+`GET` 返回可编辑的动作映射/速度限幅参数：
+
+```bash
+curl -s http://127.0.0.1:8000/v1/params | python3 -m json.tool
+```
+
+```json
+{
+  "ok": true,
+  "module": "center",
+  "params": [
+    {"key": "action.mode", "label": "动作映射模式", "value": "base_twist",
+     "type": "enum", "options": ["raw", "base_twist", "hybrid", "joint"],
+     "group": "动作映射", "editable": true},
+    {"key": "action.max_linear_x", "label": "最大线速度 X", "value": 0.5,
+     "type": "float", "unit": "m/s", "min": 0.0, "max": 5.0,
+     "group": "速度限幅", "editable": true}
+  ]
+}
+```
+
+`POST` 使用 `{"updates": {...}}`：
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/params \
+  -H 'Content-Type: application/json' \
+  -d '{"updates":{"action.mode":"raw","action.max_linear_x":0.7}}'
+```
+
+可写参数：`action.mode`（`raw`/`base_twist`/`hybrid`/`joint`）、
+`action.normalized`、`action.max_linear_x`、`action.max_linear_y`、
+`action.max_angular_z`、`action.deadband`、`action.arm_start`、
+`action.round_digits`。修改会重建 `ActionMapper`，下一次推理立即生效；
+不重新加载模型。重启服务后回到 `config.yaml`。
 
 ### 4.2 请求：`POST /v1/infer`
 
@@ -449,7 +488,7 @@ python3 -m pytest tests -q
 ```
 
 覆盖：配置校验、动作映射/限幅/关节限位、图像编解码、HTTP 路由/鉴权/错误码、
-socket 服务与自带客户端、模型缺失时 503。
+socket 服务与自带客户端、模型缺失时 503、`/v1/params` 参数查询/修改/校验。
 
 手工联调：
 

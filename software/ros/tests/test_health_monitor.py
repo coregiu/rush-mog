@@ -294,3 +294,33 @@ def test_monitor_disabled():
     assert report.ready is False
     assert report.devices == []
     assert report.summary["total"] == 0
+
+
+def test_configure_device_updates_runtime_thresholds():
+    monitor = make_monitor()
+    feed(monitor, "camera")
+    feed(monitor, "lidar")
+
+    spec = monitor.configure_device(
+        "camera", expected_rate_hz=20.0, timeout_sec=0.5, required=False
+    )
+    assert spec.expected_rate_hz == 20.0
+    assert spec.timeout_sec == 0.5
+    assert spec.required is False
+
+    report = monitor.snapshot(now=3.0)
+    camera = device(report, "camera")
+    assert camera.status == "ok"  # 10Hz >= 20*0.5
+
+    monitor.configure_device("camera", min_rate_ratio=0.8)
+    report = monitor.snapshot(now=3.0)
+    camera = device(report, "camera")
+    assert camera.status == "degraded"
+    assert report.status == "degraded"
+
+    with pytest.raises(ValueError):
+        monitor.configure_device("camera", topic="/other")
+    with pytest.raises(ValueError):
+        monitor.configure_device("camera", expected_rate_hz=-1)
+    with pytest.raises(KeyError):
+        monitor.configure_device("nope", required=True)

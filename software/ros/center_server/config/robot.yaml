@@ -299,7 +299,7 @@ center_server:
       - health_monitor_node
     http:
       enabled: true
-      host: "127.0.0.1"         # edge_center 跨机部署时改 0.0.0.0，并设置 api_key
+      host: "0.0.0.0"           # dashboard 通过 ESP32 代理访问；建议设置 api_key
       port: 8090
       api_key: ""
       cors_allow_origin: "*"

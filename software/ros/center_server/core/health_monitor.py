@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import time
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Deque, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -323,6 +323,51 @@ class HealthMonitor:
             state.invalid = False
             state.error = ""
             state.config_error = ""
+
+    def configure_device(self, device_id: str, **changes: Any) -> DeviceSpec:
+        """运行时更新单个设备的监控参数。
+
+        只允许影响判定逻辑、不改变订阅的参数；topic/message_type 需要重启节点。
+        """
+        state = self.states.get(str(device_id))
+        if state is None:
+            raise KeyError(str(device_id))
+        allowed = {
+            "expected_rate_hz",
+            "timeout_sec",
+            "required",
+            "min_rate_ratio",
+            "description",
+        }
+        unknown = set(changes) - allowed
+        if unknown:
+            raise ValueError("不支持的设备参数: " + ",".join(sorted(unknown)))
+
+        values: Dict[str, Any] = {}
+        if "expected_rate_hz" in changes:
+            rate = _to_float(changes["expected_rate_hz"], -1.0)
+            if rate < 0.0 or rate > 1000.0:
+                raise ValueError("expected_rate_hz 必须在 0..1000")
+            values["expected_rate_hz"] = rate
+        if "timeout_sec" in changes:
+            timeout = _to_float(changes["timeout_sec"], -1.0)
+            if timeout < 0.0 or timeout > 60.0:
+                raise ValueError("timeout_sec 必须在 0..60")
+            values["timeout_sec"] = timeout
+        if "required" in changes:
+            values["required"] = _to_bool(changes["required"], state.spec.required)
+        if "min_rate_ratio" in changes:
+            ratio = _to_float(changes["min_rate_ratio"], -1.0)
+            if ratio < 0.0 or ratio > 1.0:
+                raise ValueError("min_rate_ratio 必须在 0..1")
+            values["min_rate_ratio"] = ratio
+        if "description" in changes:
+            values["description"] = str(changes["description"] or "")
+
+        spec = replace(state.spec, **values)
+        self.devices[spec.id] = spec
+        state.spec = spec
+        return spec
 
     # ------------------------------------------------------------------ reports
     def snapshot(

@@ -64,12 +64,15 @@ RushMog智能系统包括语音控制系统，车体控制系统，视觉分析�
 
 ## 3.3 远程控制子系统
 - [端侧控制子系统](edge_server/README.md)
+- [数字孪生监控页](edge_server/data/dashboard.html)（`/dashboard.html`）
+- [ROS/CENTER 自动接入与上报](tools/README.md)
 
 远程控制子系统功能：
 - 1 连接摄像头，实时采集图像数据
 - 2 应用机器学习进行图像识别
 - 3 对位置、距离进行识别
 - 4 形成控制指令传给主控制系统
+- 5 模块注册/上报/代理 API，展示 EDGE/ROS/CENTER 状态并支持参数修改
 
 ## 3.4 中心推理子系统
 - 机载 ROS 包（SLAM/导航/搜索/安全/健康检查）：[ros/README.md](ros/README.md)、[详细设计](ros/DESIGN.md)、[健康检查契约](ros/HEALTHCHECK.md)
@@ -84,8 +87,8 @@ RushMog智能系统包括语音控制系统，车体控制系统，视觉分析�
 - 6 中心服务与机载 ROS 通过 HTTP 解耦，可分别部署和降级
 - 7 节点/设备健康检查，HTTP `:8090/ros/health` 供 `edge_center` 调用
 
-验证：ROS 包 59 项单元测试（含 24 项健康检查）、7/7 VLA/安全端到端、
-6/6 SLAM/导航/搜索联调；`center_server` 服务 36 项单元/HTTP 测试（不依赖 GPU）。
+验证：ROS 包 64 项单元测试（含 29 项健康检查）、7/7 VLA/安全端到端、
+6/6 SLAM/导航/搜索联调；`center_server` 服务 38 项单元/HTTP 测试（不依赖 GPU）。
 
 
 # 4 使用的相关工具软件：

@@ -11,6 +11,9 @@
 // 【自己的 WiFi 热点设置】手机直接连这个
 #define AP_SSID "RUSH-MOG"          // 热点名称
 #define AP_PSW "coregiu_927"        // 热点密码（至少8位）
+// 手机 + ROS + CENTER SERVER 至少 3 个客户端；留 1 个余量给调试电脑。
+#define AP_CHANNEL 6
+#define AP_MAX_CLIENTS 4
 extern IPAddress local_IP; // 本地IP
 extern IPAddress gateway;  // 网关
 extern IPAddress subnet; // 子网掩码
@@ -24,6 +27,7 @@ extern WebServer server;
 bool initFS();
 bool initSdcard();
 void initWebControl();
+void initEdgeConfig();
 void serviceMotionKeepalive();
 void handleWebRequest();
 void handleCmdButton();
@@ -32,6 +36,20 @@ void handleCmd();
 void handleStop();
 void handleStatus();
 void handleSdcard();
+
+// 上位机监控/配置 API（供 dashboard.html 与 ROS/CENTER 上报使用）
+//   POST /api/modules/report          模块上报（表单）
+//   GET  /api/modules                 模块注册表 + Edge 自身状态
+//   GET  /api/modules/{id}            单模块缓存
+//   GET  /api/modules/{id}/health     代理模块健康接口
+//   GET  /api/modules/{id}/params     代理/本地参数描述
+//   POST /api/modules/{id}/params     代理/本地参数修改
+void handleApiRequest();
+void handleModuleReport();
+
+// 可在运行时修改的边缘参数（NVS 持久化）
+extern uint32_t motionKeepaliveMs;
+extern uint32_t streamFps;
 
 // 命令处理（HTTP 接口共用）
 void processCmdButton(const String& key, const String& type);

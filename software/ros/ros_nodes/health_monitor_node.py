@@ -16,12 +16,13 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import math
 import numbers
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import rclpy
 from nav_msgs.msg import Odometry
@@ -121,8 +122,10 @@ class HealthMonitorNode(Node):
         self._ros_info: Dict[str, Any] = {}
         self._http_info: Dict[str, Any] = {"enabled": False, "bound": False}
         self._http: Optional[HealthHttpServer] = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._payload: Optional[Dict[str, Any]] = None
+        self._params_payload: Optional[Dict[str, Any]] = None
+        self._pending_publish_rate: Optional[float] = None
 
         status_qos = QoSProfile(
             depth=1,
@@ -420,8 +423,9 @@ class HealthMonitorNode(Node):
 
     # --------------------------------------------------------------- ros graph
     def on_safety(self, msg: SafetyState) -> None:
-        self._safety = msg
-        self._safety_time = time.monotonic()
+        with self._lock:
+            self._safety = msg
+            self._safety_time = time.monotonic()
 
     def _refresh_graph(self) -> None:
         if self._check_nodes:
@@ -515,7 +519,247 @@ class HealthMonitorNode(Node):
         with self._lock:
             if self._payload is None:
                 return None
-            return dict(self._payload)
+            return copy.deepcopy(self._payload)
+
+    def _params_provider(self) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            if self._params_payload is None:
+                return None
+            return copy.deepcopy(self._params_payload)
+
+    def _params_updater(self, updates: Mapping[str, Any]) -> Dict[str, Any]:
+        with self._lock:
+            result = self._apply_params(updates)
+            self._params_payload = self._build_params_payload()
+            return result
+
+    @staticmethod
+    def _coerce_float(value: Any, key: str, low: float, high: float) -> float:
+        try:
+            number = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{key} 必须是数字") from exc
+        if not math.isfinite(number) or number < low or number > high:
+            raise ValueError(f"{key} 必须在 {low}..{high}")
+        return number
+
+    @staticmethod
+    def _coerce_bool(value: Any, key: str) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "off"}:
+                return False
+        if isinstance(value, (int, float)):
+            return bool(value)
+        raise ValueError(f"{key} 必须是布尔值")
+
+    @staticmethod
+    def _param_item(
+        key: str,
+        label: str,
+        value: Any,
+        value_type: str,
+        group: str,
+        *,
+        unit: str = "",
+        min_value: Optional[float] = None,
+        max_value: Optional[float] = None,
+        step: Optional[float] = None,
+        editable: bool = True,
+        requires_restart: bool = False,
+        help_text: str = "",
+    ) -> Dict[str, Any]:
+        item: Dict[str, Any] = {
+            "key": key,
+            "label": label,
+            "value": value,
+            "type": value_type,
+            "group": group,
+            "editable": bool(editable),
+            "requires_restart": bool(requires_restart),
+        }
+        if unit:
+            item["unit"] = unit
+        if min_value is not None:
+            item["min"] = min_value
+        if max_value is not None:
+            item["max"] = max_value
+        if step is not None:
+            item["step"] = step
+        if help_text:
+            item["help"] = help_text
+        return item
+
+    def _build_params_payload(self) -> Dict[str, Any]:
+        params: List[Dict[str, Any]] = [
+            self._param_item(
+                "publish_rate", "健康发布频率", self.publish_rate, "float",
+                "健康检查", unit="Hz", min_value=0.2, max_value=10.0, step=0.1,
+            ),
+            self._param_item(
+                "startup_grace_sec", "启动宽限期", self.startup_grace, "float",
+                "健康检查", unit="s", min_value=0.0, max_value=120.0, step=1.0,
+            ),
+            self._param_item(
+                "rate_window_sec", "频率统计窗口", self.rate_window, "float",
+                "健康检查", unit="s", min_value=0.5, max_value=60.0, step=0.5,
+            ),
+            self._param_item(
+                "strict_unknown", "未知设备降级", self.strict_unknown, "bool",
+                "健康检查", help_text="开启后可选设备 unknown 也把整体降为 degraded",
+            ),
+            self._param_item(
+                "safety_required", "安全状态必需", self.safety_required, "bool",
+                "健康检查",
+            ),
+            self._param_item(
+                "safety_timeout_sec", "安全状态超时", self.safety_timeout, "float",
+                "健康检查", unit="s", min_value=0.5, max_value=60.0, step=0.5,
+            ),
+            self._param_item(
+                "check_nodes", "ROS 节点发现", self._check_nodes, "bool",
+                "健康检查",
+            ),
+        ]
+
+        for device_id, spec in self.monitor.devices.items():
+            group = f"设备 · {device_id}"
+            params.extend(
+                [
+                    self._param_item(
+                        f"device.{device_id}.expected_rate_hz", "期望频率",
+                        spec.expected_rate_hz, "float", group,
+                        unit="Hz", min_value=0.0, max_value=1000.0, step=0.5,
+                    ),
+                    self._param_item(
+                        f"device.{device_id}.timeout_sec", "数据超时",
+                        spec.timeout_sec, "float", group,
+                        unit="s", min_value=0.0, max_value=60.0, step=0.1,
+                    ),
+                    self._param_item(
+                        f"device.{device_id}.min_rate_ratio", "最低频率比例",
+                        spec.min_rate_ratio, "float", group,
+                        min_value=0.0, max_value=1.0, step=0.05,
+                    ),
+                    self._param_item(
+                        f"device.{device_id}.required", "必需设备",
+                        spec.required, "bool", group,
+                    ),
+                    self._param_item(
+                        f"device.{device_id}.topic", "反馈话题",
+                        spec.topic, "string", group, editable=False,
+                    ),
+                    self._param_item(
+                        f"device.{device_id}.message_type", "消息类型",
+                        spec.message_type, "string", group, editable=False,
+                    ),
+                ]
+            )
+
+        return {
+            "ok": True,
+            "module": "ros",
+            "name": "ROS 2 center_server",
+            "version": SERVICE_VERSION,
+            "editable": True,
+            "requires_restart": False,
+            "params": params,
+        }
+
+    def _apply_params(self, updates: Mapping[str, Any]) -> Dict[str, Any]:
+        if not isinstance(updates, Mapping) or not updates:
+            raise ValueError("updates 必须是非空对象")
+
+        health_values: Dict[str, Any] = {}
+        device_values: Dict[str, Dict[str, Any]] = {}
+        updated: Dict[str, Any] = {}
+
+        for raw_key, raw_value in updates.items():
+            key = str(raw_key)
+            if key == "publish_rate":
+                value = self._coerce_float(raw_value, key, 0.2, 10.0)
+                health_values["publish_rate"] = value
+            elif key == "startup_grace_sec":
+                value = self._coerce_float(raw_value, key, 0.0, 120.0)
+                health_values["startup_grace_sec"] = value
+            elif key == "rate_window_sec":
+                value = self._coerce_float(raw_value, key, 0.5, 60.0)
+                health_values["rate_window_sec"] = value
+            elif key == "strict_unknown":
+                value = self._coerce_bool(raw_value, key)
+                health_values["strict_unknown"] = value
+            elif key == "safety_required":
+                value = self._coerce_bool(raw_value, key)
+                health_values["safety_required"] = value
+            elif key == "safety_timeout_sec":
+                value = self._coerce_float(raw_value, key, 0.5, 60.0)
+                health_values["safety_timeout_sec"] = value
+            elif key == "check_nodes":
+                value = self._coerce_bool(raw_value, key)
+                health_values["check_nodes"] = value
+            elif key.startswith("device."):
+                parts = key.split(".")
+                if len(parts) != 3:
+                    raise ValueError(f"非法参数名: {key}")
+                device_id, field = parts[1], parts[2]
+                if device_id not in self.monitor.states:
+                    raise ValueError(f"未知设备: {device_id}")
+                if field == "expected_rate_hz":
+                    value = self._coerce_float(raw_value, key, 0.0, 1000.0)
+                elif field == "timeout_sec":
+                    value = self._coerce_float(raw_value, key, 0.0, 60.0)
+                elif field == "min_rate_ratio":
+                    value = self._coerce_float(raw_value, key, 0.0, 1.0)
+                elif field == "required":
+                    value = self._coerce_bool(raw_value, key)
+                else:
+                    raise ValueError(f"{key} 是只读参数或不存在")
+                device_values.setdefault(device_id, {})[field] = value
+            else:
+                raise ValueError(f"未知参数: {key}")
+            updated[key] = value
+
+        # 全部校验通过后再应用，避免半更新。
+        if "publish_rate" in health_values:
+            self.publish_rate = health_values["publish_rate"]
+            self._pending_publish_rate = self.publish_rate
+        if "startup_grace_sec" in health_values:
+            self.startup_grace = health_values["startup_grace_sec"]
+            self.monitor.startup_grace_sec = self.startup_grace
+        if "rate_window_sec" in health_values:
+            self.rate_window = health_values["rate_window_sec"]
+            self.monitor.rate_window_sec = self.rate_window
+        if "strict_unknown" in health_values:
+            self.strict_unknown = health_values["strict_unknown"]
+            self.monitor.strict_unknown = self.strict_unknown
+        if "safety_required" in health_values:
+            self.safety_required = health_values["safety_required"]
+            self.monitor.safety_required = self.safety_required
+        if "safety_timeout_sec" in health_values:
+            self.safety_timeout = health_values["safety_timeout_sec"]
+        if "check_nodes" in health_values:
+            self._check_nodes = health_values["check_nodes"]
+
+        for device_id, changes in device_values.items():
+            self.monitor.configure_device(device_id, **changes)
+
+        return {
+            "updated": updated,
+            "requires_restart": False,
+            "message": "参数已更新",
+        }
+
+    def _apply_pending_publish_rate(self) -> None:
+        with self._lock:
+            rate = self._pending_publish_rate
+            if rate is None:
+                return
+            self._pending_publish_rate = None
+            self.timer.timer_period_ns = int(1_000_000_000 / max(0.2, rate))
 
     def _build_report(
         self,
@@ -532,11 +776,15 @@ class HealthMonitorNode(Node):
         )
 
     def _publish_health(self, *, now: Optional[float] = None) -> HealthReport:
-        report = self._build_report(now=now)
-        payload = report.to_dict(include_metrics=True)
         with self._lock:
+            self._refresh_graph()
+            report = self._build_report(now=now)
+            payload = report.to_dict(include_metrics=True)
+            params = self._build_params_payload()
             self._payload = payload
-        self.pub_health.publish(self._to_message(report, include_metrics=True))
+            self._params_payload = params
+            message = self._to_message(report, include_metrics=True)
+        self.pub_health.publish(message)
         return report
 
     def _to_message(self, report: HealthReport, *, include_metrics: bool = True) -> HealthStatus:
@@ -594,7 +842,7 @@ class HealthMonitorNode(Node):
     # ------------------------------------------------------------------- events
     def on_timer(self) -> None:
         try:
-            self._refresh_graph()
+            self._apply_pending_publish_rate()
             self._publish_health()
         except Exception as exc:  # noqa: BLE001 - 健康节点自身不能因一次快照失败退出
             self.get_logger().error(
@@ -605,7 +853,12 @@ class HealthMonitorNode(Node):
     def on_health_service(self, request: HealthCheck.Request, response: HealthCheck.Response):
         ids = [str(device_id) for device_id in request.device_ids]
         try:
-            report = self._build_report(device_ids=ids or None)
+            with self._lock:
+                self._refresh_graph()
+                report = self._build_report(device_ids=ids or None)
+                message = self._to_message(
+                    report, include_metrics=bool(request.include_metrics)
+                )
         except KeyError as exc:
             message = f"未知设备: {exc}"
             response.success = False
@@ -619,9 +872,7 @@ class HealthMonitorNode(Node):
             response.status = fallback
             return response
         response.success = True
-        response.status = self._to_message(
-            report, include_metrics=bool(request.include_metrics)
-        )
+        response.status = message
         response.message = report.reason
         return response
 
@@ -641,6 +892,8 @@ class HealthMonitorNode(Node):
             cors_allow_origin=str(http_cfg.get("cors_allow_origin") or "*"),
             service=SERVICE_NAME,
             version=SERVICE_VERSION,
+            params_provider=self._params_provider,
+            params_updater=self._params_updater,
         )
         self._http.start()
         self._http_info = self._http.info()

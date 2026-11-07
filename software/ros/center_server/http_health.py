@@ -29,6 +29,7 @@ LOGGER = logging.getLogger("center_server.health_http")
 
 _DEVICE_PATH = re.compile(r"^/(?:ros/health/devices|v1/health|healthcheck)/([^/]+)$")
 _DETAIL_PATHS = {"/health", "/healthcheck", "/v1/health", "/ros/health"}
+_PARAMS_PATHS = {"/ros/params", "/params"}
 _READY_PATHS = {"/readyz", "/ros/readyz"}
 _LIVE_PATHS = {"/healthz", "/livez", "/ros/healthz"}
 
@@ -46,10 +47,18 @@ class HealthHttpServer:
         cors_allow_origin: str = "*",
         service: str = SERVICE_NAME,
         version: str = SERVICE_VERSION,
+        params_provider: Optional[
+            Callable[[], Optional[Mapping[str, Any]]]
+        ] = None,
+        params_updater: Optional[
+            Callable[[Mapping[str, Any]], Mapping[str, Any]]
+        ] = None,
     ) -> None:
         self.host = str(host or "127.0.0.1")
         self.port = int(port)
         self._provider = provider
+        self._params_provider = params_provider
+        self._params_updater = params_updater
         self.api_key = str(api_key or "")
         self.cors_allow_origin = str(cors_allow_origin or "*")
         self.service = str(service)
@@ -209,6 +218,7 @@ class HealthHttpServer:
                 "health_alias": "GET /v1/health",
                 "healthcheck_alias": "GET /healthcheck",
                 "device": "GET /ros/health/devices/{device_id}",
+                "params": "GET/POST /ros/params",
                 "liveness": "GET /ros/healthz",
                 "readiness": "GET /ros/readyz",
             },
@@ -217,6 +227,88 @@ class HealthHttpServer:
 
     def has_snapshot(self) -> bool:
         return self._snapshot() is not None
+
+    def params_supported(self) -> bool:
+        return self._params_provider is not None
+
+    def params_payload(self, request_id: str) -> Optional[Dict[str, Any]]:
+        if self._params_provider is None:
+            return None
+        try:
+            payload = self._params_provider()
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.error("health params provider failed: %s", exc)
+            return None
+        if payload is None:
+            return None
+        result = copy.deepcopy(dict(payload))
+        result["request_id"] = request_id
+        return result
+
+    def update_params_payload(
+        self,
+        request_id: str,
+        body: bytes,
+        content_type: str,
+    ) -> tuple[int, Dict[str, Any]]:
+        if self._params_updater is None:
+            return 404, self.error_payload(
+                "params_not_supported", "该模块不支持参数修改", request_id
+            )
+
+        updates: Optional[Dict[str, Any]] = None
+        if not body:
+            return 400, self.error_payload(
+                "empty_body", "缺少参数请求体", request_id
+            )
+
+        try:
+            text = body.decode("utf-8")
+            if "application/json" in (content_type or "").lower() or not content_type:
+                parsed = json.loads(text)
+                if not isinstance(parsed, dict):
+                    raise ValueError("JSON 根节点必须是对象")
+                candidate = parsed.get("updates", parsed)
+                if not isinstance(candidate, dict):
+                    raise ValueError("updates 必须是对象")
+                updates = {str(key): value for key, value in candidate.items()}
+            else:
+                form = parse_qs(text, keep_blank_values=True)
+                updates = {
+                    str(key): values[-1] if values else ""
+                    for key, values in form.items()
+                }
+        except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+            return 400, self.error_payload(
+                "invalid_body", f"参数请求体解析失败: {exc}", request_id
+            )
+
+        if not updates:
+            return 400, self.error_payload(
+                "no_updates", "没有可更新的参数", request_id
+            )
+
+        try:
+            result = self._params_updater(updates)
+        except ValueError as exc:
+            return 400, self.error_payload(
+                "invalid_param", str(exc), request_id
+            )
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.exception("health params update failed")
+            return 500, self.error_payload(
+                "update_failed", f"参数更新失败: {type(exc).__name__}", request_id
+            )
+
+        payload: Dict[str, Any] = {
+            "ok": True,
+            "module": "ros",
+            "requires_restart": False,
+        }
+        if isinstance(result, Mapping):
+            payload.update(dict(result))
+        payload["request_id"] = request_id
+        return 200, payload
 
     def error_payload(self, code: str, message: str, request_id: str) -> Dict[str, Any]:
         return {
@@ -259,9 +351,56 @@ class _HealthRequestHandler(BaseHTTPRequestHandler):
         self._handle_get(head_only=True)
 
     def do_POST(self) -> None:  # noqa: N802
-        self.close_connection = True
         app = self._app()
         request_id = self._request_id()
+        path = urlsplit(self.path or "/").path or "/"
+        if len(path) > 1:
+            path = path.rstrip("/")
+
+        if path in _PARAMS_PATHS:
+            if not app.params_supported():
+                self._send(
+                    app,
+                    404,
+                    app.error_payload(
+                        "params_not_supported", "该模块不支持参数修改", request_id
+                    ),
+                    request_id,
+                )
+                return
+            if not app.authorized(self.headers):
+                self._send(
+                    app,
+                    401,
+                    app.error_payload(
+                        "unauthorized", "无效或缺失的 API Key", request_id
+                    ),
+                    request_id,
+                )
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0") or 0)
+            except ValueError:
+                length = 0
+            if length > 65536:
+                self.close_connection = True
+                self._send(
+                    app,
+                    413,
+                    app.error_payload(
+                        "payload_too_large", "参数请求体超过 65536 字节", request_id
+                    ),
+                    request_id,
+                )
+                return
+            body = self.rfile.read(length) if length > 0 else b""
+            status, payload = app.update_params_payload(
+                request_id, body, str(self.headers.get("Content-Type", ""))
+            )
+            self._send(app, status, payload, request_id)
+            return
+
+        self.close_connection = True
         self._send(
             app,
             405,
@@ -297,7 +436,11 @@ class _HealthRequestHandler(BaseHTTPRequestHandler):
             self._send(app, 200, app.root_payload(request_id), request_id, head_only)
             return
 
-        protected = path in _DETAIL_PATHS or bool(_DEVICE_PATH.match(path))
+        protected = (
+            path in _DETAIL_PATHS
+            or path in _PARAMS_PATHS
+            or bool(_DEVICE_PATH.match(path))
+        )
         if protected and not app.authorized(self.headers):
             self._send(
                 app,
@@ -306,6 +449,33 @@ class _HealthRequestHandler(BaseHTTPRequestHandler):
                 request_id,
                 head_only,
             )
+            return
+
+        if path in _PARAMS_PATHS:
+            if not app.params_supported():
+                self._send(
+                    app,
+                    404,
+                    app.error_payload(
+                        "params_not_supported", "该模块不支持参数查询", request_id
+                    ),
+                    request_id,
+                    head_only,
+                )
+                return
+            payload = app.params_payload(request_id)
+            if payload is None:
+                self._send(
+                    app,
+                    503,
+                    app.error_payload(
+                        "not_ready", "参数快照尚未生成", request_id
+                    ),
+                    request_id,
+                    head_only,
+                )
+                return
+            self._send(app, 200, payload, request_id, head_only)
             return
 
         if path in _DETAIL_PATHS:

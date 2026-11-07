@@ -91,9 +91,11 @@ def http_get(server, path, headers=None):
         return exc.code, json.loads(exc.read()), dict(exc.headers)
 
 
-def http_post(server, path):
+def http_post(server, path, body=b"{}", headers=None):
     url = f"http://127.0.0.1:{server.info()['port']}{path}"
-    request = urllib.request.Request(url, data=b"{}", method="POST")
+    request = urllib.request.Request(
+        url, data=body, method="POST", headers=headers or {}
+    )
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
         with opener.open(request, timeout=2.0) as response:
@@ -244,5 +246,110 @@ def test_no_snapshot_is_not_ready():
         status, payload, _ = http_get(server, "/ros/health/devices/camera")
         assert status == 503
         assert payload["error"]["code"] == "not_ready"
+    finally:
+        server.stop()
+
+
+def start_params_server(api_key=""):
+    state = {"calls": []}
+
+    def provider():
+        return {
+            "ok": True,
+            "module": "ros",
+            "version": "0.2.0",
+            "editable": True,
+            "requires_restart": False,
+            "params": [
+                {
+                    "key": "publish_rate",
+                    "label": "健康发布频率",
+                    "value": 1.0,
+                    "type": "float",
+                    "group": "健康检查",
+                    "editable": True,
+                    "min": 0.2,
+                    "max": 10.0,
+                }
+            ],
+        }
+
+    def updater(updates):
+        state["calls"].append(dict(updates))
+        if "publish_rate" in updates and str(updates["publish_rate"]) == "bad":
+            raise ValueError("publish_rate 必须在 0.2..10")
+        return {"updated": dict(updates), "requires_restart": False, "message": "ok"}
+
+    server = start_server(provider, api_key=api_key, params_provider=provider, params_updater=updater)
+    return server, state
+
+
+def test_params_get_and_post_json():
+    server, state = start_params_server()
+    try:
+        status, payload, _ = http_get(server, "/ros/params")
+        assert status == 200
+        assert payload["module"] == "ros"
+        assert payload["params"][0]["key"] == "publish_rate"
+
+        status, payload, _ = http_get(server, "/params")
+        assert status == 200
+
+        body = json.dumps({"updates": {"publish_rate": 2.0}}).encode()
+        status, payload = http_post(
+            server, "/ros/params", body, {"Content-Type": "application/json"}
+        )
+        assert status == 200
+        assert payload["ok"] is True
+        assert state["calls"][-1] == {"publish_rate": 2.0}
+    finally:
+        server.stop()
+
+
+def test_params_post_form_and_validation():
+    server, state = start_params_server()
+    try:
+        status, payload = http_post(
+            server, "/ros/params", b"publish_rate=2",
+            {"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        assert status == 200
+        assert state["calls"][-1] == {"publish_rate": "2"}
+
+        body = json.dumps({"updates": {"publish_rate": "bad"}}).encode()
+        status, payload = http_post(
+            server, "/ros/params", body, {"Content-Type": "application/json"}
+        )
+        assert status == 400
+        assert payload["error"]["code"] == "invalid_param"
+
+        status, payload = http_post(server, "/ros/params", b"")
+        assert status == 400
+        assert payload["error"]["code"] == "empty_body"
+    finally:
+        server.stop()
+
+
+def test_params_auth():
+    server, _ = start_params_server(api_key="secret")
+    try:
+        status, payload, _ = http_get(server, "/ros/params")
+        assert status == 401
+        status, payload, _ = http_get(
+            server, "/ros/params", {"Authorization": "Bearer secret"}
+        )
+        assert status == 200
+    finally:
+        server.stop()
+
+
+def test_params_not_supported():
+    server = start_server(lambda: sample_payload())
+    try:
+        status, payload, _ = http_get(server, "/ros/params")
+        assert status == 404
+        assert payload["error"]["code"] == "params_not_supported"
+        status, payload = http_post(server, "/ros/params", b"{}")
+        assert status == 404
     finally:
         server.stop()

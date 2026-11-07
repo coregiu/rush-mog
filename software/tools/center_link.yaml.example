@@ -1,0 +1,21 @@
+# CENTER SERVER 侧 edge_link 配置（部署到 /etc/rush-mog/center-link.yaml）
+module: center
+name: "SmolVLA Center Server"
+
+connect_wifi: true
+ssid: "RUSH-MOG"
+password: ""
+
+edge_url: "http://192.168.4.1"
+
+health_url: "http://127.0.0.1:8000/v1/health"
+params_url: "http://127.0.0.1:8000/v1/params"
+
+public_health_port: 8000
+public_health_path: "/v1/health"
+public_params_port: 8000
+public_params_path: "/v1/params"
+
+interval_sec: 5.0
+health_timeout_sec: 3.0
+params_timeout_sec: 3.0

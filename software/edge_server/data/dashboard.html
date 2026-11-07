@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#050914">
+  <title>RUSH-MOG · 数字孪生监控</title>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <div class="ambient ambient-a"></div>
+  <div class="ambient ambient-b"></div>
+  <div class="grid-bg"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">R</div>
+      <div class="brand-copy">
+        <h1>RUSH-MOG <span>// DIGITAL TWIN</span></h1>
+        <p>上位机监控与配置 · EDGE / ROS / CENTER</p>
+      </div>
+    </div>
+
+    <div class="topbar-status">
+      <div id="overall-pill" class="status-pill status-unknown">
+        <span class="dot"></span><span id="overall-text">等待数据</span>
+      </div>
+      <div id="sync-state" class="sync-state">正在连接 192.168.4.1 …</div>
+    </div>
+
+    <nav class="topbar-actions">
+      <button id="refresh-btn" class="btn btn-ghost" type="button" title="立即刷新">
+        <span class="btn-icon">↻</span> 刷新
+      </button>
+      <label class="switch" title="每 5 秒自动刷新">
+        <input id="auto-refresh" type="checkbox" checked>
+        <span class="switch-track"><span class="switch-thumb"></span></span>
+        <span class="switch-label">自动</span>
+      </label>
+      <a class="btn" href="index.html">手柄控制</a>
+    </nav>
+  </header>
+
+  <main class="layout">
+    <section class="panel twin-panel">
+      <div class="panel-head">
+        <div>
+          <span class="eyebrow">LIVE DIGITAL TWIN</span>
+          <h2>RUSH-MOG 数字孪生</h2>
+        </div>
+        <div class="panel-meta">
+          <span class="led" id="twin-led"></span>
+          <span id="twin-time">--:--:--</span>
+        </div>
+      </div>
+
+      <div class="twin-stage" id="twin-stage">
+        <svg id="twin-svg" viewBox="0 0 760 560" role="img" aria-label="RUSH-MOG 数字孪生车辆与模块状态">
+          <defs>
+            <linearGradient id="bodyGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#1e3a4c"/>
+              <stop offset="0.55" stop-color="#142430"/>
+              <stop offset="1" stop-color="#0b141c"/>
+            </linearGradient>
+            <linearGradient id="bodyEdge" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="#22d3ee" stop-opacity="0.85"/>
+              <stop offset="0.5" stop-color="#22d3ee" stop-opacity="0.15"/>
+              <stop offset="1" stop-color="#22d3ee" stop-opacity="0.85"/>
+            </linearGradient>
+            <linearGradient id="wheelGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#334155"/>
+              <stop offset="0.5" stop-color="#111827"/>
+              <stop offset="1" stop-color="#334155"/>
+            </linearGradient>
+            <radialGradient id="floorGlow">
+              <stop offset="0" stop-color="#22d3ee" stop-opacity="0.2"/>
+              <stop offset="0.55" stop-color="#22d3ee" stop-opacity="0.05"/>
+              <stop offset="1" stop-color="#22d3ee" stop-opacity="0"/>
+            </radialGradient>
+            <radialGradient id="lidarGlow">
+              <stop offset="0" stop-color="#22d3ee" stop-opacity="0.55"/>
+              <stop offset="1" stop-color="#22d3ee" stop-opacity="0"/>
+            </radialGradient>
+            <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+              <feGaussianBlur stdDeviation="4" result="blur"/>
+              <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+            <filter id="softGlow" x="-60%" y="-60%" width="220%" height="220%">
+              <feGaussianBlur stdDeviation="10" result="blur"/>
+              <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+            <pattern id="gridPattern" width="28" height="28" patternUnits="userSpaceOnUse">
+              <path d="M 28 0 L 0 0 0 28" fill="none" stroke="#22d3ee" stroke-opacity="0.07" stroke-width="1"/>
+            </pattern>
+            <pattern id="deckPattern" width="10" height="10" patternUnits="userSpaceOnUse">
+              <path d="M 0 10 L 10 0" stroke="#22d3ee" stroke-opacity="0.08" stroke-width="1"/>
+            </pattern>
+          </defs>
+
+          <rect width="760" height="560" fill="url(#gridPattern)"/>
+          <ellipse cx="380" cy="330" rx="210" ry="150" fill="url(#floorGlow)"/>
+
+          <!-- connection links -->
+          <path class="data-link" data-link="edge" d="M 192 104 C 248 126, 276 176, 316 226"/>
+          <path class="data-link" data-link="ros" d="M 568 104 C 512 126, 486 176, 444 226"/>
+          <path class="data-link" data-link="center" d="M 568 462 C 512 440, 486 404, 446 376"/>
+
+          <!-- module nodes -->
+          <g class="module-node" data-module="edge" transform="translate(40,44)">
+            <rect class="node-shell" width="152" height="76" rx="16"/>
+            <circle class="node-dot" cx="24" cy="24" r="6"/>
+            <text class="node-kicker" x="40" y="29">EDGE</text>
+            <text class="node-name" x="18" y="52">ESP32-S3</text>
+            <text class="node-sub" x="18" y="66">192.168.4.1 · AP</text>
+            <circle class="node-wave" cx="24" cy="24" r="12"/>
+            <circle class="node-wave wave-2" cx="24" cy="24" r="22"/>
+          </g>
+
+          <g class="module-node" data-module="ros" transform="translate(560,44)">
+            <rect class="node-shell" width="160" height="76" rx="16"/>
+            <circle class="node-dot" cx="24" cy="24" r="6"/>
+            <text class="node-kicker" x="40" y="29">ROS 2</text>
+            <text class="node-name" x="18" y="52">Raspberry Pi</text>
+            <text class="node-sub" x="18" y="66">感知 / 导航 / 健康</text>
+          </g>
+
+          <g class="module-node" data-module="center" transform="translate(560,432)">
+            <rect class="node-shell" width="160" height="76" rx="16"/>
+            <circle class="node-dot" cx="24" cy="24" r="6"/>
+            <text class="node-kicker" x="40" y="29">CENTER</text>
+            <text class="node-name" x="18" y="52">SmolVLA</text>
+            <text class="node-sub" x="18" y="66">推理中心 · :8000</text>
+          </g>
+
+          <!-- ================= vehicle ================= -->
+          <g class="vehicle">
+            <ellipse class="vehicle-under" cx="380" cy="360" rx="150" ry="58"/>
+
+            <!-- wheels -->
+            <rect class="wheel" x="252" y="250" width="62" height="24" rx="11" transform="rotate(-16 283 262)"/>
+            <rect class="wheel" x="446" y="250" width="62" height="24" rx="11" transform="rotate(16 477 262)"/>
+            <rect class="wheel" x="252" y="346" width="62" height="24" rx="11" transform="rotate(16 283 358)"/>
+            <rect class="wheel" x="446" y="346" width="62" height="24" rx="11" transform="rotate(-16 477 358)"/>
+
+            <!-- chassis -->
+            <rect class="chassis" x="291" y="226" width="178" height="170" rx="34"/>
+            <rect class="chassis-deck" x="305" y="240" width="150" height="142" rx="24"/>
+            <path class="chassis-edge" d="M 308 232 H 452" stroke="url(#bodyEdge)" stroke-width="2"/>
+
+            <!-- front bumper -->
+            <rect class="bumper" x="330" y="218" width="100" height="14" rx="7"/>
+
+            <!-- lidar -->
+            <g class="component lidar">
+              <circle class="lidar-halo" cx="380" cy="196" r="38"/>
+              <circle class="scan-ring ring-1" cx="380" cy="196" r="24"/>
+              <circle class="scan-ring ring-2" cx="380" cy="196" r="34"/>
+              <circle class="scan-ring ring-3" cx="380" cy="196" r="44"/>
+              <circle class="lidar-base" cx="380" cy="196" r="17"/>
+              <circle class="lidar-core" cx="380" cy="196" r="7"/>
+              <path class="scan-cone" d="M 380 196 L 338 156 A 58 58 0 0 1 422 156 Z"/>
+            </g>
+
+            <!-- camera -->
+            <g class="component camera">
+              <rect class="camera-body" x="360" y="222" width="40" height="18" rx="5"/>
+              <circle class="camera-lens" cx="380" cy="231" r="6"/>
+            </g>
+
+            <!-- microphone -->
+            <g class="component microphone">
+              <circle class="mic-body" cx="326" cy="256" r="10"/>
+              <circle class="mic-hole" cx="323" cy="253" r="1.7"/>
+              <circle class="mic-hole" cx="329" cy="253" r="1.7"/>
+              <circle class="mic-hole" cx="323" cy="259" r="1.7"/>
+              <circle class="mic-hole" cx="329" cy="259" r="1.7"/>
+            </g>
+
+            <!-- arm -->
+            <g class="component arm">
+              <circle class="arm-base" cx="300" cy="314" r="14"/>
+              <path class="arm-seg" d="M 300 314 L 268 286"/>
+              <circle class="arm-joint" cx="268" cy="286" r="7"/>
+              <path class="arm-seg" d="M 268 286 L 244 256"/>
+              <path class="arm-claw" d="M 244 256 L 232 244 M 244 256 L 252 238"/>
+              <circle class="arm-joint" cx="244" cy="256" r="5"/>
+            </g>
+
+            <!-- speaker -->
+            <g class="component speaker">
+              <circle class="speaker-body" cx="444" cy="314" r="15"/>
+              <path class="speaker-wave" d="M 438 314 A 8 8 0 0 1 450 314"/>
+              <path class="speaker-wave" d="M 434 314 A 12 12 0 0 1 454 314"/>
+              <circle class="speaker-core" cx="444" cy="314" r="2.5"/>
+            </g>
+
+            <!-- imu -->
+            <g class="component imu">
+              <rect class="chip" x="368" y="292" width="26" height="26" rx="5"/>
+              <circle class="chip-dot" cx="381" cy="305" r="4"/>
+            </g>
+
+            <!-- esp32 / stm32 -->
+            <g class="component base">
+              <rect class="chip chip-small" x="320" y="344" width="34" height="24" rx="4"/>
+              <text class="chip-label" x="337" y="359">ESP32</text>
+              <rect class="chip chip-small" x="406" y="344" width="34" height="24" rx="4"/>
+              <text class="chip-label" x="423" y="359">STM32</text>
+            </g>
+
+            <!-- battery -->
+            <g class="component battery">
+              <rect class="battery-body" x="348" y="382" width="64" height="14" rx="4"/>
+              <rect class="battery-fill" x="352" y="385" width="42" height="8" rx="2"/>
+              <rect class="battery-tip" x="412" y="386" width="4" height="6" rx="1"/>
+            </g>
+
+            <text class="vehicle-label" x="380" y="330">RUSH-MOG</text>
+            <text class="vehicle-sub" x="380" y="343">DIGITAL TWIN · 4WD MECANUM</text>
+
+            <!-- hotspots -->
+            <g class="hotspot" data-device="lidar" transform="translate(380,196)" tabindex="0">
+              <circle class="hotspot-halo" r="21"/><circle class="hotspot-dot" r="3.5"/>
+              <title>雷达 /scan</title>
+            </g>
+            <g class="hotspot" data-device="camera" transform="translate(380,231)" tabindex="0">
+              <circle class="hotspot-halo" r="14"/><circle class="hotspot-dot" r="3"/>
+              <title>摄像头 /camera/image_raw</title>
+            </g>
+            <g class="hotspot" data-device="microphone" transform="translate(326,256)" tabindex="0">
+              <circle class="hotspot-halo" r="14"/><circle class="hotspot-dot" r="3"/>
+              <title>麦克风 /audio/raw</title>
+            </g>
+            <g class="hotspot" data-device="imu" transform="translate(381,305)" tabindex="0">
+              <circle class="hotspot-halo" r="18"/><circle class="hotspot-dot" r="3"/>
+              <title>IMU /imu/data</title>
+            </g>
+            <g class="hotspot" data-device="speaker" transform="translate(444,314)" tabindex="0">
+              <circle class="hotspot-halo" r="17"/><circle class="hotspot-dot" r="3"/>
+              <title>音箱 /body/audio_status</title>
+            </g>
+            <g class="hotspot" data-device="arm" transform="translate(244,256)" tabindex="0">
+              <circle class="hotspot-halo" r="16"/><circle class="hotspot-dot" r="3"/>
+              <title>机械臂 /arm/joint_states</title>
+            </g>
+            <g class="hotspot" data-device="base" transform="translate(423,356)" tabindex="0">
+              <circle class="hotspot-halo" r="17"/><circle class="hotspot-dot" r="3"/>
+              <title>底盘 / 电机 / STM32</title>
+            </g>
+            <g class="hotspot" data-device="battery" transform="translate(380,389)" tabindex="0">
+              <circle class="hotspot-halo" r="14"/><circle class="hotspot-dot" r="3"/>
+              <title>电池</title>
+            </g>
+          </g>
+
+          <!-- module mini labels under twin -->
+          <g class="twin-caption">
+            <text x="380" y="500" text-anchor="middle">RUSH-MOG · 192.168.4.1 · EDGE-CENTERED MONITORING</text>
+            <text x="380" y="518" text-anchor="middle">WIFI AP → ROS / CENTER REPORT → DIGITAL TWIN</text>
+          </g>
+        </svg>
+
+        <div class="twin-legend">
+          <span><i class="legend-dot status-ok"></i>正常</span>
+          <span><i class="legend-dot status-degraded"></i>降级</span>
+          <span><i class="legend-dot status-error"></i>故障</span>
+          <span><i class="legend-dot status-unknown"></i>未知</span>
+        </div>
+      </div>
+
+      <div class="telemetry-row" id="telemetry-row"></div>
+    </section>
+
+    <aside class="panel modules-panel">
+      <div class="panel-head">
+        <div>
+          <span class="eyebrow">MODULE REGISTRY</span>
+          <h2>模块状态</h2>
+        </div>
+        <span class="muted" id="module-count">0 / 3</span>
+      </div>
+      <div id="module-list" class="module-list"></div>
+
+      <div class="topology-note">
+        <div class="topology-line"><span class="topo-node">PHONE</span><span class="topo-arrow">→</span><span class="topo-node">192.168.4.1</span></div>
+        <div class="topology-line"><span class="topo-node">ROS / CENTER</span><span class="topo-arrow">→</span><span class="topo-node">REPORT API</span></div>
+        <p>模块需连接 RUSH-MOG Wi-Fi 并上报；页面只访问 192.168.4.1，由 ESP32 代理模块接口。</p>
+      </div>
+    </aside>
+
+    <section class="panel devices-panel">
+      <div class="panel-head">
+        <div>
+          <span class="eyebrow">ROS DEVICE MATRIX</span>
+          <h2>设备健康矩阵</h2>
+        </div>
+        <span class="muted" id="device-count">0 个设备</span>
+      </div>
+      <div id="device-grid" class="device-grid"></div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>RUSH-MOG · EDGE DIGITAL TWIN CONSOLE</span>
+    <span id="footer-status">DISCONNECTED</span>
+    <span>API: /api/modules · /ros/health · /v1/health</span>
+  </footer>
+
+  <div id="scrim" class="scrim" hidden></div>
+  <aside id="drawer" class="drawer" aria-hidden="true" aria-label="模块参数 drawer">
+    <div class="drawer-head">
+      <div>
+        <span class="eyebrow" id="drawer-kicker">MODULE</span>
+        <h2 id="drawer-title">模块参数</h2>
+        <p id="drawer-subtitle" class="muted">--</p>
+      </div>
+      <button id="drawer-close" class="icon-btn" type="button" aria-label="关闭">✕</button>
+    </div>
+    <div class="drawer-tabs" role="tablist">
+      <button class="tab is-active" data-tab="params" role="tab" aria-selected="true">参数配置</button>
+      <button class="tab" data-tab="raw" role="tab" aria-selected="false">原始数据</button>
+    </div>
+    <div id="drawer-body" class="drawer-body">
+      <div class="empty-state">选择一个模块查看参数</div>
+    </div>
+    <div class="drawer-foot">
+      <span id="drawer-hint" class="muted">修改后立即生效；需重启的参数会标注。</span>
+      <button id="save-params" class="btn btn-primary" type="button" disabled>保存修改</button>
+    </div>
+  </aside>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>

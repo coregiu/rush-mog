@@ -90,6 +90,189 @@ class InferenceService:
         model["action_mode"] = self.mapper.mode
         return model
 
+    # ------------------------------------------------------------------ params
+    @staticmethod
+    def _param(
+        key: str,
+        label: str,
+        value: Any,
+        value_type: str,
+        group: str,
+        *,
+        unit: str = "",
+        min_value: float | None = None,
+        max_value: float | None = None,
+        step: float | None = None,
+        options: list[str] | None = None,
+        help_text: str = "",
+    ) -> dict[str, Any]:
+        item: dict[str, Any] = {
+            "key": key,
+            "label": label,
+            "value": value,
+            "type": value_type,
+            "group": group,
+            "editable": True,
+            "requires_restart": False,
+        }
+        if unit:
+            item["unit"] = unit
+        if min_value is not None:
+            item["min"] = min_value
+        if max_value is not None:
+            item["max"] = max_value
+        if step is not None:
+            item["step"] = step
+        if options:
+            item["options"] = list(options)
+        if help_text:
+            item["help"] = help_text
+        return item
+
+    def params(self) -> dict[str, Any]:
+        mapper = self.mapper
+        model = self.engine.status()
+        params = [
+            self._param(
+                "action.mode", "动作映射模式", mapper.mode, "enum", "动作映射",
+                options=["raw", "base_twist", "hybrid", "joint"],
+                help_text="base_twist/hybrid 需要本车微调过的动作空间",
+            ),
+            self._param(
+                "action.normalized", "模型输出归一化", mapper.normalized, "bool",
+                "动作映射",
+            ),
+            self._param(
+                "action.max_linear_x", "最大线速度 X", mapper.max_values[0], "float",
+                "速度限幅", unit="m/s", min_value=0.0, max_value=5.0, step=0.05,
+            ),
+            self._param(
+                "action.max_linear_y", "最大线速度 Y", mapper.max_values[1], "float",
+                "速度限幅", unit="m/s", min_value=0.0, max_value=5.0, step=0.05,
+            ),
+            self._param(
+                "action.max_angular_z", "最大角速度 Z", mapper.max_values[2], "float",
+                "速度限幅", unit="rad/s", min_value=0.0, max_value=5.0, step=0.05,
+            ),
+            self._param(
+                "action.deadband", "速度死区", mapper.deadband, "float",
+                "速度限幅", min_value=0.0, max_value=1.0, step=0.01,
+            ),
+            self._param(
+                "action.arm_start", "机械臂起始维度", mapper.arm_start, "int",
+                "机械臂", min_value=0.0, max_value=32.0, step=1.0,
+            ),
+            self._param(
+                "action.round_digits", "动作保留小数位", mapper.round_digits, "int",
+                "动作映射", min_value=0.0, max_value=6.0, step=1.0,
+            ),
+        ]
+        return {
+            "ok": True,
+            "module": "center",
+            "name": "SmolVLA Center Server",
+            "version": __version__,
+            "editable": True,
+            "requires_restart": False,
+            "params": params,
+            "info": {
+                "backend": model.get("backend"),
+                "loaded": bool(model.get("loaded")),
+                "device": model.get("device"),
+                "dtype": model.get("dtype"),
+                "action_dim": model.get("action_dim"),
+                "state_dim": model.get("state_dim"),
+                "chunk_size": model.get("chunk_size"),
+                "action_mode": mapper.mode,
+            },
+        }
+
+    @staticmethod
+    def _param_float(value: Any, key: str, low: float, high: float) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise UnprocessableEntity(f"{key} 必须是数字", code="invalid_param")
+        number = float(value)
+        if not math.isfinite(number) or number < low or number > high:
+            raise UnprocessableEntity(
+                f"{key} 必须在 {low}..{high}", code="invalid_param"
+            )
+        return number
+
+    def update_params(self, payload: Any) -> dict[str, Any]:
+        body = self._require_mapping(payload)
+        updates = body.get("updates", body)
+        if not isinstance(updates, Mapping) or not updates:
+            raise BadRequest("updates 必须是非空对象", code="invalid_params")
+
+        allowed = {
+            "action.mode",
+            "action.normalized",
+            "action.max_linear_x",
+            "action.max_linear_y",
+            "action.max_angular_z",
+            "action.deadband",
+            "action.arm_start",
+            "action.round_digits",
+        }
+        validated: dict[str, Any] = {}
+        for raw_key, raw_value in updates.items():
+            key = str(raw_key)
+            if key not in allowed:
+                raise UnprocessableEntity(
+                    f"不支持的参数: {key}", code="invalid_param"
+                )
+            if key == "action.mode":
+                mode = str(raw_value).strip().lower()
+                if mode not in {"raw", "base_twist", "hybrid", "joint"}:
+                    raise UnprocessableEntity(
+                        "action.mode 必须是 raw/base_twist/hybrid/joint",
+                        code="invalid_param",
+                    )
+                validated[key] = mode
+            elif key == "action.normalized":
+                if isinstance(raw_value, bool):
+                    validated[key] = raw_value
+                elif isinstance(raw_value, (int, float)):
+                    validated[key] = bool(raw_value)
+                else:
+                    raise UnprocessableEntity(
+                        "action.normalized 必须是布尔值", code="invalid_param"
+                    )
+            elif key == "action.arm_start":
+                validated[key] = int(
+                    self._param_float(raw_value, key, 0.0, 32.0)
+                )
+            elif key == "action.round_digits":
+                validated[key] = int(
+                    self._param_float(raw_value, key, 0.0, 6.0)
+                )
+            else:
+                limits = {
+                    "action.max_linear_x": 5.0,
+                    "action.max_linear_y": 5.0,
+                    "action.max_angular_z": 5.0,
+                    "action.deadband": 1.0,
+                }
+                validated[key] = self._param_float(
+                    raw_value, key, 0.0, limits[key]
+                )
+
+        action_cfg = dict(self.cfg.get("action") or {})
+        for key, value in validated.items():
+            action_cfg[key.split(".", 1)[1]] = value
+
+        # 先构造新 mapper，校验失败不会破坏当前推理链路。
+        mapper = ActionMapper(action_cfg)
+        self.mapper = mapper
+        self.cfg["action"] = action_cfg
+        return {
+            "ok": True,
+            "module": "center",
+            "updated": validated,
+            "requires_restart": False,
+            "message": "参数已更新",
+        }
+
     # ------------------------------------------------------------------ infer
     def infer(
         self, payload: Any, *, request_id: str | None = None

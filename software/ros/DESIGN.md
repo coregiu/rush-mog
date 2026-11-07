@@ -13,8 +13,8 @@
 | 代码 | `software/ros`（ament_python，ROS2 Humble） |
 | 消息/动作 | `software/custom_msgs`（v0.2.0） |
 | 构建 | `colcon build --packages-select custom_msgs center_server` 通过 |
-| 单元测试 | `pytest tests -q`：59 passed |
-| 健康检查 | `test_health_monitor.py` + `test_health_http.py`：24 passed；ROS/HTTP 手工联调通过 |
+| 单元测试 | `pytest tests -q`：64 passed |
+| 健康检查 | `test_health_monitor.py` + `test_health_http.py`：29 passed；ROS/HTTP 手工联调通过 |
 | VLA/安全端到端 | `end_to_end_check.py`：7/7 passed |
 | SLAM/导航/搜索联调 | `slam_nav_check.py` + `fake_slam_robot.py`：6/6 passed |
 | 真实 VLA 模型 | 未包含权重；规则桩，接口固定 |
@@ -585,14 +585,16 @@ health_monitor_node
 
 关键设计：
 
-1. **纯逻辑与 ROS 解耦**：`core/health_monitor.py` 不 import rclpy，24 项单测覆盖状态机；
+1. **纯逻辑与 ROS 解耦**：`core/health_monitor.py` 不 import rclpy，29 项单测覆盖状态机；
 2. **配置驱动**：设备 topic/message_type/频率/超时/required 全部在 YAML，新增设备无需改代码；
 3. **诚实报告 unknown**：音箱/机械臂当前无反馈话题，报 `unknown`，不伪造 `ok`；
 4. **HTTP 线程安全**：节点按 1 Hz 预计算 JSON 快照，HTTP 线程只读快照，不调用 rclpy；
 5. **失败降级**：HTTP 端口占用只记录 `http.bound=false`，ROS 话题/服务仍工作；单次快照异常
    不退出节点；
-6. **默认安全**：只监听 `127.0.0.1`，跨机需显式 `0.0.0.0` + `api_key`；
-7. **晚加入兼容**：健康话题/安全状态均用 TRANSIENT_LOCAL，后启动的 HMI 也能拿到最后一帧。
+6. **默认安全**：代码默认监听 `127.0.0.1`；dashboard 部署配置为 `0.0.0.0`，建议启用 `api_key` 并限制 AP 内网；
+7. **晚加入兼容**：健康话题/安全状态均用 TRANSIENT_LOCAL，后启动的 HMI 也能拿到最后一帧；
+8. **参数可调**：`/ros/params` 暴露健康频率/宽限期/设备频率/超时/required，
+   修改在运行时生效，重启回 YAML。
 
 接口契约、JSON 字段、设备反馈协议和 `edge_center` 接入示例见
 [`HEALTHCHECK.md`](HEALTHCHECK.md)。
@@ -721,13 +723,14 @@ edge/Pi sensors → bridge_node → /center/synced_data
 |---|---|---|
 | `GET /ros/health` | HTTP | 详细健康快照（别名 `/v1/health`、`/health`、`/healthcheck`） |
 | `GET /ros/health/devices/{id}` | HTTP | 单设备健康 |
+| `GET/POST /ros/params` | HTTP | 健康监控参数查看/运行时修改 |
 | `GET /ros/healthz`、`GET /ros/readyz` | HTTP | 存活/就绪探针（readyz 503 表示未就绪） |
 | `/center/health` | `custom_msgs/HealthStatus` | 1 Hz，TRANSIENT_LOCAL |
 | `/center/healthcheck` | `custom_msgs/HealthCheck` | 全部/指定设备，支持 `include_metrics` |
 
 整体状态：`ok` / `starting` / `degraded` / `error` / `disabled`；
 设备状态：`ok` / `degraded` / `error` / `unknown` / `disabled`。
-默认只监听 `127.0.0.1:8090`；跨机需改 `health.http.host` 并设置 `api_key`。
+代码默认监听 `127.0.0.1:8090`；仓库配置为 `0.0.0.0` 供 dashboard 经 ESP32 代理访问，跨机建议设置 `api_key`。
 完整字段、设备清单、反馈协议和 `edge_center` 接入示例见
 [`HEALTHCHECK.md`](HEALTHCHECK.md)。
 
@@ -900,7 +903,7 @@ python3 tests/slam_nav_check.py          # 6/6
 ```bash
 cd software/ros
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 59 passed
+# 64 passed
 ```
 
 健康检查专项：
@@ -908,7 +911,7 @@ PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
 ```bash
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest \
   tests/test_health_monitor.py tests/test_health_http.py -q
-# 24 passed
+# 29 passed
 ```
 
 覆盖：
@@ -978,6 +981,6 @@ python3 tests/slam_nav_check.py
 
 `center_server` v2 在 v1 的 VLA 推理、安全、反向操作之上，补齐了 **SLAM 建图、ICM-20948 定位、
 Nav2/直航导航、目标检测/搜索/接近、速度仲裁、底盘串口桥、健康检查**。软件链路已通过
-59 项单元测试（含 24 项健康检查）、7 项 VLA/安全端到端、6 项 SLAM/导航/搜索联调；
+64 项单元测试（含 29 项健康检查）、7 项 VLA/安全端到端、6 项 SLAM/导航/搜索联调；
 实车落地还差 STM32 固件升级、硬件选型（见 `hardware/SLAM_NAV.md`）、现场标定，以及
 音箱/机械臂反馈话题接入。

@@ -12,8 +12,8 @@
 |---|---|
 | 代码 | `software/center_server`（纯 Python，标准库 HTTP） |
 | 推理后端 | SmolVLA（LeRobot）+ `stub` 联调后端 |
-| 接口 | HTTP/JSON，`/v1/infer`、`/v1/health`、`/v1/model`、`/v1/reset`、`/v1/warmup` |
-| 测试 | `pytest tests -q`：36 passed（无 GPU/torch） |
+| 接口 | HTTP/JSON，`/v1/infer`、`/v1/health`、`/v1/model`、`/v1/params`、`/v1/reset`、`/v1/warmup` |
+| 测试 | `pytest tests -q`：38 passed（无 GPU/torch） |
 | 真实权重 | 不随仓库分发；默认 `lerobot/smolvla_base` 或本地微调 checkpoint |
 | 实车验证 | 未做硬件在环；需联调相机、Wi-Fi、GPU 延迟 |
 
@@ -179,6 +179,8 @@ InferenceService.infer
 | `GET /v1/health` | 是 | 200 返回详细状态；`ready` 表示模型是否可用 |
 | `GET /v1/ready` | 是 | 就绪探针；未加载返回 503 |
 | `GET /v1/model` | 是 | schema/动作模式/错误信息，不触发模型加载 |
+| `GET /v1/params` | 是 | 动作映射/限幅参数描述 |
+| `POST /v1/params` | 否 | 运行时修改 `action.*`，重建 ActionMapper，不重载模型 |
 | `POST /v1/infer` | 否 | 推理；`reset=true` 先清策略队列 |
 | `POST /v1/reset` | 是 | 清策略内部队列/回合状态 |
 | `POST /v1/warmup` | 否 | 空推理；首次会加载模型 |
