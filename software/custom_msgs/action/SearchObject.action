@@ -1,0 +1,24 @@
+# Goal
+string task_id
+string target_label
+float64 min_confidence
+float64 max_duration
+float64 standoff_distance
+bool explore_if_not_found
+bool save_map
+---
+# Result
+bool found
+string info
+geometry_msgs/PoseStamped target_pose
+geometry_msgs/PoseStamped approach_pose
+float64 confidence
+float64 elapsed_sec
+---
+# Feedback
+string state
+string target_label
+float64 explored_ratio
+float64 best_confidence
+geometry_msgs/PoseStamped best_pose
+string detail

@@ -27,16 +27,21 @@ class ReverseOperationNode(Node):
         self.cfg = load_config(self)
         self.handler = ReverseHandler(self.cfg.get("reverse_operation", {}))
 
-        self.pub_cmd_vel = self.create_publisher(Twist, "/cmd_vel", 10)
+        self.pub_cmd_vel = self.create_publisher(Twist, "/reverse/cmd_vel", 10)
         self.pub_arm_traj = self.create_publisher(
             JointTrajectory, "/arm/trajectory", 10
         )
         self.create_subscription(
             ReverseOperation, "/reverse/operation", self.on_reverse, 10
         )
+        joint_topic = str(
+            self.cfg.get("sensor_topics", {}).get(
+                "joint_states", "/robot/joint_states"
+            )
+        )
         self.create_subscription(
             JointState,
-            "/robot/joint_states",
+            joint_topic,
             self.on_joint_state,
             qos_profile_sensor_data,
         )

@@ -1,11 +1,27 @@
 # Goal
 string task_id
 string instruction
+# vla / map / explore / search / navigate / return_home；空字符串等价 vla
+string task_type
+float64 target_x
+float64 target_y
+float64 target_yaw
+string target_label
+float64 max_duration
+bool save_map
+float64 target_coverage
 ---
 # Result
 bool success
 string info
+geometry_msgs/PoseStamped target_pose
+geometry_msgs/PoseStamped approach_pose
+float64 confidence
+float64 elapsed_sec
 ---
 # Feedback
 string progress
 string current_intent
+string state
+float64 explored_ratio
+float64 distance_remaining

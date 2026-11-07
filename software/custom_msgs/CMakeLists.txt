@@ -10,6 +10,7 @@ find_package(rosidl_default_generators REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/AudioData.msg"
@@ -21,10 +22,26 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/InferenceResult.msg"
   "msg/SafetyState.msg"
   "msg/SystemStatus.msg"
+  "msg/MapInfo.msg"
+  "msg/Frontier.msg"
+  "msg/FrontierList.msg"
+  "msg/TargetDetection.msg"
+  "msg/TargetList.msg"
+  "msg/LocalizationStatus.msg"
+  "msg/NavStatus.msg"
+  "msg/SearchStatus.msg"
+  "msg/MissionStatus.msg"
+  "msg/VelocityMuxStatus.msg"
   "srv/SetMode.srv"
   "srv/EmergencyStop.srv"
+  "srv/MapControl.srv"
+  "srv/SetInitialPose.srv"
   "action/ExecuteTask.action"
-  DEPENDENCIES std_msgs sensor_msgs nav_msgs
+  "action/NavigateTo.action"
+  "action/Explore.action"
+  "action/SearchObject.action"
+  "action/ExecuteMission.action"
+  DEPENDENCIES std_msgs sensor_msgs nav_msgs geometry_msgs
 )
 
 ament_export_dependencies(rosidl_default_runtime)

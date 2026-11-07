@@ -1,4 +1,8 @@
 center_server:
+  # ======================================================================
+  # 默认配置：仿真/桌面联调（fake_edge_publisher）
+  # 实车请用 config_file:=.../robot.yaml
+  # ======================================================================
   vla_engine:
     model_name: "vla_policy_v1"
     inference_rate: 10
@@ -9,10 +13,47 @@ center_server:
     default_linear_speed: 0.3
     default_angular_speed: 0.5
 
+  instruction:
+    object_labels:
+      cup: ["杯子", "水杯", "马克杯", "cup", "mug"]
+      bottle: ["瓶子", "水瓶", "bottle"]
+      person: ["人", "人员", "person"]
+      box: ["盒子", "箱子", "box"]
+      ball: ["球", "小球", "ball"]
+    waypoints: {}
+    home_pose: [0.0, 0.0, 0.0]
+
   action_generator:
     max_linear_speed: 0.8
     max_angular_speed: 1.0
     acceleration_limit: 0.3
+    # v2：VLA 单步速度先发到 /cmd_vel_raw，由 velocity_mux 仲裁
+    cmd_vel_topic: "/cmd_vel_raw"
+
+  velocity_mux:
+    publish_rate: 20
+    status_rate: 5
+    default_timeout: 0.5
+    max_linear: 1.0
+    max_angular: 1.5
+    priorities:
+      safety: 0
+      reverse: 1
+      teleop: 2
+      nav: 3
+      vla: 4
+    timeouts:
+      safety: 0.6
+      reverse: 0.6
+      teleop: 0.5
+      nav: 0.6
+      vla: 0.6
+    topics:
+      safety: "/safety/cmd_vel_override"
+      reverse: "/reverse/cmd_vel"
+      teleop: "/teleop/cmd_vel"
+      nav: "/nav/cmd_vel"
+      vla: "/cmd_vel_raw"
 
   reverse_operation:
     reverse_speed: 0.3
@@ -28,7 +69,15 @@ center_server:
     max_twist_x: 1.0
     max_twist_z: 1.5
     data_timeout_sec: 2.0
+    scan_timeout_sec: 1.0
     laser_front_fov_deg: 60.0
+    laser_rear_fov_deg: 60.0
+    laser_side_fov_deg: 45.0
+    battery_low_percent: 15.0
+    stop_on_low_battery: true
+    require_localization_for_nav: true
+    localization_timeout_sec: 2.0
+    localization_grace_sec: 1.5
     joint_limits:
       j1: [-3.14, 3.14]
       j2: [-1.57, 2.09]
@@ -43,7 +92,168 @@ center_server:
     # 单步任务桩：检测到非零控制指令后保持执行窗口，再判定任务成功
     execution_hold_sec: 1.0
 
+  mission:
+    default_timeout_sec: 300.0
+    map_timeout_sec: 300.0
+    map_target_coverage: 0.90
+    save_map_after_mapping: true
+
   time_sync:
-    # 雷达/图像/音频来自不同传感器，使用近似时间同步（单位 ms）
+    # image/laser/odom 使用近似时间同步；audio/joint/imu 取最近值
     sync_window_ms: 100
     queue_size: 10
+
+  sensor_topics:
+    image: "/edge/video"
+    laser: "/edge/radar"
+    audio: "/edge/audio"
+    odom: "/robot/odometry"
+    joint_states: "/robot/joint_states"
+    imu: "/imu/data"
+
+  # 仿真默认不连串口；实车 robot.yaml 中 enabled: true
+  base:
+    enabled: false
+    port: "/dev/ttyUSB0"
+    baud: 921600
+    send_rate_hz: 30.0
+    watchdog_sec: 0.5
+    odom_frame: "odom"
+    base_frame: "base_link"
+    imu_frame: "imu_link"
+    wheel_radius: 0.048
+    wheelbase_x: 0.20
+    track_y: 0.18
+    encoder_cpr: 1320.0
+    sign_fl: 1.0
+    sign_fr: 1.0
+    sign_rl: 1.0
+    sign_rr: 1.0
+    battery_full_v: 12.6
+    battery_empty_v: 10.0
+    wheel_joint_names:
+      - "wheel_front_left_joint"
+      - "wheel_front_right_joint"
+      - "wheel_rear_left_joint"
+      - "wheel_rear_right_joint"
+
+  imu:
+    enabled: false
+    i2c_bus: 1
+    address: "0x68"
+    frame_id: "imu_link"
+    rate_hz: 100.0
+    accel_fs: 1        # ±4g
+    gyro_fs: 2         # ±1000dps
+    dlpf: 3
+    expected_rate_hz: 100.0
+    max_gap_sec: 0.2
+    mag_norm_min_ut: 10.0
+    mag_norm_max_ut: 120.0
+    mag_disturb_ratio: 0.35
+    mag_declination_rad: 0.0
+    mount_yaw_rad: 0.0
+    mag_blend: 0.02
+    calibration:
+      accel_bias: [0.0, 0.0, 0.0]
+      gyro_bias: [0.0, 0.0, 0.0]
+      mag_bias: [0.0, 0.0, 0.0]
+      mag_scale: [1.0, 1.0, 1.0]
+
+  localization:
+    pose_rate: 10.0
+    status_rate: 2.0
+    odom_timeout_sec: 0.5
+    imu_timeout_sec: 0.3
+    amcl_timeout_sec: 1.0
+    min_quality: 0.35
+    map_frame: "map"
+    base_frame: "base_link"
+
+  map_manager:
+    map_frame: "map"
+    map_dir: "~/.ros/rush_mog/maps"
+    default_map_name: ""
+    publish_rate: 1.0
+    frontier_min_size: 5
+    frontier_max_count: 50
+    frontier_max_cells: 250000
+    prefer_slam_toolbox: true
+
+  navigation:
+    # auto = 有 Nav2 用 Nav2，否则内置直航；也可强制 nav2 / direct
+    backend: "auto"
+    nav2_action: "/navigate_to_pose"
+    default_timeout_sec: 120.0
+    tolerance_xy: 0.20
+    tolerance_yaw: 0.30
+    min_localization_quality: 0.35
+    require_scan: true
+    stuck_timeout_sec: 6.0
+    progress_min_m: 0.05
+    blocked_timeout_sec: 5.0
+    status_rate: 2.0
+    cmd_topic: "/nav/cmd_vel"
+    direct:
+      max_linear_speed: 0.35
+      max_angular_speed: 1.0
+      k_linear: 1.2
+      k_angular: 1.8
+      slow_radius: 0.6
+      min_linear: 0.04
+      holonomic: true
+      turn_in_place_rad: 0.8
+      obstacle_stop_distance: 0.35
+      obstacle_slow_distance: 0.8
+
+  perception:
+    enabled: false
+    image_topic: "/camera/image_raw"
+    detector: "color"      # color / yolo / none
+    publish_rate: 10.0
+    min_confidence: 0.5
+    lidar_window_deg: 6.0
+    prefer_lidar: true
+    position_frame: "map"
+    track_max_age_sec: 1.0
+    camera:
+      width: 640
+      height: 480
+      hfov_deg: 62.0
+      fx: 0.0
+      fy: 0.0
+      cx: 0.0
+      cy: 0.0
+    targets:
+      cup:
+        hsv_min: [0, 100, 60]
+        hsv_max: [10, 255, 255]
+        min_area_ratio: 0.002
+        max_area_ratio: 0.5
+        real_height_m: 0.12
+      bottle:
+        hsv_min: [35, 80, 40]
+        hsv_max: [85, 255, 255]
+        min_area_ratio: 0.002
+        max_area_ratio: 0.5
+        real_height_m: 0.22
+
+  search:
+    rate_hz: 5.0
+    confirm_hits: 3
+    confirm_time_sec: 0.4
+    standoff_distance: 0.6
+    approach_tolerance: 0.30
+    map_wait_timeout_sec: 20.0
+    target_lost_timeout_sec: 3.0
+    frontier_min_size: 5
+    max_frontier_distance: 15.0
+    blacklist_radius: 0.8
+    blacklist_sec: 30.0
+    replan_delay_sec: 0.5
+    min_confidence: 0.5
+    max_approach_failures: 3
+    default_max_duration_sec: 300.0
+    default_target_coverage: 0.90
+    feedback_interval_sec: 0.5
+    track_memory_sec: 2.0

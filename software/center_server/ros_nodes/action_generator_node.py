@@ -31,8 +31,13 @@ class ActionGeneratorNode(Node):
         self.cfg = load_config(self)
         self.planner = ActionPlanner(self.cfg.get("action_generator", {}))
         self.safety = SafetyChecker(self.cfg.get("safety", {}))
+        # v2：VLA 单步速度走 /cmd_vel_raw，由 velocity_mux 与其他来源仲裁后
+        # 再发布到 /cmd_vel。单独运行本节点时可用参数改回 /cmd_vel。
+        self.cmd_topic = str(
+            self.cfg.get("action_generator", {}).get("cmd_vel_topic", "/cmd_vel_raw")
+        )
 
-        self.pub_cmd_vel = self.create_publisher(Twist, "/cmd_vel", 10)
+        self.pub_cmd_vel = self.create_publisher(Twist, self.cmd_topic, 10)
         self.pub_arm_traj = self.create_publisher(
             JointTrajectory, "/arm/trajectory", 10
         )
@@ -40,15 +45,28 @@ class ActionGeneratorNode(Node):
         self.create_subscription(
             ActionIntent, "/center/action_intent", self.on_intent, 10
         )
+        joint_topic = str(
+            self.cfg.get("sensor_topics", {}).get(
+                "joint_states", "/robot/joint_states"
+            )
+        )
         self.create_subscription(
             JointState,
-            "/robot/joint_states",
+            joint_topic,
             self.on_joint_state,
             qos_profile_sensor_data,
         )
-        self.create_subscription(
-            LaserScan, "/edge/radar", self.on_scan, qos_profile_sensor_data
+        laser_topic = str(
+            self.cfg.get("sensor_topics", {}).get("laser", "/scan")
         )
+        self.create_subscription(
+            LaserScan, laser_topic, self.on_scan, qos_profile_sensor_data
+        )
+        if laser_topic != "/edge/radar":
+            # 兼容仿真/旧版 edge_server
+            self.create_subscription(
+                LaserScan, "/edge/radar", self.on_scan, qos_profile_sensor_data
+            )
         self.create_subscription(
             SystemStatus, "/center/status", self.on_status, 10
         )
@@ -126,6 +144,9 @@ class ActionGeneratorNode(Node):
         if time.monotonic() < self.reverse_until:
             return True
         return self.task_state in (
+            "MAPPING",
+            "NAVIGATING",
+            "SEARCHING",
             "REVERSING",
             "PAUSED",
             "ERROR",
@@ -153,12 +174,17 @@ class ActionGeneratorNode(Node):
         if self._intent_count <= 5:
             self.get_logger().info(
                 f"intent #{self._intent_count}: {intent.intent} "
+                f"task_type={intent.task_type or 'vla'} "
                 f"task_state={self.task_state} mode={self.mode} "
                 f"estop={self.emergency_stop} data_ok={self.data_ok} "
                 f"scan={self.latest_scan is not None} "
                 f"gated={self._is_gated()}"
             )
         if self._is_gated() or intent.reverse_request:
+            self._publish_stop()
+            return
+        if intent.task_type not in ("", "vla"):
+            # 建图/导航/搜索任务由导航节点控制底盘，VLA 单步通道让出
             self._publish_stop()
             return
         if self.latest_scan is None:

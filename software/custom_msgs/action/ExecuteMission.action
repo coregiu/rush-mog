@@ -1,0 +1,28 @@
+# Goal
+string mission_id
+# map / explore / search / navigate / return_home
+string mission_type
+float64 target_x
+float64 target_y
+float64 target_yaw
+string target_label
+float64 max_duration
+bool save_map
+float64 target_coverage
+---
+# Result
+bool success
+string info
+geometry_msgs/PoseStamped target_pose
+geometry_msgs/PoseStamped approach_pose
+float64 confidence
+float64 elapsed_sec
+---
+# Feedback
+string state
+string detail
+float64 progress
+float64 explored_ratio
+float64 distance_remaining
+geometry_msgs/PoseStamped best_pose
+float64 best_confidence

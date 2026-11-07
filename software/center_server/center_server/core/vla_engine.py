@@ -1,9 +1,13 @@
-"""VLA 推理引擎。
+"""VLA 推理引擎（规则桩）。
 
 当前仓库没有真实的 VLA 模型权重，DESIGN.md 也把模型服务列为外部依赖。
-因此本文件实现一个可运行的规则桩（rule-based stub）：根据任务指令文本输出
-动作意图，保持与 DESIGN.md 5.3 节一致的 predict(image/radar/audio/state)
-接口形状。接入真实模型时只需替换 _load_model / predict 内部实现。
+本文件实现一个可运行的规则桩（rule-based stub）：
+
+- 单步底盘动作：前进/后退/左转/右转/左移/右移/停止；
+- 长任务意图：建图、探索、搜索、导航到航点/坐标、回家。
+
+接入真实模型时只需替换 _load_model / predict 内部实现，保持 predict(data)
+返回 ActionIntentDTO 的接口形状即可。
 """
 
 from __future__ import annotations
@@ -11,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .data_preprocessor import SyncedDTO
+from .instruction_parser import InstructionParser
 from ..utils.logger import get_logger
 
 
@@ -22,12 +27,21 @@ class ActionIntentDTO:
     value: float = 0.0
     confidence: float = 0.0
     reverse_request: bool = False
+    # --- SLAM/导航/搜索扩展 ---
+    task_type: str = "vla"
+    object_label: str = ""
+    goal_x: float = 0.0
+    goal_y: float = 0.0
+    goal_yaw: float = 0.0
+    waypoint: str = ""
 
 
 class VLAEngine:
     # 关键词 -> (意图, 目标)。按顺序匹配，停止类关键词优先。
     _RULES = (
         (("停止", "停下", "别走", "停", "stop", "halt"), "stop", "base"),
+        (("左移", "向左平移", "strafe left", "strafe_left"), "strafe_left", "base"),
+        (("右移", "向右平移", "strafe right", "strafe_right"), "strafe_right", "base"),
         (("后退", "向后", "倒车", "backward", "back"), "backward", "base"),
         (("左转", "向左", "left"), "turn_left", "base"),
         (("右转", "向右", "right"), "turn_right", "base"),
@@ -40,6 +54,9 @@ class VLAEngine:
         self.thresh = float(self.cfg.get("confidence_threshold", 0.6))
         self.default_linear = float(self.cfg.get("default_linear_speed", 0.3))
         self.default_angular = float(self.cfg.get("default_angular_speed", 0.5))
+        self.parser = InstructionParser(
+            self.cfg.get("instruction") or self.cfg.get("instruction_parser") or self.cfg
+        )
         self.model = None
         self._logger = get_logger("center_server.vla")
         self._load_model()
@@ -65,6 +82,7 @@ class VLAEngine:
         instruction = (getattr(data, "instruction", "") or "").strip().lower()
         task_id = getattr(data, "task_id", "") or ""
 
+        # 1) 停止/单步动作优先，避免“停止前进”被识别成前进
         for keywords, intent, target in self._RULES:
             if any(keyword in instruction for keyword in keywords):
                 value = 0.0
@@ -72,6 +90,8 @@ class VLAEngine:
                     value = self.default_linear
                 elif intent in ("turn_left", "turn_right"):
                     value = self.default_angular
+                elif intent in ("strafe_left", "strafe_right"):
+                    value = self.default_linear
                 return ActionIntentDTO(
                     task_id=task_id,
                     target=target,
@@ -81,7 +101,24 @@ class VLAEngine:
                     confidence=0.9,
                 )
 
-        # 无匹配指令：保持停止并给出低于阈值的置信度，交由上层请求确认
+        # 2) 长任务意图（建图/搜索/导航/回家）
+        mission = self.parser.parse(instruction)
+        if mission.is_mission and mission.confidence >= 0.7:
+            return ActionIntentDTO(
+                task_id=task_id,
+                target="mission",
+                intent=mission.mission_type,
+                value=0.0,
+                confidence=mission.confidence,
+                task_type=mission.mission_type,
+                object_label=mission.target_label,
+                goal_x=mission.x,
+                goal_y=mission.y,
+                goal_yaw=mission.yaw,
+                waypoint=mission.waypoint,
+            )
+
+        # 3) 无匹配指令：保持停止并给出低于阈值的置信度，交由上层请求确认
         return ActionIntentDTO(
             task_id=task_id,
             target="base",

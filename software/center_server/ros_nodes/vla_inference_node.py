@@ -43,6 +43,9 @@ class VLAInferenceNode(Node):
             vla_cfg.get("confidence_threshold", 0.6)
         )
         self.preprocessor = MultiModalPreprocessor()
+        # 任务关键词/航点配置在 instruction 段；VLA 规则桩也需要它来识别长任务
+        vla_cfg = dict(vla_cfg)
+        vla_cfg.setdefault("instruction", self.cfg.get("instruction", {}))
         self.vla = VLAEngine(vla_cfg)
         self.cv_bridge = cv_bridge.CvBridge()
 
@@ -128,6 +131,12 @@ class VLAInferenceNode(Node):
         intent.value = float(intent_dto.value)
         intent.confidence = float(intent_dto.confidence)
         intent.reverse_request = bool(intent_dto.reverse_request)
+        intent.task_type = intent_dto.task_type
+        intent.object_label = intent_dto.object_label
+        intent.goal_x = float(intent_dto.goal_x)
+        intent.goal_y = float(intent_dto.goal_y)
+        intent.goal_yaw = float(intent_dto.goal_yaw)
+        intent.waypoint = intent_dto.waypoint
         self.pub_intent.publish(intent)
 
         result = InferenceResult()

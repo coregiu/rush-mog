@@ -19,6 +19,9 @@ class ActionPlanner:
         twist = Twist()
         if getattr(intent, "reverse_request", False):
             return twist
+        if getattr(intent, "task_type", "vla") not in ("", "vla"):
+            # 长任务由导航节点控制底盘，VLA 单步通道必须让出
+            return twist
 
         value = float(getattr(intent, "value", 0.0) or 0.0)
         if not math.isfinite(value):
@@ -30,6 +33,10 @@ class ActionPlanner:
             twist.linear.x = min(value, self.max_lin)
         elif name == "backward":
             twist.linear.x = -min(value, self.max_lin)
+        elif name == "strafe_left":
+            twist.linear.y = min(value, self.max_lin)
+        elif name == "strafe_right":
+            twist.linear.y = -min(value, self.max_lin)
         elif name == "turn_left":
             twist.angular.z = min(value, self.max_ang)
         elif name == "turn_right":
@@ -43,6 +50,9 @@ class ActionPlanner:
         max_delta = max(self.accel_limit * dt, 0.0)
         target.linear.x = previous.linear.x + max(
             -max_delta, min(max_delta, target.linear.x - previous.linear.x)
+        )
+        target.linear.y = previous.linear.y + max(
+            -max_delta, min(max_delta, target.linear.y - previous.linear.y)
         )
         target.angular.z = previous.angular.z + max(
             -max_delta, min(max_delta, target.angular.z - previous.angular.z)
