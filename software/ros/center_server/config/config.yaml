@@ -257,3 +257,103 @@ center_server:
     default_target_coverage: 0.90
     feedback_interval_sec: 0.5
     track_memory_sec: 2.0
+
+  # ======================================================================
+  # 健康检查（health_monitor_node）
+  #   GET  http://127.0.0.1:8090/ros/health   -> edge_center
+  #   ROS  /center/health + /center/healthcheck
+  # 接口契约与字段语义见 software/ros/HEALTHCHECK.md。
+  # 仿真默认：camera/lidar/odom/arm 由 fake_edge_publisher 提供；
+  # imu/microphone/speaker 为可选；base/battery 关闭。
+  # ======================================================================
+  health:
+    enabled: true
+    publish_rate: 1.0
+    startup_grace_sec: 5.0
+    rate_window_sec: 5.0
+    min_rate_ratio: 0.5
+    strict_unknown: false       # true: 可选设备无反馈也视为 degraded
+    safety_required: true
+    safety_timeout_sec: 3.0
+    check_nodes: true
+    expected_nodes:
+      - bridge_node
+      - vla_inference_node
+      - action_generator_node
+      - reverse_operation_node
+      - safety_manager_node
+      - task_manager_node
+      - health_monitor_node
+    http:
+      enabled: true
+      host: "127.0.0.1"         # 远程 edge_center 改为 0.0.0.0，并设置 api_key
+      port: 8090
+      api_key: ""
+      cors_allow_origin: "*"
+    devices:
+      camera:
+        type: camera
+        topic: "/edge/video"
+        message_type: "sensor_msgs/msg/Image"
+        expected_rate_hz: 10.0
+        timeout_sec: 2.0
+        required: true
+      lidar:
+        type: lidar
+        topic: "/edge/radar"
+        message_type: "sensor_msgs/msg/LaserScan"
+        expected_rate_hz: 10.0
+        timeout_sec: 1.5
+        required: true
+      imu:
+        type: imu
+        topic: "/imu/data"
+        message_type: "sensor_msgs/msg/Imu"
+        expected_rate_hz: 100.0
+        timeout_sec: 1.0
+        required: false
+      microphone:
+        type: microphone
+        topic: "/edge/audio"
+        message_type: "custom_msgs/msg/AudioData"
+        expected_rate_hz: 10.0
+        timeout_sec: 2.0
+        required: false
+      speaker:
+        type: speaker
+        topic: "/body/audio_status"
+        message_type: "std_msgs/msg/String"
+        expected_rate_hz: 0.0
+        timeout_sec: 2.0
+        required: false
+      arm:
+        type: arm
+        topic: "/robot/joint_states"
+        message_type: "sensor_msgs/msg/JointState"
+        joint_names: ["j1", "j2", "j3", "j4", "j5"]
+        expected_rate_hz: 10.0
+        timeout_sec: 2.0
+        required: true
+      odom:
+        type: odometry
+        topic: "/robot/odometry"
+        message_type: "nav_msgs/msg/Odometry"
+        expected_rate_hz: 10.0
+        timeout_sec: 2.0
+        required: true
+      base:
+        enabled: false
+        type: base
+        topic: "/base/status"
+        message_type: "std_msgs/msg/String"
+        expected_rate_hz: 1.0
+        timeout_sec: 3.0
+        required: true
+      battery:
+        enabled: false
+        type: battery
+        topic: "/battery_state"
+        message_type: "sensor_msgs/msg/BatteryState"
+        expected_rate_hz: 1.0
+        timeout_sec: 5.0
+        required: false

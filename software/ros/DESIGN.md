@@ -13,7 +13,8 @@
 | 代码 | `software/ros`（ament_python，ROS2 Humble） |
 | 消息/动作 | `software/custom_msgs`（v0.2.0） |
 | 构建 | `colcon build --packages-select custom_msgs center_server` 通过 |
-| 单元测试 | `pytest tests -q`：35 passed |
+| 单元测试 | `pytest tests -q`：59 passed |
+| 健康检查 | `test_health_monitor.py` + `test_health_http.py`：24 passed；ROS/HTTP 手工联调通过 |
 | VLA/安全端到端 | `end_to_end_check.py`：7/7 passed |
 | SLAM/导航/搜索联调 | `slam_nav_check.py` + `fake_slam_robot.py`：6/6 passed |
 | 真实 VLA 模型 | 未包含权重；规则桩，接口固定 |
@@ -24,12 +25,13 @@
 ## 1. 设计目标
 
 `center_server` 是 Rush-MOG 的**决策与任务中心**，在 v1 的 VLA 推理/安全/反向操作之上，
-增加四类能力：
+增加五类能力：
 
 1. **SLAM 建图**：消费 2D 激光与里程计，控制 slam_toolbox 建图、保存/加载地图、发布前沿。
 2. **定位**：消费 ICM-20948、轮式里程计、AMCL/TF，输出定位健康度与 map 系位姿，门控导航。
 3. **自主导航**：把“去某点/探索/回家”转成 Nav2 或内置直航的速度指令，带目标校验、停滞检测、超时。
 4. **目标搜索**：相机检测 + 激光测距 + 地图投影 + 前沿探索 + 目标确认 + 接近，返回目标位姿。
+5. **健康检查**：ROS 节点/话题 + 全部连接设备，HTTP 供 `edge_center` 调用。
 
 设计原则：
 
@@ -126,6 +128,7 @@
 | 机械臂 | `/arm/trajectory` | JointTrajectory |
 | 任务请求 | `/task/request`、`/center/mission_request` | 内部/外部 |
 | 状态 | `/center/status`、`/center/mission_status`、`/center/nav_status`、`/center/search_status`、`/center/localization_status`、`/center/safety_state`、`/center/velocity_status`、`/center/map_info`、`/center/frontiers`、`/center/target_detections` | 可观测性 |
+| 健康 | `/center/health`、`/center/healthcheck`、HTTP `:8090/ros/health` | 系统/设备健康，供 edge_center |
 | 位姿 | `/center/pose` | map 系，供导航/搜索/目标投影 |
 
 ---
@@ -150,6 +153,7 @@ software/
     │   │   ├── action_planner.py
     │   │   ├── base_protocol.py      # STM32 二进制帧/CRC
     │   │   ├── data_preprocessor.py
+    │   │   ├── health_monitor.py      # 设备/节点健康状态机（纯逻辑）
     │   │   ├── imu_monitor.py        # ICM-20948 健康度/航向
     │   │   ├── instruction_parser.py # 文本 -> 任务
     │   │   ├── nav_supervisor.py     # 目标校验/停滞/直航
@@ -165,10 +169,11 @@ software/
     │   │   ├── target_tracker.py
     │   │   ├── velocity_mux.py
     │   │   └── vla_engine.py
+    │   ├── http_health.py            # 健康检查 HTTP 网关（stdlib）
     │   ├── drivers/
     │   │   └── icm20948.py           # 寄存器级 I2C 驱动
     │   └── utils/
-    ├── ros_nodes/                    # 14 个节点
+    ├── ros_nodes/                    # 15 个节点
     ├── launch/
     │   ├── center_server.launch.py
     │   ├── robot_bringup.launch.py
@@ -206,6 +211,7 @@ software/
 | 12 | `object_search_node` | 前沿探索、目标确认、接近 | → `/center/search_status` |
 | 13 | `base_bridge_node` | Pi ↔ STM32 串口、里程计、电池、IMU 转发 | ↔ `/odom`、`/imu/data`、`/battery_state` |
 | 14 | `imu_node` | Pi I2C 直连 ICM-20948 | → `/imu/data` |
+| 15 | `health_monitor_node` | 节点/设备健康、HTTP 网关 | → `/center/health`、`/center/healthcheck`、:8090 |
 
 启动：
 
@@ -551,6 +557,46 @@ flags：bit0 ESTOP、bit1 ARMED、bit2 IMU_OK、bit3 ENCODER_OK、bit4 BATTERY_L
 - 提供 `config.yaml`（仿真）与 `robot.yaml`（实车）；
 - `ekf.yaml`/`slam_toolbox.yaml`/`nav2_params.yaml` 为外部栈配置。
 
+### 6.15 健康检查（`health_monitor_node` + `health_monitor.py`）
+
+目标：给 `edge_center` 一个只读接口，回答“ROS/设备是否健康、能否继续接任务”。
+
+```text
+/scan /camera /imu /audio /joint_states /odom /base/status /battery_state
+        │
+        ▼
+health_monitor_node
+  ├─ 设备注册表（health.devices）→ 订阅/超时/频率/指标校验
+  ├─ ROS graph：get_node_names() + count_publishers()
+  ├─ /center/safety_state（TRANSIENT_LOCAL）→ 急停/安全超时
+  ├─ /center/health（HealthStatus，1 Hz，TRANSIENT_LOCAL）
+  ├─ /center/healthcheck（HealthCheck 服务）
+  └─ HTTP :8090（/ros/health 等，stdlib ThreadingHTTPServer）
+```
+
+状态机：
+
+- 设备：`ok` / `degraded` / `error` / `unknown` / `disabled`；
+- 整体：`ok` / `starting` / `degraded` / `error` / `disabled`；
+- 判定优先级：必需设备 error > 期望节点缺失 > 安全状态超时 > 宽限期 > 设备 degraded >
+  可选设备 error > 急停 > `strict_unknown` > ok；
+- `ready = (ok|degraded) && !emergency_stop`；
+- 启动宽限期避免“节点刚启动还没来得及发布”被误报。
+
+关键设计：
+
+1. **纯逻辑与 ROS 解耦**：`core/health_monitor.py` 不 import rclpy，24 项单测覆盖状态机；
+2. **配置驱动**：设备 topic/message_type/频率/超时/required 全部在 YAML，新增设备无需改代码；
+3. **诚实报告 unknown**：音箱/机械臂当前无反馈话题，报 `unknown`，不伪造 `ok`；
+4. **HTTP 线程安全**：节点按 1 Hz 预计算 JSON 快照，HTTP 线程只读快照，不调用 rclpy；
+5. **失败降级**：HTTP 端口占用只记录 `http.bound=false`，ROS 话题/服务仍工作；单次快照异常
+   不退出节点；
+6. **默认安全**：只监听 `127.0.0.1`，跨机需显式 `0.0.0.0` + `api_key`；
+7. **晚加入兼容**：健康话题/安全状态均用 TRANSIENT_LOCAL，后启动的 HMI 也能拿到最后一帧。
+
+接口契约、JSON 字段、设备反馈协议和 `edge_center` 接入示例见
+[`HEALTHCHECK.md`](HEALTHCHECK.md)。
+
 ---
 
 ## 7. 数据流
@@ -627,6 +673,10 @@ edge/Pi sensors → bridge_node → /center/synced_data
 | `/center/target_detections` | `custom_msgs/TargetList` | 发布 | 目标 |
 | `/center/search_status` | `custom_msgs/SearchStatus` | 发布 | 搜索状态 |
 | `/center/velocity_status` | `custom_msgs/VelocityMuxStatus` | 发布 | 速度源 |
+| `/center/health` | `custom_msgs/HealthStatus` | 发布 | 系统/设备健康（1 Hz，TRANSIENT_LOCAL） |
+| `/base/status` | `std_msgs/String` | 发布/订阅 | STM32 遥测 JSON（底盘/健康） |
+| `/arm/joint_states` | `sensor_msgs/JointState` | 订阅 | 机械臂回读（待接入） |
+| `/body/audio_status` | `std_msgs/String` | 订阅 | 音箱状态 JSON（待接入） |
 | `/cmd_vel` | `geometry_msgs/Twist` | 发布 | 最终速度 |
 | `/cmd_vel_raw` | `geometry_msgs/Twist` | 发布 | VLA 原始 |
 | `/nav/cmd_vel` | `geometry_msgs/Twist` | 发布 | 导航速度 |
@@ -644,6 +694,7 @@ edge/Pi sensors → bridge_node → /center/synced_data
 | `/center/emergency_stop` | `custom_msgs/EmergencyStop` | 急停/解除 |
 | `/center/map_control` | `custom_msgs/MapControl` | start/stop/save/load/reset |
 | `/center/set_initial_pose` | `custom_msgs/SetInitialPose` | 设置初始位姿 |
+| `/center/healthcheck` | `custom_msgs/HealthCheck` | 全部/指定设备健康快照 |
 
 ### 8.3 Action
 
@@ -660,7 +711,25 @@ edge/Pi sensors → bridge_node → /center/synced_data
 `AudioData`、`SyncedSensorData`、`RobotState`、`TaskRequest`、`ActionIntent`、`ReverseOperation`、
 `InferenceResult`、`SafetyState`、`SystemStatus`、`MapInfo`、`Frontier`、`FrontierList`、
 `TargetDetection`、`TargetList`、`LocalizationStatus`、`NavStatus`、`SearchStatus`、
-`MissionStatus`、`VelocityMuxStatus`。
+`MissionStatus`、`VelocityMuxStatus`、`DeviceHealth`、`HealthStatus`。
+
+### 8.5 健康检查接口
+
+对外主接口是 HTTP（供 `edge_center`），ROS 原生接口同时保留：
+
+| 接口 | 类型 | 说明 |
+|---|---|---|
+| `GET /ros/health` | HTTP | 详细健康快照（别名 `/v1/health`、`/health`、`/healthcheck`） |
+| `GET /ros/health/devices/{id}` | HTTP | 单设备健康 |
+| `GET /ros/healthz`、`GET /ros/readyz` | HTTP | 存活/就绪探针（readyz 503 表示未就绪） |
+| `/center/health` | `custom_msgs/HealthStatus` | 1 Hz，TRANSIENT_LOCAL |
+| `/center/healthcheck` | `custom_msgs/HealthCheck` | 全部/指定设备，支持 `include_metrics` |
+
+整体状态：`ok` / `starting` / `degraded` / `error` / `disabled`；
+设备状态：`ok` / `degraded` / `error` / `unknown` / `disabled`。
+默认只监听 `127.0.0.1:8090`；跨机需改 `health.http.host` 并设置 `api_key`。
+完整字段、设备清单、反馈协议和 `edge_center` 接入示例见
+[`HEALTHCHECK.md`](HEALTHCHECK.md)。
 
 ---
 
@@ -693,6 +762,12 @@ edge/Pi sensors → bridge_node → /center/synced_data
 | `search.confirm_hits` | 3 | 目标确认次数 |
 | `velocity_mux.priorities` | safety>reverse>teleop>nav>vla | 仲裁 |
 | `task_manager.execution_hold_sec` | 1.0 | VLA 成功保持窗口 |
+| `health.publish_rate` | 1.0 | 健康话题/HTTP 快照频率 |
+| `health.startup_grace_sec` | 5.0/8.0 | 启动宽限期（仿真/实车） |
+| `health.min_rate_ratio` | 0.5 | 低于期望频率比例判 degraded |
+| `health.strict_unknown` | false | 可选设备 unknown 是否降级整体 |
+| `health.http.host/port` | 127.0.0.1/8090 | HTTP 网关绑定 |
+| `health.devices.<id>.required` | 按设备 | 缺失是否 error |
 
 ---
 
@@ -712,6 +787,10 @@ edge/Pi sensors → bridge_node → /center/synced_data
 | 急停 | 服务/障碍/电量/定位 | 零速度覆盖，任务取消 |
 | 地图保存失败 | 服务/IO | 返回失败，保留内存地图 |
 | 串口断开 | 读写异常 | 2s 重连，底盘看门狗回零 |
+| 设备掉线 | 健康检查超时/无发布者 | `HealthStatus` 报 `error/degraded`，`edge_center` 禁能力 |
+| 设备无反馈 | 可选设备从未收到数据 | 报 `unknown`，不伪造 `ok`；`strict_unknown` 可升级为 degraded |
+| 期望节点缺失 | ROS graph 发现 | 宽限期后整体 `error`，`ros.missing_nodes` 给出名单 |
+| 健康 HTTP 端口占用 | bind 异常 | ROS 话题/服务继续，`http.bound=false`，不影响运动控制 |
 
 ---
 
@@ -762,6 +841,12 @@ edge/Pi sensors → bridge_node → /center/synced_data
    ros2 action send_goal /center/execute_task custom_msgs/action/ExecuteTask \
      "{task_id: find_cup, instruction: 找杯子}"
    ```
+9. 健康检查（`robot_bringup.launch.py` 已包含 `health_monitor_node`）：
+   ```bash
+   curl -s http://127.0.0.1:8090/ros/health | python3 -m json.tool
+   curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8090/ros/readyz
+   ```
+   跨机 `edge_center` 调用时，把 `health.http.host` 改为 `0.0.0.0` 并设置 `health.http.api_key`。
 
 ### 12.2 仿真/桌面
 
@@ -800,6 +885,8 @@ python3 tests/slam_nav_check.py          # 6/6
 | 目标检测 | 5–10 Hz（颜色/YOLO-lite） |
 | 目标搜索 | 30–300 s（场景相关） |
 | 急停响应 | < 100 ms（软件）/ 硬件更快 |
+| 健康快照 | 1 Hz；HTTP 响应 < 10 ms（本地） |
+| 设备故障发现 | ≤ timeout_sec（典型 0.5–3 s） |
 
 ---
 
@@ -813,14 +900,24 @@ python3 tests/slam_nav_check.py          # 6/6
 ```bash
 cd software/ros
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 35 passed
+# 59 passed
+```
+
+健康检查专项：
+
+```bash
+PYTHONPATH=.:$PYTHONPATH python3 -m pytest \
+  tests/test_health_monitor.py tests/test_health_http.py -q
+# 24 passed
 ```
 
 覆盖：
 
 - 状态机、安全校验、动作规划、预处理、VLA、反向操作（v1）；
 - 指令解析、栅格/前沿/存图、相机/激光定位、跟踪、搜索协调器、导航校验/直航、
-  IMU 监控/航向、速度仲裁、麦轮里程计、串口协议 CRC/分帧、ICM-20948 驱动（v2）。
+  IMU 监控/航向、速度仲裁、麦轮里程计、串口协议 CRC/分帧、ICM-20948 驱动（v2）；
+- 设备健康状态机、启动宽限期、频率/超时/非法数据、节点缺失、急停、设备过滤、
+  HTTP 存活/就绪/鉴权/单设备/metrics 开关（healthcheck）。
 
 ### 14.2 VLA/安全端到端
 
@@ -863,6 +960,9 @@ python3 tests/slam_nav_check.py
 8. **目标检测模型**：颜色检测只适合演示；YOLO 需模型/算力；可接 Orin Nano。
 9. **地图保存回退**：slam_toolbox 不可用时 PGM/YAML 精度取决于当前 `/map`。
 10. **未做硬件在环**：`fake_slam_robot` 验证了软件链路，真实串口/IMU/激光需实车联调。
+11. **健康反馈缺口**：音箱 `/body/audio_status`、机械臂 `/arm/joint_states` 尚未发布，
+    健康接口报 `unknown`；接入后无需改 `health_monitor_node`，只改配置。
+12. **健康 HTTP 无 TLS/限流**：默认仅回环；跨机需 `api_key` + 防火墙/反向代理。
 
 后续优先级：
 
@@ -877,6 +977,7 @@ python3 tests/slam_nav_check.py
 ## 16. 总结
 
 `center_server` v2 在 v1 的 VLA 推理、安全、反向操作之上，补齐了 **SLAM 建图、ICM-20948 定位、
-Nav2/直航导航、目标检测/搜索/接近、速度仲裁、底盘串口桥**。软件链路已通过 35 项单元测试、
-7 项 VLA/安全端到端、6 项 SLAM/导航/搜索联调；实车落地还差 STM32 固件升级、硬件选型
-（见 `hardware/SLAM_NAV.md`）和现场标定。
+Nav2/直航导航、目标检测/搜索/接近、速度仲裁、底盘串口桥、健康检查**。软件链路已通过
+59 项单元测试（含 24 项健康检查）、7 项 VLA/安全端到端、6 项 SLAM/导航/搜索联调；
+实车落地还差 STM32 固件升级、硬件选型（见 `hardware/SLAM_NAV.md`）、现场标定，以及
+音箱/机械臂反馈话题接入。

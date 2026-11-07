@@ -22,6 +22,7 @@ CORE_NODES = [
     "reverse_operation_node",
     "safety_manager_node",
     "task_manager_node",
+    "health_monitor_node",
 ]
 
 

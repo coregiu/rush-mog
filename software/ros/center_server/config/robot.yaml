@@ -260,3 +260,114 @@ center_server:
   time_sync:
     sync_window_ms: 120
     queue_size: 10
+
+  # ======================================================================
+  # 健康检查（health_monitor_node）
+  #   GET  http://127.0.0.1:8090/ros/health   -> edge_center
+  #   ROS  /center/health + /center/healthcheck
+  # 接口契约与字段语义见 software/ros/HEALTHCHECK.md。
+  #
+  # 设备反馈缺口（当前代码未发布，状态会显示 unknown，不影响整体 ok）：
+  #   - speaker: /body/audio_status（建议 STM32 桥接后发布 JSON）
+  #   - arm:     /arm/joint_states（机械臂驱动/回读节点发布）
+  # 这两个话题接入后无需改 health_monitor_node，只改配置即可。
+  # ======================================================================
+  health:
+    enabled: true
+    publish_rate: 1.0
+    startup_grace_sec: 8.0
+    rate_window_sec: 5.0
+    min_rate_ratio: 0.5
+    strict_unknown: false
+    safety_required: true
+    safety_timeout_sec: 3.0
+    check_nodes: true
+    expected_nodes:
+      - bridge_node
+      - vla_inference_node
+      - action_generator_node
+      - reverse_operation_node
+      - safety_manager_node
+      - task_manager_node
+      - velocity_mux_node
+      - localization_node
+      - map_manager_node
+      - navigation_node
+      - target_detector_node
+      - object_search_node
+      - base_bridge_node
+      - health_monitor_node
+    http:
+      enabled: true
+      host: "127.0.0.1"         # edge_center 跨机部署时改 0.0.0.0，并设置 api_key
+      port: 8090
+      api_key: ""
+      cors_allow_origin: "*"
+    devices:
+      camera:
+        type: camera
+        topic: "/camera/image_raw"
+        message_type: "sensor_msgs/msg/Image"
+        expected_rate_hz: 15.0
+        timeout_sec: 2.0
+        required: true
+      lidar:
+        type: lidar
+        topic: "/scan"
+        message_type: "sensor_msgs/msg/LaserScan"
+        expected_rate_hz: 10.0
+        timeout_sec: 1.5
+        required: true
+      imu:
+        type: imu
+        topic: "/imu/data"
+        message_type: "sensor_msgs/msg/Imu"
+        expected_rate_hz: 100.0
+        timeout_sec: 0.5
+        required: true
+      microphone:
+        type: microphone
+        topic: "/audio/raw"       # 无麦克风时该话题可不存在
+        message_type: "custom_msgs/msg/AudioData"
+        expected_rate_hz: 10.0
+        timeout_sec: 2.0
+        required: false
+      speaker:
+        type: speaker
+        topic: "/body/audio_status"
+        message_type: "std_msgs/msg/String"
+        expected_rate_hz: 0.0
+        timeout_sec: 2.0
+        required: false
+        description: "speaker feedback not implemented yet"
+      arm:
+        type: arm
+        topic: "/arm/joint_states"
+        message_type: "sensor_msgs/msg/JointState"
+        joint_names: ["j1", "j2", "j3", "j4", "j5"]
+        expected_rate_hz: 10.0
+        timeout_sec: 2.0
+        required: false
+        description: "arm feedback not implemented yet"
+      base:
+        type: base
+        topic: "/base/status"
+        message_type: "std_msgs/msg/String"
+        expected_rate_hz: 1.0
+        timeout_sec: 3.0
+        required: true
+        qos: "reliable"
+      battery:
+        type: battery
+        topic: "/battery_state"
+        message_type: "sensor_msgs/msg/BatteryState"
+        expected_rate_hz: 1.0
+        timeout_sec: 5.0
+        required: false
+      odom:
+        type: odometry
+        topic: "/odom"
+        message_type: "nav_msgs/msg/Odometry"
+        expected_rate_hz: 20.0
+        timeout_sec: 2.0
+        required: true

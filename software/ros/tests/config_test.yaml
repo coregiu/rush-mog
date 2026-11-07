@@ -69,3 +69,20 @@ center_server:
     obstacle_clear_distance: 0.55
     data_timeout_sec: 2.0
     scan_timeout_sec: 1.0
+  # SLAM/导航联调只启动 fake_slam_robot（发布 /scan + /center/safety_state），
+  # 因此这里只监控雷达，并关闭节点发现/HTTP，避免测试环境误报。
+  health:
+    enabled: true
+    startup_grace_sec: 3.0
+    safety_required: false
+    check_nodes: false
+    http:
+      enabled: false
+    devices:
+      lidar:
+        type: lidar
+        topic: "/scan"
+        message_type: "sensor_msgs/msg/LaserScan"
+        expected_rate_hz: 10.0
+        timeout_sec: 2.0
+        required: true

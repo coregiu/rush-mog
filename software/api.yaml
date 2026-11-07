@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: Rush-MOG 模块接口
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Rush-MOG 各模块接口归档，按模块分组：
 
@@ -10,10 +10,13 @@ info:
     | --- | --- | --- | --- |
     | **Edge Server** | HTTP | `http://192.168.4.1`（80） | ESP32-S3 网页手柄、控制命令、状态、静态资源、MJPEG 图传 |
     | **Center Server** | HTTP | `http://127.0.0.1:8000` | SmolVLA 多模态推理、健康检查、模型信息 |
+    | **ROS Health Gateway** | HTTP | `http://127.0.0.1:8090` | ROS/设备健康检查，供 edge_center 调用 |
     | **Body Control** | UART | STM32 USART3，9600 8N1 | ESP32-S3 → STM32 的 ASCII 运动/音频命令，无 ACK |
 
     > **ROS 说明**：`software/ros` 的 ROS 2 话题/服务/Action 不是 HTTP，
     > 未纳入本 OpenAPI 文件，详见 `software/ros/README.md`。
+    > `health_monitor_node` 额外提供 HTTP 健康网关，归档在下方
+    > `ROS Health Gateway` 分组，完整契约见 `software/ros/HEALTHCHECK.md`。
     >
     > **UART 说明**：OpenAPI/Swagger 只原生描述 HTTP。本文档用
     > `/body-control/uart/command` 作为**虚拟归档路径**，并在
@@ -23,6 +26,7 @@ info:
     详细文档：
     - Edge Server：`software/edge_server/README.md`
     - Center Server：`software/center_server/README.md`、`DESIGN.md`
+    - ROS Health Gateway：`software/ros/HEALTHCHECK.md`
     - Body Control：`software/body_control/README.md`
 
   license:
@@ -54,6 +58,14 @@ tags:
       不单独占用 path，见 `x-center-server.root_response`；CORS 见
       `x-center-server.cors`。
     x-docs: "./center_server/README.md"
+  - name: ROS Health Gateway
+    description: |
+      `software/ros` 的 `health_monitor_node` 内嵌 HTTP 网关，默认
+      `127.0.0.1:8090`。返回 ROS 节点/话题状态，以及相机、雷达、IMU、
+      麦克风、音箱、机械臂、底盘、电池、里程计等设备的健康情况。
+      只读接口；默认仅回环，跨机调用需设置 `health.http.api_key`。
+      主路径为 `/ros/health`，同时保留 `/v1/health`、`/health` 别名。
+    x-docs: "./ros/HEALTHCHECK.md"
   - name: Body Control (UART)
     description: |
       STM32F103C8T6 车体控制器的 UART 命令协议。ESP32-S3 UART1
@@ -65,6 +77,7 @@ x-tagGroups:
   - name: 车载控制
     tags:
       - Edge Server
+      - ROS Health Gateway
       - Body Control (UART)
   - name: 中心推理
     tags:
@@ -97,6 +110,17 @@ x-modules:
       - "body_control/src/src/ps2_receiver.c"
       - "body_control/src/src/controller.c"
       - "body_control/src/inc/command.h"
+  - id: ros_health
+    name: ROS Health Gateway
+    transport: http
+    base_url: "http://127.0.0.1:8090"
+    ports:
+      http: 8090
+    source:
+      - "ros/ros_nodes/health_monitor_node.py"
+      - "ros/center_server/core/health_monitor.py"
+      - "ros/center_server/http_health.py"
+    docs: "ros/HEALTHCHECK.md"
 
 x-edge-network:
   mode: AP
@@ -1191,6 +1215,140 @@ paths:
               schema:
                 $ref: '#/components/schemas/CenterReady'
 
+  /ros/health:
+    servers:
+      - url: "http://127.0.0.1:8090"
+        description: ROS Health Gateway（默认只监听回环）
+    get:
+      tags: [ROS Health Gateway]
+      summary: ROS 与全部连接设备的详细健康
+      description: |
+        返回 ROS 节点/话题状态，以及相机、雷达、IMU、麦克风、音箱、机械臂、
+        底盘、电池、里程计等设备的健康情况。HTTP 200 只代表健康数据可读；
+        机器健康看 body 的 `status` / `healthy` / `ready`。
+
+        别名：`/v1/health`、`/health`、`/healthcheck`。完整字段、状态语义和
+        edge_center 接入示例见 `software/ros/HEALTHCHECK.md`。
+      operationId: rosHealth
+      security:
+        - {}
+        - rosHealthBearer: []
+        - rosHealthApiKey: []
+      parameters:
+        - name: include_metrics
+          in: query
+          required: false
+          description: false 时不返回设备 metrics 字段
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: 健康快照（整体 status 可为 ok/starting/degraded/error/disabled）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RosHealth'
+        '401':
+          $ref: '#/components/responses/RosHealthUnauthorized'
+        '503':
+          description: 健康快照尚未生成
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /ros/health/devices/{device_id}:
+    servers:
+      - url: "http://127.0.0.1:8090"
+        description: ROS Health Gateway（默认只监听回环）
+    get:
+      tags: [ROS Health Gateway]
+      summary: 单个设备健康
+      description: |
+        返回指定设备详情；`status` 仍是整体系统状态。
+        设备 ID 示例：camera / lidar / imu / microphone / speaker / arm / base / battery / odom。
+      operationId: rosHealthDevice
+      security:
+        - {}
+        - rosHealthBearer: []
+        - rosHealthApiKey: []
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: include_metrics
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: 单设备健康
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RosHealthDeviceEnvelope'
+        '401':
+          $ref: '#/components/responses/RosHealthUnauthorized'
+        '404':
+          description: 未知设备
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '503':
+          description: 健康快照尚未生成
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /ros/healthz:
+    servers:
+      - url: "http://127.0.0.1:8090"
+        description: ROS Health Gateway（默认只监听回环）
+    get:
+      tags: [ROS Health Gateway]
+      summary: 存活探针
+      description: HTTP 线程存活即 200，不检查设备；等价别名 `/healthz`、`/livez`。
+      operationId: rosHealthLiveness
+      responses:
+        '200':
+          description: 存活
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RosHealthLive'
+
+  /ros/readyz:
+    servers:
+      - url: "http://127.0.0.1:8090"
+        description: ROS Health Gateway（默认只监听回环）
+    get:
+      tags: [ROS Health Gateway]
+      summary: 就绪探针
+      description: |
+        整体 `ok`/`degraded` 且未急停返回 200；`starting`/`error`/`disabled`
+        或急停返回 503。等价别名 `/readyz`。
+      operationId: rosHealthReadiness
+      responses:
+        '200':
+          description: 就绪
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RosHealthReady'
+        '503':
+          description: 未就绪
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RosHealthReady'
+
   /body-control/uart/command:
     post:
       tags: [Body Control (UART)]
@@ -1257,6 +1415,15 @@ components:
       in: header
       name: X-API-Key
       description: "Center Server 可选的 API Key（server.api_key）"
+    rosHealthBearer:
+      type: http
+      scheme: bearer
+      description: "ROS Health Gateway 可选的 Bearer Token（health.http.api_key）"
+    rosHealthApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: "ROS Health Gateway 可选的 API Key（health.http.api_key）"
 
   responses:
     CenterBadRequest:
@@ -1275,6 +1442,18 @@ components:
                   message: "JSON 解析失败: ..."
     CenterUnauthorized:
       description: 缺少或错误的 API Key
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/CenterErrorResponse'
+          example:
+            ok: false
+            request_id: "..."
+            error:
+              code: "unauthorized"
+              message: "无效或缺失的 API Key"
+    RosHealthUnauthorized:
+      description: 缺少或错误的 ROS Health API Key
       content:
         application/json:
           schema:
@@ -1829,6 +2008,267 @@ components:
           enum: [false]
         error:
           $ref: '#/components/schemas/CenterError'
+        request_id:
+          type: string
+
+    RosHealthSummary:
+      type: object
+      required: [total, enabled, ok, degraded, error, unknown, disabled]
+      properties:
+        total:
+          type: integer
+        enabled:
+          type: integer
+        ok:
+          type: integer
+        degraded:
+          type: integer
+        error:
+          type: integer
+        unknown:
+          type: integer
+        disabled:
+          type: integer
+
+    RosDeviceHealth:
+      type: object
+      required:
+        - id
+        - type
+        - status
+        - healthy
+        - ready
+        - enabled
+        - required
+        - connected
+        - data_fresh
+        - topic
+        - message_type
+        - publisher_count
+        - age_sec
+        - rate_hz
+        - expected_rate_hz
+        - detail
+      properties:
+        id:
+          type: string
+          example: "camera"
+        type:
+          type: string
+          enum: [camera, lidar, imu, microphone, speaker, arm, base, battery, odometry, other]
+        status:
+          type: string
+          enum: [ok, degraded, error, unknown, disabled]
+        healthy:
+          type: boolean
+        ready:
+          type: boolean
+        enabled:
+          type: boolean
+        required:
+          type: boolean
+        connected:
+          type: boolean
+        data_fresh:
+          type: boolean
+        topic:
+          type: string
+        message_type:
+          type: string
+        publisher_count:
+          type: integer
+        age_sec:
+          type: number
+          description: 最后一条消息年龄；从未收到为 -1
+        rate_hz:
+          type: number
+          description: 最近窗口实测频率；样本不足为 -1
+        expected_rate_hz:
+          type: number
+        detail:
+          type: string
+        metrics:
+          type: object
+          additionalProperties: true
+
+    RosHealthSafety:
+      type: object
+      properties:
+        available:
+          type: boolean
+        age_sec:
+          type: number
+        emergency_stop:
+          type: boolean
+        reason:
+          type: string
+        data_ok:
+          type: boolean
+          nullable: true
+        localization_ok:
+          type: boolean
+          nullable: true
+        battery_ok:
+          type: boolean
+          nullable: true
+        battery_percent:
+          type: number
+        min_obstacle_distance:
+          type: number
+
+    RosHealthRuntime:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        checked:
+          type: boolean
+        node_count:
+          type: integer
+        expected_nodes:
+          type: array
+          items:
+            type: string
+        missing_nodes:
+          type: array
+          items:
+            type: string
+        use_sim_time:
+          type: boolean
+        error:
+          type: string
+
+    RosHealthHttp:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        host:
+          type: string
+        port:
+          type: integer
+        configured_port:
+          type: integer
+        bound:
+          type: boolean
+        error:
+          type: string
+        auth:
+          type: boolean
+
+    RosHealth:
+      type: object
+      required:
+        - ok
+        - status
+        - healthy
+        - ready
+        - service
+        - version
+        - uptime_sec
+        - timestamp
+        - reason
+        - summary
+        - emergency_stop
+        - safety
+        - ros
+        - http
+        - devices
+        - request_id
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        status:
+          type: string
+          enum: [ok, starting, degraded, error, disabled]
+        healthy:
+          type: boolean
+        ready:
+          type: boolean
+        service:
+          type: string
+          example: "rush-mog-ros-health"
+        version:
+          type: string
+          example: "0.2.0"
+        uptime_sec:
+          type: number
+        timestamp:
+          type: string
+          format: date-time
+        reason:
+          type: string
+        summary:
+          $ref: '#/components/schemas/RosHealthSummary'
+        emergency_stop:
+          type: boolean
+        safety:
+          $ref: '#/components/schemas/RosHealthSafety'
+        ros:
+          $ref: '#/components/schemas/RosHealthRuntime'
+        http:
+          $ref: '#/components/schemas/RosHealthHttp'
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/RosDeviceHealth'
+        request_id:
+          type: string
+
+    RosHealthLive:
+      type: object
+      required: [ok, status, service, version, request_id]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        status:
+          type: string
+          enum: [ok]
+        service:
+          type: string
+        version:
+          type: string
+        uptime_sec:
+          type: number
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+          nullable: true
+        request_id:
+          type: string
+
+    RosHealthReady:
+      type: object
+      required: [ok, status, reason, request_id]
+      properties:
+        ok:
+          type: boolean
+        status:
+          type: string
+          enum: [ready, not_ready]
+        reason:
+          type: string
+        status_detail:
+          type: string
+          description: 整体健康状态 ok/starting/degraded/error/disabled
+        request_id:
+          type: string
+
+    RosHealthDeviceEnvelope:
+      type: object
+      required: [ok, status, device, request_id]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        status:
+          type: string
+          description: 整体状态（不是单设备状态）
+        device:
+          $ref: '#/components/schemas/RosDeviceHealth'
         request_id:
           type: string
 

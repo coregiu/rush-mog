@@ -1,6 +1,7 @@
-# center_server（ROS2：VLA + SLAM + 导航 + 目标搜索）
+# center_server（ROS2：VLA + SLAM + 导航 + 目标搜索 + 健康检查）
 
 设计文档：[`DESIGN.md`](DESIGN.md)。
+健康检查接口契约：[`HEALTHCHECK.md`](HEALTHCHECK.md)。
 硬件方案与缺口分析：[`hardware/SLAM_NAV.md`](../../hardware/SLAM_NAV.md)。
 
 本包在 v1 的 VLA 推理/安全/反向操作之上，补齐：
@@ -10,14 +11,16 @@
 - **自主导航**：Nav2 或内置直航，目标校验、停滞检测、超时/急停；
 - **目标搜索**：颜色/YOLO 检测、激光测距、map 投影、前沿探索、确认、接近；
 - **速度仲裁**：VLA/Nav2/反向/安全统一到唯一 `/cmd_vel`；
-- **底盘桥**：Pi ↔ STM32 二进制串口协议、里程计、电池、IMU 转发。
+- **底盘桥**：Pi ↔ STM32 二进制串口协议、里程计、电池、IMU 转发；
+- **健康检查**：ROS 节点/话题 + 相机/雷达/IMU/麦克风/音箱/机械臂等设备，
+  HTTP 供 `edge_center` 调用，另有 ROS 话题/服务。
 
 验证状态（ROS2 Humble，本仓库）：
 
 | 项目 | 结果 |
 |---|---|
 | `colcon build --packages-select custom_msgs center_server` | 通过 |
-| `pytest tests -q` | 35 passed |
+| `pytest tests -q` | 59 passed |
 | `tests/end_to_end_check.py` | 7/7 passed |
 | `tests/slam_nav_check.py` + `fake_slam_robot.py` | 6/6 passed |
 
@@ -74,7 +77,7 @@ ros2 launch center_server center_server.launch.py
 ros2 launch center_server center_server.launch.py config_file:=/path/to/config.yaml
 ```
 
-启动 14 个节点（可选节点按 launch 参数裁剪）：
+启动 15 个节点（可选节点按 launch 参数裁剪）：
 
 ```bash
 # 只跑核心 VLA 链路
@@ -140,6 +143,7 @@ ros2 run robot_localization ekf_node --ros-args \
 | `object_search_node` | `/center/explore`、`/center/search_object` |
 | `base_bridge_node` | Pi ↔ STM32 串口、`/odom`、`/imu/data`、`/battery_state` |
 | `imu_node` | Pi I2C 直连 ICM-20948 → `/imu/data` |
+| `health_monitor_node` | 节点/设备健康、`/center/health`、`/center/healthcheck`、HTTP `:8090` |
 
 ---
 
@@ -155,7 +159,10 @@ ros2 run robot_localization ekf_node --ros-args \
 | `/odom`、`/robot/odometry` | `nav_msgs/Odometry` | 订阅 |
 | `/imu/data` | `sensor_msgs/Imu` | 订阅 |
 | `/joint_states` | `sensor_msgs/JointState` | 订阅 |
+| `/arm/joint_states` | `sensor_msgs/JointState` | 订阅（健康检查，待接入） |
+| `/body/audio_status` | `std_msgs/String` | 订阅（健康检查，待接入） |
 | `/battery_state` | `sensor_msgs/BatteryState` | 订阅 |
+| `/base/status` | `std_msgs/String` | 发布/订阅（STM32 遥测 JSON） |
 | `/map` | `nav_msgs/OccupancyGrid` | 订阅/发布 |
 | `/amcl_pose` | `geometry_msgs/PoseWithCovarianceStamped` | 订阅 |
 | `/center/synced_data` | `custom_msgs/SyncedSensorData` | 发布 |
@@ -173,6 +180,7 @@ ros2 run robot_localization ekf_node --ros-args \
 | `/center/target_detections` | `custom_msgs/TargetList` | 发布 |
 | `/center/search_status` | `custom_msgs/SearchStatus` | 发布 |
 | `/center/velocity_status` | `custom_msgs/VelocityMuxStatus` | 发布 |
+| `/center/health` | `custom_msgs/HealthStatus` | 发布（1 Hz，TRANSIENT_LOCAL） |
 | `/cmd_vel` | `geometry_msgs/Twist` | 发布（唯一最终出口） |
 | `/cmd_vel_raw` | `geometry_msgs/Twist` | 发布（VLA） |
 | `/nav/cmd_vel` | `geometry_msgs/Twist` | 发布（导航） |
@@ -190,6 +198,7 @@ ros2 run robot_localization ekf_node --ros-args \
 | `/center/emergency_stop` | `custom_msgs/EmergencyStop` | 急停/解除 |
 | `/center/map_control` | `custom_msgs/MapControl` | `start`/`stop`/`save`/`load`/`reset` |
 | `/center/set_initial_pose` | `custom_msgs/SetInitialPose` | 设置 AMCL 初始位姿 |
+| `/center/healthcheck` | `custom_msgs/HealthCheck` | 全部/指定设备健康快照 |
 
 ### 5.3 Action
 
@@ -225,6 +234,38 @@ ros2 action send_goal /center/search_object custom_msgs/action/SearchObject \
   "{task_id: s1, target_label: cup, max_duration: 120.0}" --feedback
 ```
 
+### 5.4 健康检查（供 edge_center）
+
+详细契约、字段语义和接入示例见 [`HEALTHCHECK.md`](HEALTHCHECK.md)。主接口：
+
+```bash
+# 详细健康（HTTP 200 只代表数据可读；机器健康看 body.status/healthy/ready）
+curl -s http://127.0.0.1:8090/ros/health | python3 -m json.tool
+
+# 存活/就绪探针
+curl -s http://127.0.0.1:8090/ros/healthz
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8090/ros/readyz
+
+# 单设备 / 不返回 metrics
+curl -s http://127.0.0.1:8090/ros/health/devices/lidar | python3 -m json.tool
+curl -s 'http://127.0.0.1:8090/ros/health?include_metrics=false' | python3 -m json.tool
+```
+
+ROS 原生接口：
+
+```bash
+ros2 topic echo /center/health --once
+ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
+  "{device_ids: [camera, lidar], include_metrics: false}"
+```
+
+- 默认只监听 `127.0.0.1:8090`；跨机调用改 `health.http.host: 0.0.0.0` 并设置 `health.http.api_key`。
+- 设备清单在 `health.devices` 配置：camera/lidar/imu/microphone/speaker/arm/base/battery/odom。
+- 音箱 `/body/audio_status`、机械臂 `/arm/joint_states` 当前无反馈时显示 `unknown`，不伪造 `ok`；
+  接入后无需改代码。
+- 整体状态：`ok` / `starting` / `degraded` / `error` / `disabled`；
+  `ready=true` 表示可接新任务（`ok`/`degraded` 且未急停）。
+
 ---
 
 ## 6. 配置
@@ -234,7 +275,7 @@ ros2 action send_goal /center/search_object custom_msgs/action/SearchObject \
 | 文件 | 用途 |
 |---|---|
 | `config.yaml` | 仿真/桌面默认；`/edge/*` 话题；`perception.enabled=false`；`base.enabled=false` |
-| `robot.yaml` | 实车；`/scan`、`/camera/image_raw`、`base.enabled=true` |
+| `robot.yaml` | 实车；`/scan`、`/camera/image_raw`、`base.enabled=true`；完整健康设备清单 |
 | `ekf.yaml` | `robot_localization` |
 | `slam_toolbox.yaml` | `slam_toolbox` |
 | `nav2_params.yaml` | Nav2 Humble 起步配置 |
@@ -249,6 +290,9 @@ ros2 action send_goal /center/search_object custom_msgs/action/SearchObject \
 - `search.standoff_distance` / `confirm_hits` / `explore_coverage`
 - `velocity_mux.priorities`
 - `task_manager.execution_hold_sec`
+- `health.publish_rate` / `startup_grace_sec` / `strict_unknown`
+- `health.http.host` / `port` / `api_key`
+- `health.devices.<id>` 的 `topic` / `message_type` / `expected_rate_hz` / `timeout_sec` / `required`
 
 ---
 
@@ -270,7 +314,14 @@ ros2 action send_goal /center/search_object custom_msgs/action/SearchObject \
 ```bash
 cd software/ros
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 35 passed
+# 59 passed
+```
+
+单独跑健康检查（不依赖 ROS 图）：
+
+```bash
+PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests/test_health_monitor.py tests/test_health_http.py -q
+# 24 passed
 ```
 
 ### 7.2 VLA/安全端到端
@@ -335,7 +386,11 @@ ros2 topic echo /center/frontiers --once
 ros2 topic echo /center/localization_status
 ros2 topic echo /center/nav_status
 ros2 topic echo /center/target_detections
+ros2 topic echo /center/health --once
 ros2 topic echo /cmd_vel
+curl -s http://127.0.0.1:8090/ros/health | python3 -m json.tool
+curl -s http://127.0.0.1:8090/ros/health/devices/camera | python3 -m json.tool
+ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck "{}"
 ros2 service call /center/map_control custom_msgs/srv/MapControl "{command: save, map_name: test}"
 ros2 service call /center/emergency_stop custom_msgs/srv/EmergencyStop "{trigger: true}"
 ```
@@ -353,6 +408,8 @@ ros2 service call /center/emergency_stop custom_msgs/srv/EmergencyStop "{trigger
 7. **定位**：AMCL/map_server，设置初始位姿。
 8. **导航/搜索**：Nav2 或直航；目标检测/搜索。
 9. **安全**：硬件急停、INA226、悬崖/碰撞、看门狗。
+10. **健康检查**：`robot_bringup.launch.py` 已启动 `health_monitor_node`；确认
+    `curl http://127.0.0.1:8090/ros/health` 返回 `status=ok`，并让 `edge_center` 接入。
 
 硬件选型、接线、引脚冲突、标定与验收见 [`hardware/SLAM_NAV.md`](../../hardware/SLAM_NAV.md)。
 
@@ -368,6 +425,8 @@ ros2 service call /center/emergency_stop custom_msgs/srv/EmergencyStop "{trigger
 6. **单地图/单楼层**：未实现多地图切换/电梯/多层。
 7. **动态目标**：搜索假设目标基本静止；移动目标需预测/重规划。
 8. **颜色检测仅演示**：真实场景建议 YOLO/深度相机/Orin Nano。
+9. **健康反馈缺口**：音箱 `/body/audio_status`、机械臂 `/arm/joint_states` 尚未发布，
+   健康接口显示 `unknown`；接入后自动变为 `ok`/`degraded`/`error`。
 
 ---
 
@@ -377,13 +436,15 @@ ros2 service call /center/emergency_stop custom_msgs/srv/EmergencyStop "{trigger
 ros/
 ├── center_server/
 │   ├── config/          # config.yaml / robot.yaml / ekf.yaml / slam_toolbox.yaml / nav2_params.yaml
-│   ├── core/            # 纯算法，可单测
+│   ├── core/            # 纯算法，可单测（含 health_monitor.py）
 │   ├── drivers/         # ICM-20948
+│   ├── http_health.py   # 健康检查 HTTP 网关（stdlib）
 │   └── utils/
-├── ros_nodes/           # 14 个 ROS2 节点
+├── ros_nodes/           # 15 个 ROS2 节点（含 health_monitor_node）
 ├── launch/              # center_server / robot_bringup / slam_stack / nav2_stack
-├── tests/               # 单元 + 仿真 + 联调
+├── tests/               # 单元 + 仿真 + 联调（含 test_health_*.py）
 ├── DESIGN.md
+├── HEALTHCHECK.md       # 健康检查接口契约（HTTP + ROS）
 ├── README.md
 ├── package.xml
 └── setup.py

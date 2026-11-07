@@ -1,5 +1,5 @@
 # 1 整体软件架构
-> 统一接口文档（OpenAPI 3.0 / Swagger）：[api.yaml](api.yaml)，按 Edge Server、Center Server、Body Control (UART) 分组。
+> 统一接口文档（OpenAPI 3.0 / Swagger）：[api.yaml](api.yaml)，按 Edge Server、Center Server、ROS Health Gateway、Body Control (UART) 分组。
 RushMog智能系统包括语音控制系统，车体控制系统，视觉分析系统，远程控制中心系统、激光雷达系统、VLA推理系统、机械臂系统、SLAM/导航/目标搜索系统等核心子系统。
 - 语音控制系统，识别语音，将语音转换成执行指令，并将指令传给主控制系统，进行控制执行。(原计划采用asr-pro车载控制，但小车电机噪音较大，效果不好。改用终端控制。)
 - 车体控制系统，STM32单板控制，接收语音指令、PS2手柄指令对小车行进、声音、机械臂进行控制执行。
@@ -8,6 +8,7 @@ RushMog智能系统包括语音控制系统，车体控制系统，视觉分析�
 - VLA推理系统。由 `software/center_server` 的 SmolVLA HTTP 服务执行真实策略推理；机载 ROS 负责采集、安全门控与执行，规则桩保留为降级路径。
 - 机械臂系统。PCA9685 驱动，`/arm/trajectory` 接口；抓取/放置轨迹待 IK 接入。
 - SLAM/导航/目标搜索系统。由 `software/ros` 的 center_server v2 实现：建图、定位健康度、Nav2/直航、目标检测、前沿探索、目标确认与接近。
+- 健康检查系统。由 `software/ros` 的 `health_monitor_node` 实现：ROS 节点/话题 + 相机/雷达/IMU/麦克风/音箱/机械臂/底盘/电池等设备健康，HTTP 供 `edge_center` 调用。
 
 ![](architechture.png)
 
@@ -71,7 +72,7 @@ RushMog智能系统包括语音控制系统，车体控制系统，视觉分析�
 - 4 形成控制指令传给主控制系统
 
 ## 3.4 中心推理子系统
-- 机载 ROS 包（SLAM/导航/搜索/安全）：[ros/README.md](ros/README.md)、[详细设计](ros/DESIGN.md)
+- 机载 ROS 包（SLAM/导航/搜索/安全/健康检查）：[ros/README.md](ros/README.md)、[详细设计](ros/DESIGN.md)、[健康检查契约](ros/HEALTHCHECK.md)
 - 中心 SmolVLA HTTP 推理服务：[center_server/README.md](center_server/README.md)、[服务设计](center_server/DESIGN.md)
 
 中心推理子系统功能：
@@ -81,9 +82,10 @@ RushMog智能系统包括语音控制系统，车体控制系统，视觉分析�
 - 4 目标检测、前沿探索、目标确认与接近
 - 5 多源速度仲裁、安全门控、反向操作
 - 6 中心服务与机载 ROS 通过 HTTP 解耦，可分别部署和降级
+- 7 节点/设备健康检查，HTTP `:8090/ros/health` 供 `edge_center` 调用
 
-验证：ROS 包 35 项单元测试、7/7 VLA/安全端到端、6/6 SLAM/导航/搜索联调；
-`center_server` 服务 36 项单元/HTTP 测试（不依赖 GPU）。
+验证：ROS 包 59 项单元测试（含 24 项健康检查）、7/7 VLA/安全端到端、
+6/6 SLAM/导航/搜索联调；`center_server` 服务 36 项单元/HTTP 测试（不依赖 GPU）。
 
 
 # 4 使用的相关工具软件：

@@ -40,6 +40,7 @@ Rush Mog是一款致敬Unimog的VLA控制的智能万向轮小车。基于树莓
 | **车辆控制接口** | uart | Edge Server | BodyControl | 小车运动命令执行；小车速度、里程状态获取。 |
 | **Center Server 接口** | http | ROS | Center Server | 提供 VLA 推理执行。 |
 | **ROS 执行接口** | http | Terminal | ROS | ROS 指令接收与执行；传感器信息获取。 |
+| **ROS 健康检查接口** | http | edge_center | ROS | 监控 ROS 节点及全部连接设备（相机、雷达、IMU、麦克风、音箱、机械臂、底盘、电池），见 [HEALTHCHECK.md](software/ros/HEALTHCHECK.md)。 |
 
 #### 硬件架构设计
 - DIY小车，使用97mm万向轮加JGB37-520电机（带霍尔编码器），L298N驱动板(四驱的，或者用两个两驱的)。导航目标建议换四路独立 PWM 驱动（TB6612/DRV8871/BTS7960）。
@@ -57,6 +58,7 @@ Rush Mog是一款致敬Unimog的VLA控制的智能万向轮小车。基于树莓
 - 车体控制子系统，由STM32单板承载，驱动小车电机、机械臂、外放，接机载计算机/桥接命令进行执行。
 - 机载 Linux 子系统运行 ROS2 驱动、`base_bridge_node`、ICM-20948、EKF、slam_toolbox、Nav2、目标检测和目标搜索。
 - `software/ros` 的 center_server v2 增加 SLAM 地图管理、定位健康度门控、自主导航、目标检测/搜索/接近、速度仲裁和 STM32 串口桥。详见 [ROS 包设计](software/ros/DESIGN.md)。
+- `health_monitor_node` 通过 HTTP（`:8090/ros/health`）向 `edge_center` 提供 ROS 节点与全部设备健康，同时保留 ROS 话题/服务；见 [健康检查契约](software/ros/HEALTHCHECK.md)。
 - 独立部署的 [Center Server SmolVLA 推理服务](software/center_server/README.md) 通过 HTTP 为 ROS 提供 VLA 推理；接口见 [服务设计](software/center_server/DESIGN.md)。
 
 ![](software/architechture.png)
