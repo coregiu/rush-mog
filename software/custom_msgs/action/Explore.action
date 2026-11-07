@@ -1,0 +1,15 @@
+# Goal
+string mission_id
+float64 max_duration
+float64 target_coverage
+---
+# Result
+bool success
+string info
+float64 coverage
+float64 elapsed_sec
+---
+# Feedback
+string state
+float64 coverage
+string detail

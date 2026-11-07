@@ -1,0 +1,20 @@
+# Goal
+geometry_msgs/PoseStamped target_pose
+float64 tolerance_xy
+float64 tolerance_yaw
+float64 timeout_sec
+string goal_id
+bool avoid_obstacles
+---
+# Result
+bool success
+string info
+geometry_msgs/PoseStamped final_pose
+float64 elapsed_sec
+---
+# Feedback
+string state
+float64 distance_remaining
+float64 eta_sec
+geometry_msgs/PoseStamped current_pose
+string detail

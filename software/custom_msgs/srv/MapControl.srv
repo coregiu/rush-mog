@@ -1,0 +1,8 @@
+# 建图/定位控制。command: start / stop / save / load / reset
+string command
+string map_name
+bool reset_pose
+---
+bool success
+string msg
+string map_file
