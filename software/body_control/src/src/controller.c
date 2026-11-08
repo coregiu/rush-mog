@@ -10,6 +10,7 @@
 
 #include <controller.h>
 #include "task_manager.h"
+#include "encoder_sensor.h"
 // the map of command to module
 const char command_module_map[COMMANDS_LENGTH][2] = {{COMMAND_STOP,          MODULE_MOTOR_DIRECT},
                                                       {COMMAND_RUN,          MODULE_MOTOR_DIRECT},
@@ -59,6 +60,7 @@ void init_modules()
     motor_direct_executor.init();
 
     init_freertos();
+    encoder_sensor_init();
 
     motor_pwm_executor.init();
     arm_roboot_executor.init();

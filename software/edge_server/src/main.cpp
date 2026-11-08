@@ -31,11 +31,12 @@ static bool initWiFi()
   return true;
 }
 
-// 控制任务：负责给 STM32 做运动保活；HTTP 控制命令在 80 端口处理
+// 控制任务：负责 STM32 遥测接收和运动保活；HTTP 控制命令在 80 端口处理
 static void controlTask(void* arg)
 {
   (void)arg;
   for (;;) {
+    serviceSTM32Telemetry();
     serviceMotionKeepalive();
     vTaskDelay(pdMS_TO_TICKS(2));
   }
@@ -66,6 +67,7 @@ void setup()
   server.on("/api/modules/edge/health", HTTP_GET, handleApiRequest);
   server.on("/api/modules/edge/params", HTTP_GET, handleApiRequest);
   server.on("/api/modules/edge/params", HTTP_POST, handleApiRequest);
+  server.on("/api/body", HTTP_GET, handleApiRequest);
 
   // 兼容旧页面：旧版本从 80 端口请求 /stream，重定向到独立视频端口
   server.on("/stream", []() {

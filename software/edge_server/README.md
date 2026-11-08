@@ -7,7 +7,7 @@
 - **YOLO物体识别**: 支持实时物体检测，自动框选并标注物体名称和置信度
 - **语音控制**: 支持语音识别，通过语音命令控制小车
 - **手柄控制**: 完整的PS2风格虚拟手柄控制
-- **数字孪生监控**: `dashboard.html` 展示 EDGE / ROS / CENTER 模块状态、设备矩阵和参数配置
+- **数字孪生监控**: `dashboard.html` 展示 EDGE / ROS / CENTER 模块状态、设备矩阵、BODY CONTROL 电机/速度/里程和参数配置
 
 ## 端口说明
 - `80`：网页、静态文件、`/sdcard/*`、`/cmd`（控制）、`/stop`、`/status`、`/api/modules*`（监控/配置）
@@ -42,7 +42,8 @@ curl -X POST --data 'button:stop:down' http://192.168.4.1/cmd
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | POST | `/api/modules/report` | ROS / CENTER 上报模块、状态、精简参数（表单） |
-| GET | `/api/modules` | 模块注册表 + Edge 自身状态/参数 |
+| GET | `/api/modules` | 模块注册表 + Edge 自身状态/参数（含 `edge.body` 编码器遥测） |
+| GET | `/api/body` | STM32 编码器遥测快照（四轮 mm/s、总里程 mm、年龄/新鲜度） |
 | GET | `/api/modules/{id}` | 单个模块缓存 |
 | GET | `/api/modules/{id}/health` | 代理模块健康接口（如 ROS `/ros/health`） |
 | GET | `/api/modules/{id}/params` | 代理/本地参数描述 |

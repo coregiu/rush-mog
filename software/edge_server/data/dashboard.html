@@ -33,7 +33,7 @@
       <button id="refresh-btn" class="btn btn-ghost" type="button" title="立即刷新">
         <span class="btn-icon">↻</span> 刷新
       </button>
-      <label class="switch" title="每 5 秒自动刷新">
+      <label class="switch" title="模块 5 秒 / 车身遥测 1 秒自动刷新">
         <input id="auto-refresh" type="checkbox" checked>
         <span class="switch-track"><span class="switch-thumb"></span></span>
         <span class="switch-label">自动</span>
@@ -447,7 +447,7 @@
 
           <div class="speed-foot">
             <span>RANGE 0 – 1.4 m/s</span>
-            <span>ODOM <b id="body-odom-rate">--</b></span>
+            <span><b id="body-rate-label">ODOM</b> <b id="body-odom-rate">--</b></span>
           </div>
         </div>
 
@@ -507,7 +507,7 @@
   <footer class="footer">
     <span>RUSH-MOG · EDGE DIGITAL TWIN CONSOLE</span>
     <span id="footer-status">DISCONNECTED</span>
-    <span>API: /api/modules · /ros/health · /v1/health</span>
+    <span>API: /api/modules · /api/body · /ros/health · /v1/health</span>
   </footer>
 
   <div id="scrim" class="scrim" hidden></div>

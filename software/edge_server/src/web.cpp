@@ -550,9 +550,41 @@ static String edgeSummary() {
   return summary;
 }
 
+// STM32 编码器遥测。valid=true 表示收到过帧，stale=true 表示超过 2s 没更新。
+static String bodyTelemetryJson() {
+  BodyTelemetry telemetry;
+  bool valid = getSTM32Telemetry(&telemetry);
+  unsigned long ageMs = valid ? (unsigned long)(millis() - telemetry.receivedMs) : 0;
+  bool stale = !valid || ageMs > 2000;
+
+  String json;
+  json.reserve(240);
+  json += "{";
+  json += "\"valid\":";
+  json += valid ? "true" : "false";
+  json += ",\"stale\":";
+  json += stale ? "true" : "false";
+  json += ",\"source\":\"stm32\"";
+  json += ",\"rate_hz\":10";
+  json += ",\"seq\":" + String((unsigned long)telemetry.seq);
+  json += ",\"uptime_ms\":" + String((unsigned long)telemetry.uptimeMs);
+  json += ",\"age_ms\":";
+  json += valid ? String(ageMs) : String(-1L);
+  json += ",\"wheel_mm_s\":[";
+  for (int i = 0; i < 4; ++i) {
+    if (i > 0) {
+      json += ",";
+    }
+    json += String((long)telemetry.wheelMmS[i]);
+  }
+  json += "],\"distance_mm\":" + String((long)telemetry.distanceMm);
+  json += "}";
+  return json;
+}
+
 static String edgeModuleJson() {
   String json;
-  json.reserve(900);
+  json.reserve(1200);
   json += "{";
   json += "\"id\":\"edge\",\"name\":\"Edge Server\",\"version\":\"0.2.0\",";
   json += "\"ip\":" + jsonQuote(WiFi.softAPIP().toString()) + ",";
@@ -563,6 +595,7 @@ static String edgeModuleJson() {
   json += "\"updated_ms\":" + String((unsigned long)millis()) + ",";
   json += "\"age_ms\":0,\"stale\":false,";
   json += "\"params\":" + edgeParamsObjectJson();
+  json += ",\"body\":" + bodyTelemetryJson();
   json += "}";
   return json;
 }
@@ -904,6 +937,18 @@ void handleApiRequest() {
       return;
     }
     server.send(200, "application/json", edgeModuleJson());
+    return;
+  }
+
+  if (uri == "/api/body") {
+    if (method != HTTP_GET) {
+      sendApiError(405, "method_not_allowed", "只支持 GET");
+      return;
+    }
+    String json = "{\"ok\":true,\"body\":";
+    json += bodyTelemetryJson();
+    json += "}";
+    server.send(200, "application/json", json);
     return;
   }
 

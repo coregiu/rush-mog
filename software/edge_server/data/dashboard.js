@@ -13,6 +13,7 @@ const API = {
   edge: '/api/modules/edge',
   edgeHealth: '/api/modules/edge/health',
   edgeParams: '/api/modules/edge/params',
+  body: '/api/body',
   module: (id) => `/api/modules/${encodeURIComponent(id)}`,
   health: (id) => `/api/modules/${encodeURIComponent(id)}/health`,
   params: (id) => `/api/modules/${encodeURIComponent(id)}/params`,
@@ -78,11 +79,16 @@ const state = {
   polling: false,
   pollTimer: null,
   clockTimer: null,
+  bodyPolling: false,
+  bodyPollTimer: null,
+  bodyFailures: 0,
+  bodyTelemetry: null,
   body: {
     lastOdom: null,
     sessionDistance: 0,
     history: [],
     historySync: 0,
+    historyKey: '',
     latest: null,
   },
 };
@@ -349,6 +355,18 @@ function mecanumWheelSpeeds(vx, vy, wz) {
   return [vx - vy - k, vx + vy + k, vx + vy - k, vx - vy + k];
 }
 
+function mecanumTwistFromWheels(speeds) {
+  const fl = speeds[0];
+  const fr = speeds[1];
+  const rl = speeds[2];
+  const rr = speeds[3];
+  return {
+    vx: (fl + fr + rl + rr) / 4,
+    vy: (-fl + fr + rl - rr) / 4,
+    wz: (-fl + fr - rl + rr) / (4 * BODY_LIMITS.rotationRadius),
+  };
+}
+
 function bodyMotionLabel(data) {
   if (!data.hasOdom || data.speed === null) return '待上报';
   const vx = data.vx == null ? 0 : data.vx;
@@ -375,6 +393,29 @@ function collectBodyTelemetry(now = Date.now()) {
   const om = (odom && odom.metrics) || {};
   const bm = (base && base.metrics) || {};
   const bat = (battery && battery.metrics) || {};
+
+  // ESP32 缓存了 STM32 编码器遥测；优先用较新的那份（1s 快速轮询或完整轮询）。
+  const fastBody = state.bodyTelemetry;
+  const edgeBody = state.edge && state.edge.body ? state.edge.body : null;
+  let espBody = fastBody;
+  if (edgeBody) {
+    const fastAge = fastBody ? numberOrNull(fastBody.age_ms) : null;
+    const edgeAge = numberOrNull(edgeBody.age_ms);
+    if (!fastBody || (edgeAge !== null && (fastAge === null || edgeAge < fastAge))) {
+      espBody = edgeBody;
+    }
+  }
+  const bodyWheels = espBody && Array.isArray(espBody.wheel_mm_s) ? espBody.wheel_mm_s : null;
+  const bodyLive = Boolean(
+    espBody
+    && espBody.valid === true
+    && espBody.stale !== true
+    && bodyWheels
+    && bodyWheels.length >= 4
+    && bodyWheels.slice(0, 4).every((value) => numberOrNull(value) !== null)
+  );
+  const bodyWheelSpeeds = bodyLive ? bodyWheels.slice(0, 4).map((value) => Number(value) / 1000) : null;
+  const bodyDistanceMm = espBody ? numberOrNull(espBody.distance_mm) : null;
 
   const x = numberOrNull(om.x);
   const y = numberOrNull(om.y);
@@ -427,19 +468,37 @@ function collectBodyTelemetry(now = Date.now()) {
     twistSource = 'derived';
   }
 
+  if (bodyLive) {
+    const bodyTwist = mecanumTwistFromWheels(bodyWheelSpeeds);
+    vx = bodyTwist.vx;
+    vy = bodyTwist.vy;
+    wz = bodyTwist.wz;
+    speed = Math.hypot(vx, vy);
+    twistSource = 'stm32';
+  }
+
   const telemetryDistance = numberOrNull(om.distance);
-  const distance = telemetryDistance === null ? state.body.sessionDistance : telemetryDistance;
-  const distanceSource = telemetryDistance === null ? 'session' : 'ros';
+  let distance = telemetryDistance === null ? state.body.sessionDistance : telemetryDistance;
+  let distanceSource = telemetryDistance === null ? 'session' : 'ros';
+  if (bodyLive && bodyDistanceMm !== null && bodyDistanceMm >= 0) {
+    distance = bodyDistanceMm / 1000;
+    distanceSource = 'stm32';
+  }
 
   let wheelSpeeds = null;
   let wheelSource = 'none';
-  const baseWheels = Array.isArray(bm.wheel_speeds) ? bm.wheel_speeds : null;
-  if (baseWheels && baseWheels.length >= 4 && baseWheels.slice(0, 4).every((value) => numberOrNull(value) !== null)) {
-    wheelSpeeds = baseWheels.slice(0, 4).map(Number);
-    wheelSource = 'base';
-  } else if (vx !== null && vy !== null && wz !== null) {
-    wheelSpeeds = mecanumWheelSpeeds(vx, vy, wz);
-    wheelSource = 'odom';
+  if (bodyLive) {
+    wheelSpeeds = bodyWheelSpeeds;
+    wheelSource = 'stm32';
+  } else {
+    const baseWheels = Array.isArray(bm.wheel_speeds) ? bm.wheel_speeds : null;
+    if (baseWheels && baseWheels.length >= 4 && baseWheels.slice(0, 4).every((value) => numberOrNull(value) !== null)) {
+      wheelSpeeds = baseWheels.slice(0, 4).map(Number);
+      wheelSource = 'base';
+    } else if (vx !== null && vy !== null && wz !== null) {
+      wheelSpeeds = mecanumWheelSpeeds(vx, vy, wz);
+      wheelSource = 'odom';
+    }
   }
 
   const voltage = numberOrNull(bat.voltage) !== null
@@ -454,12 +513,15 @@ function collectBodyTelemetry(now = Date.now()) {
     ? bm.estop
     : (ros.emergency_stop == null ? null : Boolean(ros.emergency_stop));
 
-  const hasOdom = Boolean(odom && (x !== null || y !== null || speed !== null));
+  const hasOdom = Boolean(bodyLive || (odom && (x !== null || y !== null || speed !== null)));
   return {
     odom,
     base,
     battery,
-    status: odom ? (odom.status || 'unknown') : 'unknown',
+    body: espBody,
+    bodyLive,
+    bodyDistanceMm,
+    status: bodyLive ? 'ok' : (odom ? (odom.status || 'unknown') : 'unknown'),
     hasOdom,
     speed,
     vx,
@@ -471,7 +533,7 @@ function collectBodyTelemetry(now = Date.now()) {
     wheelSpeeds,
     wheelSource,
     yaw,
-    rate: odom ? numberOrNull(odom.rate_hz) : null,
+    rate: bodyLive ? (numberOrNull(espBody.rate_hz) || 10) : (odom ? numberOrNull(odom.rate_hz) : null),
     voltage,
     percent,
     current,
@@ -538,10 +600,11 @@ function renderSpeedSpark(data) {
   const area = $('#speed-spark-area');
   const note = $('#body-hint');
   if (note) {
-    if (!data.hasOdom) note.textContent = '等待 ROS /odom 上报';
+    if (data.bodyLive) note.textContent = '轮速/里程来自 STM32 编码器 · 经 ESP32 上报';
+    else if (!data.hasOdom) note.textContent = '等待 STM32 编码器或 ROS /odom 上报';
     else if (data.wheelSource === 'base') note.textContent = '轮速来自 /base/status · 速度/里程来自 /odom';
     else if (data.twistSource === 'telemetry') note.textContent = '速度/轮速来自 /odom 实时 twist · 里程累计自 ROS';
-    else note.textContent = '速度/里程由 /odom 位姿推算 · 编码器遥测待固件上报';
+    else note.textContent = '速度/里程由 /odom 位姿推算';
   }
   if (!line || !area) return;
   const values = state.body.history;
@@ -577,14 +640,25 @@ function renderBody() {
 
   const source = $('#body-source');
   if (source) {
-    source.textContent = data.hasOdom
-      ? (data.twistSource === 'telemetry' ? 'ODOM 实时' : 'ODOM 推算')
-      : '等待 /odom';
+    if (data.bodyLive) {
+      source.textContent = 'STM32 实时';
+    } else if (data.hasOdom) {
+      source.textContent = data.twistSource === 'telemetry' ? 'ODOM 实时' : 'ODOM 推算';
+    } else {
+      source.textContent = '等待 /odom';
+    }
     source.className = `status-chip status-${data.hasOdom ? data.status : 'unknown'}`;
   }
 
   const time = $('#body-time');
-  if (time) time.textContent = state.lastSync ? fmtTime(new Date(state.lastSync)) : '--:--:--';
+  if (time) {
+    const bodyAge = data.body ? numberOrNull(data.body.age_ms) : null;
+    if (data.bodyLive && bodyAge !== null) {
+      time.textContent = fmtTime(new Date(Date.now() - bodyAge));
+    } else {
+      time.textContent = state.lastSync ? fmtTime(new Date(state.lastSync)) : '--:--:--';
+    }
+  }
 
   const speed = data.hasOdom ? data.speed : null;
   const speedEl = $('#body-speed');
@@ -600,6 +674,8 @@ function renderBody() {
   const needle = $('#body-needle');
   if (needle) needle.setAttribute('transform', `rotate(${(pct * 180).toFixed(1)} 120 112)`);
 
+  const rateLabel = $('#body-rate-label');
+  if (rateLabel) rateLabel.textContent = data.bodyLive ? 'BODY' : 'ODOM';
   const rateEl = $('#body-odom-rate');
   if (rateEl) rateEl.textContent = data.rate === null ? '--' : `${fmtNumber(data.rate)}Hz`;
 
@@ -610,9 +686,15 @@ function renderBody() {
   if (odoUnit) odoUnit.textContent = odo.unit;
   const odoNote = $('#body-odo-note');
   if (odoNote) {
-    odoNote.textContent = !data.hasOdom
-      ? '等待里程计'
-      : (data.distanceSource === 'ros' ? 'ROS 启动后累计' : '本次监控累计');
+    if (!data.hasOdom) {
+      odoNote.textContent = '等待里程计';
+    } else if (data.distanceSource === 'stm32') {
+      odoNote.textContent = 'STM32 编码器累计';
+    } else if (data.distanceSource === 'ros') {
+      odoNote.textContent = 'ROS 启动后累计';
+    } else {
+      odoNote.textContent = '本次监控累计';
+    }
   }
 
   const headingEl = $('#body-heading');
@@ -633,7 +715,10 @@ function renderBody() {
   const currentEl = $('#body-current');
   if (currentEl) currentEl.textContent = data.current === null ? '--' : `${data.current.toFixed(2)}A`;
   const encoderEl = $('#body-encoder');
-  if (encoderEl) encoderEl.textContent = data.encoderOk === null ? '--' : (data.encoderOk ? 'OK' : 'FAULT');
+  if (encoderEl) {
+    if (data.encoderOk !== null) encoderEl.textContent = data.encoderOk ? 'OK' : 'FAULT';
+    else encoderEl.textContent = data.bodyLive ? 'OK' : '--';
+  }
 
   setFlag($('#body-estop'), data.estop === null ? '' : (data.estop ? 'is-on' : 'is-ok'), 'E-STOP');
   setFlag($('#body-imu'), data.imuOk === null ? '' : (data.imuOk ? 'is-ok' : 'is-fault'), 'IMU');
@@ -672,8 +757,11 @@ function renderBody() {
     }
   });
 
-  if (state.lastSync && state.body.historySync !== state.lastSync) {
-    state.body.historySync = state.lastSync;
+  const historyKey = data.bodyLive && data.body
+    ? `b:${data.body.seq}`
+    : (state.lastSync ? `o:${state.lastSync}` : '');
+  if (historyKey && state.body.historyKey !== historyKey) {
+    state.body.historyKey = historyKey;
     if (speed !== null) {
       state.body.history.push(speed);
       if (state.body.history.length > BODY_LIMITS.history) state.body.history.shift();
@@ -1261,22 +1349,55 @@ function toast(message, kind = '') {
   }, 3600);
 }
 
+async function pollBody() {
+  if (state.bodyPolling) return;
+  state.bodyPolling = true;
+  try {
+    const data = await fetchJson(API.body, {}, 2500);
+    if (data && data.body) {
+      state.bodyTelemetry = data.body;
+      state.bodyFailures = 0;
+      renderBody();
+      renderTwin();
+    }
+  } catch (error) {
+    // 旧固件没有 /api/body 时退化为完整轮询里的 edge.body。
+    state.bodyFailures += 1;
+    if (state.bodyTelemetry) {
+      state.bodyTelemetry = { ...state.bodyTelemetry, stale: true };
+    }
+    if (state.bodyFailures >= 3 && state.bodyPollTimer) {
+      clearInterval(state.bodyPollTimer);
+      state.bodyPollTimer = null;
+    }
+  } finally {
+    state.bodyPolling = false;
+  }
+}
+
 function startPolling() {
   stopPolling();
+  state.bodyFailures = 0;
   state.pollTimer = setInterval(() => {
     if (!document.hidden) poll();
   }, 5000);
+  state.bodyPollTimer = setInterval(() => {
+    if (!document.hidden) pollBody();
+  }, 1000);
+  pollBody();
   poll();
 }
 
 function stopPolling() {
   if (state.pollTimer) clearInterval(state.pollTimer);
   state.pollTimer = null;
+  if (state.bodyPollTimer) clearInterval(state.bodyPollTimer);
+  state.bodyPollTimer = null;
 }
 
 function bindEvents() {
   const refresh = $('#refresh-btn');
-  if (refresh) refresh.addEventListener('click', () => poll());
+  if (refresh) refresh.addEventListener('click', () => { pollBody(); poll(); });
 
   const auto = $('#auto-refresh');
   if (auto) {
@@ -1314,10 +1435,10 @@ function bindEvents() {
   });
 
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) poll();
+    if (!document.hidden) { pollBody(); poll(); }
   });
 
-  window.addEventListener('online', () => poll());
+  window.addEventListener('online', () => { pollBody(); poll(); });
 }
 
 function init() {

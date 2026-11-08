@@ -6,6 +6,7 @@
 #    src/stm32f10x_it.c
 #)
 aux_source_directory(src sources)
+# 新增 encoder_sensor.c 后需要重新跑 cmake；修改本文件可让已有 build 目录自动 reconfigure。
 aux_source_directory(src/driver sources)
 aux_source_directory(src/protocol sources)
 

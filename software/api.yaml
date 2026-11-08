@@ -330,9 +330,11 @@ x-body-control-uart:
     supported: false
     response: "无"
     note: |
-      STM32 不在 USART3 上返回 ACK/状态/遥测，uart_log 输出也被关闭。
-      命令是否生效只能通过车体动作、Edge /status（仅 ESP32 状态）或后续
-      ROS 底盘反馈确认。
+      STM32 不返回命令 ACK，uart_log 输出已关闭。
+      USART3 上会周期发送编码器遥测（STM32 -> ESP32）：
+      $B,<seq>,<uptime_ms>,<fl>,<fr>,<rl>,<rr>,<distance_mm>\n
+      轮速单位 mm/s，里程单位 mm；ESP32 解析后通过 GET /api/body
+      和 GET /api/modules 的 edge.body 暴露。
   second_byte:
     motion_direct: "0-9/A/B/C/D 命令可带 1 位 PWM：0=停，1..9 对应约 11%..100% 占空比。"
     audio_play: "P 命令可带 1 位曲目索引 1..9；不带则播放 V8_STOP（索引 1）。"
