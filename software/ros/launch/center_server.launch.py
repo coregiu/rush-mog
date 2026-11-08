@@ -10,7 +10,7 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -36,6 +36,7 @@ def generate_launch_description():
     start_perception = LaunchConfiguration("start_perception")
     start_search = LaunchConfiguration("start_object_search")
     start_base = LaunchConfiguration("start_base_bridge")
+    base_transport = LaunchConfiguration("base_transport")
     start_imu = LaunchConfiguration("start_imu")
 
     params = [
@@ -95,7 +96,24 @@ def generate_launch_description():
             executable="base_bridge_node",
             output="screen",
             parameters=params,
-            condition=IfCondition(start_base),
+            condition=IfCondition(
+                PythonExpression([
+                    "'", start_base, "' == 'true' and '",
+                    base_transport, "' == 'serial'"
+                ])
+            ),
+        ),
+        Node(
+            package="center_server",
+            executable="esp32_bridge_node",
+            output="screen",
+            parameters=params,
+            condition=IfCondition(
+                PythonExpression([
+                    "'", start_base, "' == 'true' and '",
+                    base_transport, "' in ('esp32', 'esp32_http')"
+                ])
+            ),
         ),
         Node(
             package="center_server",
@@ -149,7 +167,12 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "start_base_bridge",
                 default_value="false",
-                description="Start STM32 serial bridge (real robot)",
+                description="Start base bridge (real robot)",
+            ),
+            DeclareLaunchArgument(
+                "base_transport",
+                default_value="serial",
+                description="serial = STM32 direct UART; esp32 = STM32 via ESP32 HTTP",
             ),
             DeclareLaunchArgument(
                 "start_imu",

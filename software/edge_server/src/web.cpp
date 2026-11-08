@@ -49,6 +49,11 @@ static ModuleRecord moduleRecords[EDGE_API_MAX_MODULES];
 static SemaphoreHandle_t motionMutex = nullptr;
 static String activeMotionCommand;
 static bool motionActive = false;
+// ROS 的 raw: 命令需要保留第二字节（PWM 档位），并带 1s 租约：
+// ROS 进程异常退出后不再续租，ESP32 自动停车。
+static bool motionPreserveSecondByte = false;
+static uint32_t rawMotionLastMs = 0;
+#define RAW_MOTION_TIMEOUT_MS 1000
 
 void initWebControl() {
   if (motionMutex == nullptr) {
@@ -69,6 +74,25 @@ static bool isSustainedMotionCommand(const String& cmd) {
   return false;
 }
 
+static bool isValidRawMotionCommand(const String& cmd) {
+  if (cmd.length() < 1 || cmd.length() > 2) {
+    return false;
+  }
+  char c = cmd[0];
+  bool base_ok = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'C');
+  if (!base_ok) {
+    return false;
+  }
+  if (cmd.length() == 2) {
+    if (c == '0') {
+      return false;
+    }
+    char level = cmd[1];
+    return level >= '0' && level <= '9';
+  }
+  return true;
+}
+
 static void updateMotionState(const String& cmd) {
   if (motionMutex == nullptr ||
       xSemaphoreTake(motionMutex, portMAX_DELAY) != pdTRUE) {
@@ -79,10 +103,36 @@ static void updateMotionState(const String& cmd) {
     // 停止 / 复位 / 测试模式：清掉持续运动
     motionActive = false;
     activeMotionCommand = "";
+    motionPreserveSecondByte = false;
+    rawMotionLastMs = 0;
   } else if (isSustainedMotionCommand(cmd)) {
     // 按下后一直保持，直到收到松开/停止命令
     motionActive = true;
     activeMotionCommand = cmd;
+    motionPreserveSecondByte = false;
+    rawMotionLastMs = 0;
+  }
+
+  xSemaphoreGive(motionMutex);
+}
+
+// ROS 专用：命令已通过 isValidRawMotionCommand 校验，保留第二字节并续租。
+static void updateMotionStateRaw(const String& cmd) {
+  if (motionMutex == nullptr ||
+      xSemaphoreTake(motionMutex, portMAX_DELAY) != pdTRUE) {
+    return;
+  }
+
+  if (cmd == "0") {
+    motionActive = false;
+    activeMotionCommand = "";
+    motionPreserveSecondByte = false;
+    rawMotionLastMs = 0;
+  } else if (isValidRawMotionCommand(cmd)) {
+    motionActive = true;
+    activeMotionCommand = cmd;
+    motionPreserveSecondByte = (cmd.length() == 2);
+    rawMotionLastMs = millis();
   }
 
   xSemaphoreGive(motionMutex);
@@ -95,6 +145,8 @@ static void clearMotionState() {
   }
   motionActive = false;
   activeMotionCommand = "";
+  motionPreserveSecondByte = false;
+  rawMotionLastMs = 0;
   xSemaphoreGive(motionMutex);
 }
 
@@ -128,16 +180,28 @@ void serviceMotionKeepalive() {
   }
 
   String cmd;
+  bool preserveSecondByte = false;
   if (motionActive) {
     cmd = activeMotionCommand;
+    preserveSecondByte = motionPreserveSecondByte;
+    // raw: 命令是 1s 租约；ROS 停止续租后自动停车（比 STM32 800ms 看门狗更保守）。
+    if (preserveSecondByte &&
+        (millis() - rawMotionLastMs) > RAW_MOTION_TIMEOUT_MS) {
+      motionActive = false;
+      activeMotionCommand = "";
+      motionPreserveSecondByte = false;
+      rawMotionLastMs = 0;
+      preserveSecondByte = false;
+      cmd = "0";
+    }
   }
 
   xSemaphoreGive(motionMutex);
 
   if (!cmd.isEmpty()) {
-    // 摇杆命令形如 "15"（方向1 + 速度5）。保活只重发方向，避免把用户
-    // 后来按三角/方块调过的速度/微调又覆盖掉。
-    if (cmd.length() == 2) {
+    // 摇杆命令形如 "15"（方向1 + 速度5）。UI 保活只重发方向，避免把用户
+    // 后来按三角/方块调过的速度/微调又覆盖掉；ROS raw 命令保留第二字节。
+    if (cmd.length() == 2 && !preserveSecondByte) {
       cmd = cmd.substring(0, 1);
     }
     sendToSTM32(cmd);
@@ -1034,7 +1098,19 @@ void dispatchControlMessage(const String& msg) {
   //   button:<key>:<type>                   例如 button:up:down
   //   stick:<stickId>:<direct>:<stepValue>  例如 stick:left-analog:up:5
   // 旧页面的 "hold" 心跳已废弃，收到后直接忽略（不匹配下面的前缀）。
-  if (msg.startsWith("button:")) {
+  if (msg.startsWith("raw:")) {
+    String command = msg.substring(4);
+    command.trim();
+    if (!isValidRawMotionCommand(command)) {
+      return;
+    }
+    sendToSTM32(command);
+    if (command == "0") {
+      clearMotionState();
+    } else {
+      updateMotionStateRaw(command);
+    }
+  } else if (msg.startsWith("button:")) {
     int first = msg.indexOf(':', 7);
     if (first > 0) {
       String key = msg.substring(7, first);

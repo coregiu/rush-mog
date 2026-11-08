@@ -74,7 +74,7 @@ tags:
     description: |
       STM32F103C8T6 车体控制器的 UART 命令协议。ESP32-S3 UART1
       （GPIO19 TX / GPIO20 RX）连接 STM32 USART3（PB10 TX / PB11 RX），
-      9600 8N1，命令以 `\n` 结束。命令无 ACK/无遥测返回。
+      9600 8N1，命令以 `\n` 结束。命令无 ACK；USART3 会周期回传编码器遥测，ESP32 通过 `/api/body` 暴露。
     x-docs: "./body_control/README.md"
 
 x-tagGroups:
@@ -705,9 +705,12 @@ paths:
 
         - `button:<key>:<type>`
         - `stick:left-analog:<direct>:<stepValue>`
+        - `raw:<command>`：ROS2 专用 Body Control 运动命令，只允许
+          `0`、`1`~`9`、`A`~`C`，可带第二字节 PWM `0`~`9`。
+          ESP32 保留第二字节并每 200ms 重发；1s 未收到新 raw 命令自动停车。
 
         示例：`button:up:down`、`button:stop:down`、
-        `stick:left-analog:up:5`。
+        `stick:left-analog:up:5`、`raw:15`、`raw:95`。
 
         也兼容 `curl -d` 的 `application/x-www-form-urlencoded`：
         当 `plain` 参数为空且存在参数时，使用第一个参数名作为命令。
@@ -732,6 +735,12 @@ paths:
               stick:
                 summary: 左摇杆向前，速度档 5
                 value: "stick:left-analog:up:5"
+              ros_forward:
+                summary: ROS 前进，PWM 档 5
+                value: "raw:15"
+              ros_turn:
+                summary: ROS 左转，PWM 档 5
+                value: "raw:95"
           application/x-www-form-urlencoded:
             schema:
               type: string
@@ -920,6 +929,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EdgeModulesResponse'
+
+  /api/body:
+    get:
+      tags: [Edge Server]
+      summary: STM32 编码器遥测快照
+      description: |
+        ESP32 从 USART3 解析 STM32 编码器遥测后缓存的最新帧。
+        轮速单位 mm/s，distance_mm 为四轮平均绝对里程。
+        `valid=false` 表示从未收到；`stale=true` 表示超过 2s 未更新。
+      operationId: edgeBody
+      responses:
+        '200':
+          description: 编码器遥测
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: {type: boolean}
+                  body:
+                    type: object
+                    properties:
+                      valid: {type: boolean}
+                      stale: {type: boolean}
+                      source: {type: string, example: stm32}
+                      rate_hz: {type: number, example: 10}
+                      seq: {type: integer}
+                      uptime_ms: {type: integer}
+                      age_ms: {type: integer}
+                      wheel_mm_s:
+                        type: array
+                        items: {type: integer}
+                        minItems: 4
+                        maxItems: 4
+                      distance_mm: {type: integer}
 
   /api/modules/report:
     post:

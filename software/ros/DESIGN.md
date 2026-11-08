@@ -88,14 +88,18 @@
 
 - Wi-Fi AP、网页手柄、MJPEG 图传；
 - 遥控串口桥（ESP32 UART3 ↔ STM32）；
+- 车身遥测桥（STM32 编码器 → ESP32 `/api/body`）；
+- 运动命令桥（ROS `/cmd_vel` → ESP32 `/cmd` `raw:` → STM32）；
 - 可选 OV2640 图传。
 
 `center_server` 不依赖 ESP32 的算力。实车推荐：
 
 - 激光、相机、IMU 直接接 Pi；
-- Pi 通过 UART 与 STM32 通信（`base_bridge_node`）；
-- ESP32 只做图传/遥控/备用通道；
-- 手机连 Pi 的 AP 或独立路由器，而不是 ESP32 AP。
+- 默认 Pi 通过 Wi-Fi HTTP 与 ESP32 通信（`esp32_bridge_node`）：
+  `GET /api/body` 取编码器遥测，`POST /cmd raw:<cmd>` 下发电机命令；
+- 仍保留 Pi 通过 UART 直连 STM32（`base_bridge_node`，`base_transport:=serial`）；
+- ESP32 负责 AP、编码器遥测转发、运动命令转发、图传/遥控；
+- 手机可连 ESP32 AP；Pi 也可连 ESP32 AP 使用 `192.168.4.1`。
 
 ---
 
@@ -209,7 +213,8 @@ software/
 | 10 | `navigation_node` | `/center/navigate_to`，Nav2/直航后端 | → `/nav/cmd_vel`、`/center/nav_status` |
 | 11 | `target_detector_node` | 颜色/YOLO 检测、测距、map 投影、跟踪 | → `/center/target_detections` |
 | 12 | `object_search_node` | 前沿探索、目标确认、接近 | → `/center/search_status` |
-| 13 | `base_bridge_node` | Pi ↔ STM32 串口、里程计、电池、IMU 转发 | ↔ `/odom`、`/imu/data`、`/battery_state` |
+| 13 | `esp32_bridge_node` | Pi ↔ ESP32 HTTP、`/api/body` 遥测、`/cmd` 运动 | ↔ `/odom`、`/joint_states`、`/base/status` |
+| 13b | `base_bridge_node` | 旧版 Pi ↔ STM32 串口、里程计、电池、IMU 转发 | ↔ `/odom`、`/imu/data`、`/battery_state` |
 | 14 | `imu_node` | Pi I2C 直连 ICM-20948 | → `/imu/data` |
 | 15 | `health_monitor_node` | 节点/设备健康、HTTP 网关 | → `/center/health`、`/center/healthcheck`、:8090 |
 
@@ -546,8 +551,24 @@ flags：bit0 ESTOP、bit1 ARMED、bit2 IMU_OK、bit3 ENCODER_OK、bit4 BATTERY_L
 - 串口断开 2s 重连；
 - 状态 JSON 发 `/base/status`。
 
-注意：现有 STM32 固件仍是 ASCII 命令（`'0'..'Z'` + PWM 档位），没有编码器/IMU 回传。
-要跑 Nav2 必须按上表升级固件；协议解析已做分帧/CRC/坏帧重同步。
+#### ESP32 HTTP 模式（当前实车默认）
+
+Body Control 已通过 USART3 上报四轮编码器遥测；ESP32 解析后在 `/api/body`
+和 `/api/modules` 的 `edge.body` 暴露。`esp32_bridge_node`：
+
+- 10Hz 轮询 `/api/body`，用麦轮正运动学积分 `/odom`，20Hz 发布；
+- 发布 `/joint_states` 和 `/base/status`（`encoder_ok`、`distance_mm`、轮速）；
+- 订阅 `/cmd_vel`，把 Twist 量化为 8 方向 + 1~9 档 PWM，或 9/A 原地转向；
+- 通过 `POST /cmd` 的 `raw:<cmd>` 下发，ESP32 保留 PWM 第二字节并每 200ms 重发；
+- raw 命令有 1s 租约，ROS 停止续租后 ESP32 自动停车；
+- `/cmd_vel` 0.5s 超时、急停、车身遥测 1s 超时都会停车。
+
+注意：Body Control 的接口是离散方向 + 9 档 PWM，不是连续左右轮差速；
+`twist_mode: priority` 会优先平移或转向的较大分量，`time_share` 用时间片近似弧线。
+需要平滑弧线时应升级体控固件，增加左右 PWM/四轮直接控制命令。
+
+旧串口二进制协议（上表）仍保留在 `base_protocol.py`/`base_bridge_node.py`；
+当前 Body Control ASCII 固件不支持该二进制帧，实车默认不要再启用 `base_transport:=serial`。
 
 ### 6.14 配置与日志
 

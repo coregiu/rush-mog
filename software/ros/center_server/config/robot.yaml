@@ -16,10 +16,16 @@ center_server:
     joint_states: "/joint_states"
     imu: "/imu/data"                # base_bridge（STM32 转发）或 imu_node（Pi I2C）输出
 
-  # ---------------------------------------------------------------- 底盘串口
+  # ---------------------------------------------------------------- 底盘
+  # 实车默认经 ESP32 HTTP：
+  #   STM32 编码器 -> USART3 -> ESP32 /api/body -> esp32_bridge_node -> /odom
+  #   /cmd_vel -> esp32_bridge_node -> ESP32 /cmd (raw:) -> STM32
+  # 如需恢复树莓派直连 STM32 串口，把 transport 改为 serial，并在 launch 中
+  # 设置 base_transport:=serial。
   base:
     enabled: true
-    port: "/dev/ttyUSB0"            # 建议用 udev 规则固定为 /dev/rush_base
+    transport: "esp32_http"         # serial | esp32_http
+    port: "/dev/ttyUSB0"            # 仅 serial 模式使用
     baud: 921600
     send_rate_hz: 30.0
     watchdog_sec: 0.5
@@ -42,6 +48,29 @@ center_server:
       - "wheel_front_right_joint"
       - "wheel_rear_left_joint"
       - "wheel_rear_right_joint"
+
+    # ESP32 HTTP 模式参数
+    esp32:
+      host: "192.168.4.1"           # RUSH-MOG AP 地址
+      body_path: "/api/body"
+      cmd_path: "/cmd"
+      poll_hz: 10.0                 # /api/body 轮询
+      odom_rate_hz: 20.0            # /odom、/joint_states 发布
+      status_rate_hz: 1.0           # /base/status 发布
+      cmd_rate_hz: 10.0             # 命令循环频率
+      http_timeout_sec: 0.4
+      stale_timeout_sec: 1.0        # 超时未收到车身遥测 -> 默认停车
+      cmd_resend_sec: 0.4           # 同一条 raw 命令的重发周期
+      stop_on_body_stale: true
+      publish_tf: false             # robot_localization EKF 已发布 odom->base_link
+      # Body Control 只有离散方向 + 1~9 档 PWM，Twist 会被量化
+      max_linear: 0.35
+      max_angular: 1.0
+      deadband_linear: 0.02
+      deadband_angular: 0.05
+      max_level: 9
+      twist_mode: "priority"        # priority | time_share
+      arc_period_sec: 0.5
 
   # ---------------------------------------------------------------- ICM-20948
   # 方案 A（推荐）：IMU 接树莓派 I2C，enabled: true，启动 start_imu:=true

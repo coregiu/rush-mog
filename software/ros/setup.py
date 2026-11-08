@@ -41,6 +41,7 @@ setup(
             "object_search_node = ros_nodes.object_search_node:main",
             # v2：底盘/IMU 适配（实车启用）
             "base_bridge_node = ros_nodes.base_bridge_node:main",
+            "esp32_bridge_node = ros_nodes.esp32_bridge_node:main",
             "imu_node = ros_nodes.imu_node:main",
             # 健康检查：ROS 话题/服务 + 供 edge_center 调用的 HTTP 网关
             "health_monitor_node = ros_nodes.health_monitor_node:main",

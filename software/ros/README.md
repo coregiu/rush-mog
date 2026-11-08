@@ -11,7 +11,7 @@
 - **自主导航**：Nav2 或内置直航，目标校验、停滞检测、超时/急停；
 - **目标搜索**：颜色/YOLO 检测、激光测距、map 投影、前沿探索、确认、接近；
 - **速度仲裁**：VLA/Nav2/反向/安全统一到唯一 `/cmd_vel`；
-- **底盘桥**：Pi ↔ STM32 二进制串口协议、里程计、电池、IMU 转发；
+- **底盘桥**：默认 Pi ↔ ESP32 HTTP（`/api/body` 遥测、`/cmd` 运动）；保留 Pi ↔ STM32 串口模式；
 - **健康检查**：ROS 节点/话题 + 相机/雷达/IMU/麦克风/音箱/机械臂等设备，
   HTTP 供 `edge_center` 调用，另有 ROS 话题/服务。
 
@@ -86,7 +86,7 @@ ros2 launch center_server center_server.launch.py \
   start_map_manager:=false start_localization:=false
 ```
 
-### 3.2 实车（robot.yaml + STM32 串口桥）
+### 3.2 实车（robot.yaml + ESP32 底盘桥）
 
 ```bash
 ros2 launch center_server robot_bringup.launch.py
@@ -96,13 +96,25 @@ ros2 launch center_server robot_bringup.launch.py start_imu:=true
 ros2 launch center_server robot_bringup.launch.py config_file:=/path/to/robot.yaml
 ```
 
-`robot_bringup.launch.py` 会启动 `base_bridge_node`（`base.enabled=true`）。
-启动前确认：
-- 串口 udev 规则（示例 `/etc/udev/rules.d/99-rush-mog.rules`）：
-  ```
-  SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="rush_base"
-  ```
-- `python3-serial` 已安装；
+`robot_bringup.launch.py` 默认启动 `esp32_bridge_node`（`base_transport:=esp32`）：
+- 树莓派先连上 RUSH-MOG Wi-Fi（`192.168.4.x`），ESP32 地址默认 `192.168.4.1`；
+- 节点轮询 `GET /api/body` 获取四轮编码器速度/里程，发布 `/odom`、`/joint_states`、
+  `/base/status`；
+- 订阅 `/cmd_vel`，量化成 Body Control 的 `方向+PWM` 命令，通过
+  `POST /cmd` 的 `raw:<cmd>` 下发给 STM32；
+- `/cmd_vel` 超时、急停或 ESP32 遥测超时都会自动停车。
+
+仍使用树莓派直连 STM32 串口时：
+```bash
+ros2 launch center_server robot_bringup.launch.py base_transport:=serial
+```
+并确认 udev 规则（示例 `/etc/udev/rules.d/99-rush-mog.rules`）：
+```
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="rush_base"
+```
+以及 `python3-serial` 已安装。
+
+其他启动前确认：
 - 激光驱动已发布 `/scan`；
 - 相机驱动已发布 `/camera/image_raw`；
 - 12V/5V/6V 共地，急停释放。
@@ -141,7 +153,8 @@ ros2 run robot_localization ekf_node --ros-args \
 | `navigation_node` | `/center/navigate_to`，Nav2/直航后端 |
 | `target_detector_node` | 颜色/YOLO 检测、激光/bbox 测距、map 投影、跟踪 |
 | `object_search_node` | `/center/explore`、`/center/search_object` |
-| `base_bridge_node` | Pi ↔ STM32 串口、`/odom`、`/imu/data`、`/battery_state` |
+| `esp32_bridge_node` | Pi ↔ ESP32 HTTP、`/api/body` → `/odom`、`/joint_states`；`/cmd_vel` → `/cmd` |
+| `base_bridge_node` | 旧版 Pi ↔ STM32 串口、`/odom`、`/imu/data`、`/battery_state` |
 | `imu_node` | Pi I2C 直连 ICM-20948 → `/imu/data` |
 | `health_monitor_node` | 节点/设备健康、`/center/health`、`/center/healthcheck`、HTTP `:8090` |
 
