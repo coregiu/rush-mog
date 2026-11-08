@@ -2,6 +2,7 @@
 
 设计文档：[`DESIGN.md`](DESIGN.md)。
 健康检查接口契约：[`HEALTHCHECK.md`](HEALTHCHECK.md)。
+部署与发布说明：[`DEPLOY.md`](DEPLOY.md)。
 硬件方案与缺口分析：[`hardware/SLAM_NAV.md`](../../hardware/SLAM_NAV.md)。
 
 本包在 v1 的 VLA 推理/安全/反向操作之上，补齐：
