@@ -13,6 +13,11 @@
 - `80`：网页、静态文件、`/sdcard/*`、`/cmd`（控制）、`/stop`、`/status`、`/api/modules*`（监控/配置）
 - `8080`：独立 MJPEG 视频流（与 HTTP 80 分离，避免推流阻塞控制）
 
+> 摄像头模块当前默认禁用：`include/camera.h` 中的 `ENABLE_CAMERA = 0`。
+> 禁用时不会初始化摄像头、不会占用摄像头引脚，也不会监听 8080；
+> 需要恢复视频流时把它改成 `1`（或在 `build_flags` 里加 `-DENABLE_CAMERA=1`）
+> 重新编译即可（camera 源码均保留）。
+
 `/status` 返回 JSON，包含运行时间、剩余堆/PSRAM、摄像头/SD 状态和当前是否有持续运动（`motion_active`）。
 
 控制通道直接复用网页的 80 端口，用 `POST /cmd` 发送纯文本命令（`button:up:down`、`stick:left-analog:up:5`），不再占用 81 端口。浏览器只在按下/松开（摇杆为按下/拖动/松开）时发命令，按住期间不再发心跳；ESP32 默认每 200ms 把当前运动命令重发给 STM32（dashboard 可调 100–600ms），用来喂 STM32 的 800ms 看门狗，直到收到松开/停止命令。

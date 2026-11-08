@@ -2,6 +2,7 @@
 
 bool cameraReady = false;
 
+#if ENABLE_CAMERA
 bool initCamera() {
   delay(1000);
   Serial.println("\nGOOUUU V1.3 ESP32-S3 CAM 初始化...");
@@ -80,3 +81,4 @@ bool initCamera() {
   cameraReady = true;
   return true;
 }
+#endif // ENABLE_CAMERA

@@ -70,11 +70,13 @@ void setup()
   server.on("/api/body", HTTP_GET, handleApiRequest);
 
   // 兼容旧页面：旧版本从 80 端口请求 /stream，重定向到独立视频端口
+#if ENABLE_CAMERA
   server.on("/stream", []() {
     String location = String("http://") + WiFi.softAPIP().toString() + ":8080/stream";
     server.sendHeader("Location", location);
     server.send(302, "text/plain", "");
   });
+#endif
 
   server.onNotFound([]() {
     String uri = server.uri();
@@ -95,21 +97,32 @@ void setup()
     Serial.println("控制任务创建失败");
   }
 
+  // 摄像头模块由 camera.h 的 ENABLE_CAMERA 统一控制；禁用时初始化、
+  // 推流任务和 /stream 跳转都不会编译进来，控制与网页功能不受影响。
+#if ENABLE_CAMERA
   // 摄像头初始化可能较慢；失败时仍保留网页和控制，视频接口返回 503
   if (!initCamera()) {
     Serial.println("摄像头不可用，视频流将返回 503");
   }
+#endif
+
   initSdcard();
 
+#if ENABLE_CAMERA
   ok = xTaskCreatePinnedToCore(
       cameraStreamTask, "mjpeg", 4096, nullptr, 2, nullptr, 1);
   if (ok != pdPASS) {
     Serial.println("视频流任务创建失败");
   }
+#endif
 
   Serial.println("Web 服务器已启动");
   Serial.println("控制接口：POST http://<ip>/cmd（与网页共用 80 端口）");
+#if ENABLE_CAMERA
   Serial.printf("视频流端口：%d\n", STREAM_PORT);
+#else
+  Serial.println("摄像头模块已禁用（ENABLE_CAMERA=0）");
+#endif
 }
 
 void loop()

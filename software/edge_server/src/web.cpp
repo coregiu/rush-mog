@@ -239,12 +239,14 @@ static void saveEdgeConfig() {
   prefs.end();
 }
 
+#if ENABLE_CAMERA
 static TickType_t streamFrameInterval() {
   uint32_t fps = streamFps;
   if (fps < 5) fps = 5;
   if (fps > 20) fps = 20;
   return pdMS_TO_TICKS(1000 / fps);
 }
+#endif
 
 // 初始化 LittleFS
 bool initFS()
@@ -1151,6 +1153,11 @@ void handleCmd() {
   server.send(200, "text/plain", "ok");
 }
 
+// ============================================================================
+// 摄像头 MJPEG 推流（ENABLE_CAMERA=0 时整段不编译，源码保留）
+// ============================================================================
+#if ENABLE_CAMERA
+
 // 读取并丢弃 HTTP 请求头，最多等 300ms
 static bool readHttpRequest(WiFiClient& client) {
   uint32_t start = millis();
@@ -1326,3 +1333,5 @@ void cameraStreamTask(void* arg) {
     vTaskDelay(pdMS_TO_TICKS(1));
   }
 }
+
+#endif // ENABLE_CAMERA
