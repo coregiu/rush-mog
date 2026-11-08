@@ -1,5 +1,5 @@
 [Unit]
-Description=RUSH-MOG CENTER edge reporter (Wi-Fi + 192.168.4.1)
+Description=RUSH-MOG CENTER reporter -> Pi Edge Server (192.168.4.1)
 After=network-online.target
 Wants=network-online.target
 

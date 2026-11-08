@@ -1,0 +1,413 @@
+# ============================================================================
+# Rush-MoG 实车配置（树莓派/Orin + STM32 + LD19/LD06 + ICM-20948）
+# 用法：
+#   ros2 launch center_server center_server.launch.py \
+#       config_file:=<install>/share/center_server/config/robot.yaml \
+#       start_base_bridge:=true
+# 说明：本文件是“覆盖式”配置，未列出的参数使用节点内默认值；
+#       但为了可维护性，关键参数都在这里显式给出。
+# ============================================================================
+center_server:
+  sensor_topics:
+    image: "/camera/image_raw"     # 树莓派 USB/CSI 相机（Edge Server 订阅后转 MJPEG）
+    laser: "/scan"                  # LD19/LD06/RPLidar 驱动输出
+    audio: "/audio/raw"             # 无麦克风时该话题可不存在
+    odom: "/odom"                   # edge_server_node（STM32 遥测）或底盘驱动输出
+    joint_states: "/joint_states"
+    imu: "/imu/data"                # imu_node（Pi I2C）或旧 base_bridge（STM32 转发）
+
+  # ---------------------------------------------------------------- 底盘
+  # 树莓派 Edge Server 直连 STM32 USART3（9600 8N1，ASCII 命令 + $B 遥测）：
+  #   STM32 编码器 -> USART3 -> edge_server_node -> /odom、/base/status
+  #   /cmd_vel -> edge_server_node -> UART -> STM32
+  # 旧版 ESP32 HTTP 桥（esp32_bridge_node）仅作为历史兼容保留，不再默认启动。
+  base:
+    enabled: true
+    transport: "edge_serial"         # edge_serial | serial_binary | esp32_http(legacy)
+    port: "/dev/ttyUSB0"             # 推荐 udev 固定为 /dev/rush_base
+    baud: 9600                       # 当前 body_control 固件固定 9600
+    odom_rate_hz: 20.0
+    watchdog_sec: 0.5
+    odom_frame: "odom"
+    base_frame: "base_link"
+    imu_frame: "imu_link"
+    # 以下参数必须实测标定，否则里程计会系统性偏差
+    wheel_radius: 0.048             # JGB37-520 + 97mm 麦轮，实测轮半径
+    wheelbase_x: 0.20               # 前后轮轴距
+    track_y: 0.18                   # 左右轮距
+    encoder_cpr: 1320.0             # 输出轴每圈计数 = 11PPR * 减速比 * 4
+    sign_fl: 1.0
+    sign_fr: 1.0
+    sign_rl: 1.0
+    sign_rr: 1.0
+    battery_full_v: 12.6
+    battery_empty_v: 10.0
+    wheel_joint_names:
+      - "wheel_front_left_joint"
+      - "wheel_front_right_joint"
+      - "wheel_rear_left_joint"
+      - "wheel_rear_right_joint"
+
+    edge_serial:
+      reconnect_sec: 2.0
+
+    # Body Control 只有离散方向 + 1~9 档 PWM，Twist 会被量化
+    body_command:
+      max_linear: 0.35
+      max_angular: 1.0
+      deadband_linear: 0.02
+      deadband_angular: 0.05
+      max_level: 9
+      twist_mode: "priority"        # priority | time_share
+      arc_period_sec: 0.5
+    publish_tf: false               # robot_localization EKF 已发布 odom->base_link
+
+  # ---------------------------------------------------------------- Edge Server
+  # 网页/API 与底盘串口同进程：手机/PC 直接访问树莓派 80 端口，8080 为 MJPEG。
+  edge:
+    web:
+      host: "0.0.0.0"
+      port: 80                     # 需要 root 或 CAP_NET_BIND_SERVICE
+      stream_port: 8080
+      root: ""                     # 空 = share/center_server/web
+      sdcard_dir: ""               # /sdcard/* 映射目录，空则 404
+    camera:
+      enabled: true
+      topic: "/camera/image_raw"
+      fps: 10
+      quality: 70
+    motion:
+      keepalive_ms: 200
+      raw_lease_sec: 1.0
+    ros_health_url: "http://127.0.0.1:8090/ros/health"
+    ros_params_url: "http://127.0.0.1:8090/ros/params"
+    state_file: "~/.config/rush-mog/edge_params.json"
+
+  # ---------------------------------------------------------------- ICM-20948
+  # 方案 A（推荐）：IMU 接树莓派 I2C，enabled: true，启动 start_imu:=true
+  # 方案 B：IMU 接 STM32，由旧 base_bridge 转发 /imu/data，enabled: false
+  imu:
+    enabled: false
+    i2c_bus: 1
+    address: "0x68"                 # SA0 接地 0x68，接 3.3V 为 0x69
+    frame_id: "imu_link"
+    rate_hz: 100.0
+    accel_fs: 1                     # ±4g
+    gyro_fs: 2                      # ±1000dps
+    dlpf: 3
+    expected_rate_hz: 100.0
+    max_gap_sec: 0.2
+    mag_norm_min_ut: 10.0
+    mag_norm_max_ut: 120.0
+    mag_disturb_ratio: 0.35
+    mag_declination_rad: 0.0        # 安装偏航 + 当地磁偏角，实测标定
+    mount_yaw_rad: 0.0
+    mag_blend: 0.02
+    calibration:
+      accel_bias: [0.0, 0.0, 0.0]
+      gyro_bias: [0.0, 0.0, 0.0]
+      mag_bias: [0.0, 0.0, 0.0]
+      mag_scale: [1.0, 1.0, 1.0]
+
+  localization:
+    pose_rate: 10.0
+    status_rate: 2.0
+    odom_timeout_sec: 0.5
+    imu_timeout_sec: 0.3
+    amcl_timeout_sec: 1.0
+    min_quality: 0.35
+    map_frame: "map"
+    base_frame: "base_link"
+
+  # ---------------------------------------------------------------- 建图
+  map_manager:
+    map_frame: "map"
+    map_dir: "~/rush_mog/maps"
+    default_map_name: "rush_mog"
+    publish_rate: 1.0
+    frontier_min_size: 5
+    frontier_max_count: 50
+    frontier_max_cells: 250000
+    prefer_slam_toolbox: true
+    map_id: "rush_mog"
+
+  # ---------------------------------------------------------------- 导航
+  navigation:
+    backend: "auto"                 # 装了 Nav2 自动用 Nav2；否则内置直航
+    nav2_action: "/navigate_to_pose"
+    default_timeout_sec: 120.0
+    tolerance_xy: 0.15
+    tolerance_yaw: 0.25
+    min_localization_quality: 0.35
+    require_scan: true
+    stuck_timeout_sec: 6.0
+    progress_min_m: 0.05
+    blocked_timeout_sec: 5.0
+    status_rate: 2.0
+    cmd_topic: "/nav/cmd_vel"
+    direct:
+      max_linear_speed: 0.35
+      max_angular_speed: 1.0
+      k_linear: 1.2
+      k_angular: 1.8
+      slow_radius: 0.6
+      min_linear: 0.04
+      holonomic: true
+      turn_in_place_rad: 0.8
+      obstacle_stop_distance: 0.35
+      obstacle_slow_distance: 0.8
+
+  # ---------------------------------------------------------------- 目标检测
+  perception:
+    enabled: true
+    image_topic: "/camera/image_raw"
+    detector: "color"               # 接入 YOLO 后改为 yolo 并配置 model_path
+    publish_rate: 10.0
+    min_confidence: 0.5
+    lidar_window_deg: 6.0
+    prefer_lidar: true
+    position_frame: "map"
+    track_max_age_sec: 1.0
+    camera:
+      width: 640
+      height: 480
+      hfov_deg: 62.0                # 用棋盘格标定后填 fx/fy/cx/cy 更准
+      fx: 0.0
+      fy: 0.0
+      cx: 0.0
+      cy: 0.0
+    targets:
+      cup:
+        hsv_min: [0, 100, 60]
+        hsv_max: [10, 255, 255]
+        min_area_ratio: 0.002
+        max_area_ratio: 0.5
+        real_height_m: 0.12
+      bottle:
+        hsv_min: [35, 80, 40]
+        hsv_max: [85, 255, 255]
+        min_area_ratio: 0.002
+        max_area_ratio: 0.5
+        real_height_m: 0.22
+
+  # ---------------------------------------------------------------- 搜索
+  search:
+    rate_hz: 5.0
+    confirm_hits: 3
+    confirm_time_sec: 0.4
+    standoff_distance: 0.6
+    approach_tolerance: 0.30
+    map_wait_timeout_sec: 20.0
+    target_lost_timeout_sec: 3.0
+    frontier_min_size: 5
+    max_frontier_distance: 15.0
+    blacklist_radius: 0.8
+    blacklist_sec: 30.0
+    replan_delay_sec: 0.5
+    min_confidence: 0.5
+    max_approach_failures: 3
+    default_max_duration_sec: 300.0
+    default_target_coverage: 0.90
+    feedback_interval_sec: 0.5
+    track_memory_sec: 2.0
+
+  # ---------------------------------------------------------------- 指令
+  instruction:
+    object_labels:
+      cup: ["杯子", "水杯", "马克杯", "cup", "mug"]
+      bottle: ["瓶子", "水瓶", "bottle"]
+      person: ["人", "人员", "person"]
+      box: ["盒子", "箱子", "box"]
+      ball: ["球", "小球", "ball"]
+    waypoints:
+      kitchen:
+        x: 1.2
+        y: 0.8
+        yaw: 0.0
+        aliases: ["厨房", "kitchen"]
+      charging:
+        x: 0.0
+        y: 0.0
+        yaw: 0.0
+        aliases: ["充电桩", "charging"]
+      living_room:
+        x: -1.5
+        y: 2.0
+        yaw: 1.57
+        aliases: ["客厅", "living room"]
+    home_pose: [0.0, 0.0, 0.0]
+
+  # ---------------------------------------------------------------- 安全
+  safety:
+    obstacle_stop_distance: 0.35
+    obstacle_clear_distance: 0.55
+    max_twist_x: 0.5
+    max_twist_z: 1.0
+    data_timeout_sec: 2.0
+    scan_timeout_sec: 1.0
+    laser_front_fov_deg: 60.0
+    laser_rear_fov_deg: 60.0
+    laser_side_fov_deg: 45.0
+    battery_low_percent: 15.0
+    stop_on_low_battery: true
+    require_localization_for_nav: true
+    localization_timeout_sec: 2.0
+    localization_grace_sec: 1.5
+    joint_limits:
+      j1: [-3.14, 3.14]
+      j2: [-1.57, 2.09]
+      j3: [-1.57, 2.09]
+      j4: [-3.14, 3.14]
+      j5: [-3.14, 3.14]
+
+  velocity_mux:
+    publish_rate: 20
+    status_rate: 5
+    default_timeout: 0.5
+    max_linear: 0.5
+    max_angular: 1.0
+    priorities:
+      safety: 0
+      reverse: 1
+      teleop: 2
+      nav: 3
+      vla: 4
+    timeouts:
+      safety: 0.6
+      reverse: 0.6
+      teleop: 0.5
+      nav: 0.6
+      vla: 0.6
+    topics:
+      safety: "/safety/cmd_vel_override"
+      reverse: "/reverse/cmd_vel"
+      teleop: "/teleop/cmd_vel"
+      nav: "/nav/cmd_vel"
+      vla: "/cmd_vel_raw"
+
+  task_manager:
+    task_timeout_sec: 30.0
+    reverse_timeout_sec: 5.0
+    status_rate: 2.0
+    execution_hold_sec: 1.0
+
+  mission:
+    default_timeout_sec: 300.0
+    map_timeout_sec: 300.0
+    map_target_coverage: 0.90
+    save_map_after_mapping: true
+
+  time_sync:
+    sync_window_ms: 120
+    queue_size: 10
+
+  # ======================================================================
+  # 健康检查（health_monitor_node）
+  #   GET  http://127.0.0.1:8090/ros/health   -> Edge Server/dashboard
+  #   ROS  /center/health + /center/healthcheck
+  # 接口契约与字段语义见 software/ros/HEALTHCHECK.md。
+  #
+  # 设备反馈缺口（当前代码未发布，状态会显示 unknown，不影响整体 ok）：
+  #   - speaker: /body/audio_status（建议 STM32 桥接后发布 JSON）
+  #   - arm:     /arm/joint_states（机械臂驱动/回读节点发布）
+  # 这两个话题接入后无需改 health_monitor_node，只改配置即可。
+  # ======================================================================
+  health:
+    enabled: true
+    publish_rate: 1.0
+    startup_grace_sec: 8.0
+    rate_window_sec: 5.0
+    min_rate_ratio: 0.5
+    strict_unknown: false
+    safety_required: true
+    safety_timeout_sec: 3.0
+    check_nodes: true
+    expected_nodes:
+      - bridge_node
+      - vla_inference_node
+      - action_generator_node
+      - reverse_operation_node
+      - safety_manager_node
+      - task_manager_node
+      - velocity_mux_node
+      - localization_node
+      - map_manager_node
+      - navigation_node
+      - target_detector_node
+      - object_search_node
+      - edge_server_node
+      - health_monitor_node
+    http:
+      enabled: true
+      host: "127.0.0.1"        # Edge Server 同机代理；跨机监控再改 0.0.0.0 + api_key
+      port: 8090
+      api_key: ""
+      cors_allow_origin: "*"
+    devices:
+      camera:
+        type: camera
+        topic: "/camera/image_raw"
+        message_type: "sensor_msgs/msg/Image"
+        expected_rate_hz: 15.0
+        timeout_sec: 2.0
+        required: true
+      lidar:
+        type: lidar
+        topic: "/scan"
+        message_type: "sensor_msgs/msg/LaserScan"
+        expected_rate_hz: 10.0
+        timeout_sec: 1.5
+        required: true
+      imu:
+        type: imu
+        topic: "/imu/data"
+        message_type: "sensor_msgs/msg/Imu"
+        expected_rate_hz: 100.0
+        timeout_sec: 0.5
+        required: true
+      microphone:
+        type: microphone
+        topic: "/audio/raw"       # 无麦克风时该话题可不存在
+        message_type: "custom_msgs/msg/AudioData"
+        expected_rate_hz: 10.0
+        timeout_sec: 2.0
+        required: false
+      speaker:
+        type: speaker
+        topic: "/body/audio_status"
+        message_type: "std_msgs/msg/String"
+        expected_rate_hz: 0.0
+        timeout_sec: 2.0
+        required: false
+        description: "speaker feedback not implemented yet"
+      arm:
+        type: arm
+        topic: "/arm/joint_states"
+        message_type: "sensor_msgs/msg/JointState"
+        joint_names: ["j1", "j2", "j3", "j4", "j5"]
+        expected_rate_hz: 10.0
+        timeout_sec: 2.0
+        required: false
+        description: "arm feedback not implemented yet"
+      base:
+        type: base
+        topic: "/base/status"
+        message_type: "std_msgs/msg/String"
+        expected_rate_hz: 1.0
+        timeout_sec: 3.0
+        required: true
+        qos: "reliable"
+      battery:
+        type: battery
+        topic: "/battery_state"
+        message_type: "sensor_msgs/msg/BatteryState"
+        expected_rate_hz: 1.0
+        timeout_sec: 5.0
+        required: false
+      odom:
+        type: odometry
+        topic: "/odom"
+        message_type: "nav_msgs/msg/Odometry"
+        expected_rate_hz: 20.0
+        timeout_sec: 2.0
+        required: true

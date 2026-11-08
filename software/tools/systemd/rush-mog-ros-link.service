@@ -1,5 +1,5 @@
 [Unit]
-Description=RUSH-MOG ROS edge reporter (Wi-Fi + 192.168.4.1)
+Description=[LEGACY] RUSH-MOG ROS reporter (ROS 已并入 Edge Server)
 After=network-online.target
 Wants=network-online.target
 
@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 EnvironmentFile=-/etc/rush-mog/edge-link.env
 ExecStart=/usr/bin/python3 /opt/rush-mog/software/tools/edge_link.py --config /etc/rush-mog/ros-link.yaml
-Restart=always
+Restart=on-failure
 RestartSec=5
 User=root
 

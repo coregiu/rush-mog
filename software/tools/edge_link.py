@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""RUSH-MOG edge link agent.
+"""RUSH-MOG 外部模块上报 agent（CENTER 等）。
 
-让 ROS / CENTER SERVER 在系统启动后：
+ESP32 与树莓派合并后，ROS 2 与 Edge Server 同机运行，ROS 健康由
+``edge_server_node`` 直接读取，不再需要本 agent 上报。本脚本保留给
+CENTER SERVER 等外部模块：
+
 1. 连接 RUSH-MOG Wi-Fi（Linux + NetworkManager/nmcli，可关闭）；
 2. 读取本机健康/参数接口；
-3. 通过 192.168.4.1 的 ``POST /api/modules/report`` 上报模块、状态和精简参数。
+3. 通过 ``POST /api/modules/report`` 向 Pi Edge Server 上报模块、状态和精简参数。
 
-服务端只向 ESP32 上报，不暴露额外端口；dashboard 通过 ESP32 读取。
-配置文件示例见 ``ros_link.yaml.example`` / ``center_link.yaml.example``。
+服务端只向 Edge Server 上报，不暴露额外端口；dashboard 通过 Edge Server 读取。
+配置文件示例见 ``center_link.yaml.example``；``ros_link.yaml.example`` 仅作历史参考。
 """
 
 from __future__ import annotations
@@ -39,7 +42,7 @@ DEFAULT_INTERVAL = 5.0
 MAX_SUMMARY = 240
 MAX_PARAMS_JSON = 2048
 
-# 每个模块上报的精简参数（完整参数由 dashboard 打开抽屉时通过 ESP32 代理获取）
+# 每个模块上报的精简参数（完整参数由 dashboard 打开抽屉时通过 Edge Server 代理获取）
 ROS_PARAM_KEYS = {
     "publish_rate",
     "startup_grace_sec",
@@ -183,7 +186,7 @@ def compact_params(module: str, params_payload: Optional[Dict[str, Any]], health
         values["model.loaded"] = bool(model.get("loaded"))
         values["model.backend"] = model.get("backend")
 
-    # 控制上报体积，避免 ESP32 WebServer 表单过长。
+    # 控制上报体积，避免 Edge Server 表单过长。
     raw = json.dumps(values, ensure_ascii=False, separators=(",", ":"))
     if len(raw) > MAX_PARAMS_JSON:
         return {}
@@ -191,7 +194,7 @@ def compact_params(module: str, params_payload: Optional[Dict[str, Any]], health
 
 
 def build_report(config: Dict[str, Any]) -> Dict[str, str]:
-    module = str(config.get("module") or "ros").strip().lower()
+    module = str(config.get("module") or "center").strip().lower()
     name = str(config.get("name") or module)
     health_url = str(config.get("health_url") or "")
     params_url = str(config.get("params_url") or "")
@@ -283,7 +286,13 @@ def configure_logging(verbose: bool) -> None:
 
 
 def run(config: Dict[str, Any], *, once: bool = False, dry_run: bool = False) -> int:
-    module = str(config.get("module") or "ros")
+    module = str(config.get("module") or "center")
+    if module == "ros":
+        LOGGER.info(
+            "ROS 2 已并入 Pi Edge Server，健康数据由 edge_server_node 本地读取；"
+            "rush-mog-ros-link 服务不再需要"
+        )
+        return 0
     ssid = str(config.get("ssid") or DEFAULT_SSID)
     password = str(config.get("password") or os.environ.get("RUSH_MOG_WIFI_PASSWORD") or "")
     edge_url = str(config.get("edge_url") or DEFAULT_EDGE_URL)
@@ -302,7 +311,7 @@ def run(config: Dict[str, Any], *, once: bool = False, dry_run: bool = False) ->
         try:
             report = build_report(config)
             ip = local_ip_for(edge_host)
-            report["_ip"] = ip  # 仅日志/调试；ESP32 以 remoteIP 为准
+            report["_ip"] = ip  # 仅日志/调试；Edge Server 以 remoteIP 为准
             if dry_run:
                 print(json.dumps(report, ensure_ascii=False, indent=2))
             else:
@@ -327,12 +336,12 @@ def run(config: Dict[str, Any], *, once: bool = False, dry_run: bool = False) ->
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="RUSH-MOG ROS/CENTER -> edge_server reporter")
+    parser = argparse.ArgumentParser(description="RUSH-MOG CENTER -> Pi Edge Server reporter")
     parser.add_argument("--config", default="edge_link.yaml", help="YAML 配置文件")
     parser.add_argument("--once", action="store_true", help="只上报一次后退出")
     parser.add_argument("--dry-run", action="store_true", help="不发送，只打印上报内容")
     parser.add_argument("--no-wifi", action="store_true", help="不主动连接 Wi-Fi")
-    parser.add_argument("--edge-url", default="", help="覆盖 edge_server 地址")
+    parser.add_argument("--edge-url", default="", help="覆盖 Edge Server 地址（默认 http://192.168.4.1）")
     parser.add_argument("--verbose", action="store_true", help="DEBUG 日志")
     args = parser.parse_args(argv)
 

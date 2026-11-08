@@ -1,4 +1,5 @@
 # CENTER SERVER 侧 edge_link 配置（部署到 /etc/rush-mog/center-link.yaml）
+# 目标：Pi Edge Server（hostapd AP 默认 192.168.4.1，或局域网内 Pi IP）
 module: center
 name: "SmolVLA Center Server"
 
@@ -6,7 +7,7 @@ connect_wifi: true
 ssid: "RUSH-MOG"
 password: ""
 
-edge_url: "http://192.168.4.1"
+edge_url: "http://192.168.4.1"   # Pi Edge Server；局域网部署时改为 Pi 的实际 IP
 
 health_url: "http://127.0.0.1:8000/v1/health"
 params_url: "http://127.0.0.1:8000/v1/params"

@@ -25,7 +25,7 @@
 | OLED屏       | OLED屏，用来显示调试/监控信息                                 | 10       |
 | TOF测距       | OpenMV扩展，弥补OpenMV在测距方面的不足                        | 10       |
 | 陀螺仪        | **ICM-20948 9 轴 IMU**（替代 MPU6050），用于 EKF/定位          | 40       |
-| ESP32-S3-CAM   | 用来创建WIFI网络，连接手机APP；可做图传/遥控桥，**不跑 SLAM** | 35       |
+| Wi-Fi AP / 网页 | 由树莓派内置 Wi-Fi + hostapd 提供 `RUSH-MOG` AP、网页和 MJPEG；ESP32-S3-CAM 仅旧版保留 | —        |
 | 2D 激光雷达    | **LD19/LD06 或 RPLIDAR A1**，360°/12m/10Hz，接树莓派 USB       | 300      |
 | 机载计算机     | **树莓派 4B/5 或 Jetson Orin Nano**，跑 ROS2/SLAM/Nav2         | 500      |
 | 电机驱动升级   | **TB6612×2 / DRV8871×4 / BTS7960×2**，四轮独立 PWM             | 80       |
@@ -71,8 +71,8 @@ IO口分配如下（以 `software/body_control` 固件为准）：
 | PB1          | 小车右侧电机使能        |  TIM3_CH4 PWM      | |
 | PA2          | UART2 TX接ASR板PA6 RX  |  语音板串口通信     | 也接 JQ6500 |
 | PA3          | UART2 RX接ASR板PA5 TX  |  语音板串口通信     | |
-| PB10         | UART3 TX接ESP32 GPIO20 |  遥控/图传串口      | **与 bit-bang I2C 冲突** |
-| PB11         | UART3 RX接ESP32 GPIO19 |  遥控/图传串口      | **与 bit-bang I2C 冲突** |
+| PB10         | UART3 TX接树莓派 UART RX |  Edge Server 底盘串口 | **与 bit-bang I2C 冲突** |
+| PB11         | UART3 RX接树莓派 UART TX |  Edge Server 底盘串口 | **与 bit-bang I2C 冲突** |
 | PB6 / PB7    | I2C1（树莓派/外设）     |  树莓派通信        | 与 PB8/PB9 只能二选一 |
 | PB8 / PB9    | I2C1 重映射（PCA9685）  |  舵机驱动通信      | 与 PB6/PB7 只能二选一 |
 | PA13 / PA14  | SWDIO / SWCLK          |  下载调试          | **不能当普通 IO** |
@@ -84,21 +84,25 @@ IO口分配如下（以 `software/body_control` 固件为准）：
 > 目标方案建议升级 STM32F103RCT6/F411，或加编码器计数芯片。详见 [SLAM_NAV.md](SLAM_NAV.md) §4。
 
 
-#### ESP32-S3-CAM
-![esp32-s3-cam.png](modules/esp32-s3-cam.png)
+#### Wi-Fi AP / 网页 / 图传（Pi Edge Server）
 
-ESP32-S3-CAM 负责 Wi-Fi AP、网页手柄、MJPEG 图传和遥控串口桥。它没有 Linux，
-不能运行 ROS2/slam_toolbox/Nav2，因此不做“机载 SLAM 计算”。
+ESP32 与树莓派两个模块已合并，Wi-Fi AP、网页手柄、MJPEG 图传和 STM32 串口桥
+由树莓派上的 `edge_server_node` 承担（80 网页/API + 8080 MJPEG + UART）。
+树莓派用 `hostapd` + `dnsmasq` 提供 `RUSH-MOG` AP（`192.168.4.1`），或接入现有局域网。
+
+旧版 `ESP32-S3-CAM` 硬件仍可保留作回退，但不再参与当前架构：
+![esp32-s3-cam.png](modules/esp32-s3-cam.png)
 
 #### 2D 激光雷达（SLAM/导航必需）
 推荐 LD19/LD06（360°, 12 m, 10 Hz）或 RPLIDAR A1。接树莓派 USB，由 ROS2 驱动发布
-`/scan`。安装高度 15–25 cm，360° 无遮挡。不要接 ESP32 再转发：带宽、时间戳和驱动都不合适。
+`/scan`。安装高度 15–25 cm，360° 无遮挡。不要经旧 ESP32 桥转发：带宽、时间戳和驱动都不合适。
 详见 [SLAM_NAV.md](SLAM_NAV.md) §7。
 
 #### 机载计算机
 树莓派 4B/5 或 Jetson Orin Nano，跑 Ubuntu 22.04 + ROS2 Humble：
-激光/相机驱动、`base_bridge_node`、`robot_localization` EKF、`slam_toolbox`、Nav2、
-`center_server` 的导航/搜索节点。需要 5V/5A 供电和散热。
+`edge_server_node`（网页/API/MJPEG/STM32 串口）、激光/相机驱动、
+`robot_localization` EKF、`slam_toolbox`、Nav2、`center_server` 的导航/搜索节点。
+需要 5V/5A 供电和散热；80 端口需要 root 或 `CAP_NET_BIND_SERVICE`。
 
 #### ICM-20948 9 轴 IMU
 替代 MPU6050。3.3V I2C（0x68/0x69），AK09916 磁力计通过 bypass 访问。安装在底盘中心、
@@ -111,8 +115,8 @@ ESP32-S3-CAM 负责 Wi-Fi AP、网页手柄、MJPEG 图传和遥控串口桥。�
 #### 轮式编码器与轮速闭环
 JGB37-520 自带霍尔编码器，现已接入 STM32 的 PA12/PA15/PB3~PB8，固件用 EXTI
 软件四倍频解码（8 路 A/B 相，无需空闲定时器），通过 USART3（与 PS2 接收器同一串口）
-向 ESP32 上报四轮速度和总里程，dashboard 的 **BODY CONTROL** 面板实时显示。
-编码器 → 轮速闭环 → `/odom`，仍需在 ROS `base_bridge_node` 中接入 EKF/Nav2；
+向树莓派 Edge Server 上报四轮速度和总里程，dashboard 的 **BODY CONTROL** 面板实时显示。
+编码器 → 轮速闭环 → `/odom` 由 `edge_server_node` 发布，可直接接入 EKF/Nav2；
 详见 [SLAM_NAV.md](SLAM_NAV.md) §9。
 
 #### 小车底盘

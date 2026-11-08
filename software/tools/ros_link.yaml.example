@@ -1,3 +1,7 @@
+# [LEGACY] ROS 2 已并入 Pi Edge Server，本配置不再需要。
+# 保留仅用于回退到旧 ESP32 架构；新部署请只使用 center_link.yaml.example。
+# 旧行为：ROS 侧 edge_link 上报 /ros/health 到 ESP32。
+
 # ROS 侧 edge_link 配置（部署到 /etc/rush-mog/ros-link.yaml）
 # 启动：python3 edge_link.py --config /etc/rush-mog/ros-link.yaml
 module: ros
@@ -9,7 +13,7 @@ connect_wifi: true
 ssid: "RUSH-MOG"
 password: ""
 
-# ESP32-S3 AP 网关
+# 旧 ESP32-S3 AP 网关（legacy；新架构请用 Pi Edge Server）
 edge_url: "http://192.168.4.1"
 
 # 本机健康/参数接口（edge_link 自己调用 localhost）

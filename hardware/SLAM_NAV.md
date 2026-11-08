@@ -7,7 +7,7 @@
 
 结论先行：**现有硬件能完成遥控、语音、机械臂和基础视觉演示，但不能直接跑 SLAM + Nav2。**
 必须补三块：**机载 Linux 计算平台、2D 激光雷达、轮式编码器闭环**；ICM-20948 是定位链路的必要补充，
-但只加 IMU 不足以实现导航。ESP32-S3 不能替代机载计算机。
+但只加 IMU 不足以实现导航。旧 ESP32 不能替代机载计算机；现 ESP32 已与 Pi 合并为 Edge Server。
 
 ---
 
@@ -33,32 +33,32 @@
 |---|---|---|
 | STM32F103C8T6 | 车体控制，FreeRTOS，电机/音频/PS2 协议 | 可作为实时运动控制 MCU，但引脚/定时器/RAM 不足，见 §4 |
 | L298N 四驱板 | 8 路方向 + 2 路使能 | 能驱动四轮，但只有 2 路 PWM，无法四轮独立调速 |
-| JGB37-520 电机 ×4 | 自带霍尔编码器 | 已接入 STM32 PA12/PA15/PB3~PB8，EXTI 四倍频解码，USART3 上报 ESP32；ROS `/odom` 仍需 base_bridge 接入 |
-| ESP32-S3-CAM + OV2640 | Wi-Fi AP、网页手柄、MJPEG 图传 | 可做图传/遥控桥；**不能跑 SLAM/Nav2** |
+| JGB37-520 电机 ×4 | 自带霍尔编码器 | 已接入 STM32 PA12/PA15/PB3~PB8，EXTI 四倍频解码，USART3 上报 Pi Edge Server；`edge_server_node` 直接发布 `/odom` |
+| 树莓派 Edge Server | Wi-Fi AP、网页手柄、MJPEG 图传、STM32 串口 | 与 ROS 同机；承担网页/底盘/图传，ESP32-S3-CAM 仅旧版回退 |
 | PCA9685 + 机械臂 | 16 路舵机驱动 | 抓取执行；不参与导航定位 |
 | JQ6500 | 音频播放 | 与导航无关 |
 | OLED / GY-53 TOF | 调试/短距测距 | 可做辅助，不能替代 360° 激光 |
 | 12V 电池 + 降压板 | 12V/5V/3.3V | 需为新增计算平台和舵机扩容，见 §5 |
 | MPU6050 | 6 轴，代码存在但未真正接入主循环 | 可被 ICM-20948 替代；6 轴无磁力计 |
-| KiCad PCB | 含 STM32/PCA9685/L298N/ESP32/电机/舵机/喇叭 | **没有 IMU、激光、编码器、树莓派接口**，需改板或转接 |
+| KiCad PCB | 含 STM32/PCA9685/L298N/ESP32（legacy）/电机/舵机/喇叭 | **没有 IMU、激光、编码器、树莓派接口**，需改板或转接 |
 
 ### 2.2 缺失或不足
 
 | 缺口 | 影响 | 结论 |
 |---|---|---|
-| 无机载 Linux 计算平台 | ESP32-S3 无 Linux、RAM/算力不足，无法运行 slam_toolbox/Nav2/ROS2 节点 | **必须增加** 树莓派 4B/5 或 Jetson Orin Nano |
+| 无机载 Linux 计算平台 | 旧 ESP32 无 Linux；网页/底盘/ROS 合并后必须由 Pi 承担 | **使用** 树莓派 4B/5 或 Jetson Orin Nano 作为 Edge Server |
 | 无 2D 激光雷达 | 无法建图/定位/避障；`edge_server` 只开了 9600 UART，没有解析 | **必须增加** LD19/LD06/RPLIDAR A1 等 |
 | 编码器未接线/未闭环 | 无轮式里程计，EKF/Nav2 精度差，麦轮打滑无法校正 | **必须补** 4 路正交编码器 + 轮速 PID |
 | STM32F103C8T6 资源不足 | 4 路编码器需要 4 个定时器；引脚冲突多；RAM 仅剩约 2–3 KB | **建议升级** STM32F103RCT6/RET6 或 STM32F411 |
 | L298N 只有 2 路使能 | 四轮不能独立调速，麦轮全向运动学无法精确执行 | **建议换** 4 路独立 PWM 驱动（TB6612×2/DRV8871/BTS7960） |
 | 无 ICM-20948 | 只有 6 轴 MPU6050，航向漂移快，EKF 缺少可靠角速度 | **增加** ICM-20948（或替代型号），见 §6 |
-| 相机为 OV2640 + ESP32 图传 | 分辨率/延迟/曝光一般，目标检测精度有限 | 建议 Pi 接 USB/CSI 相机；OV2640 保留为备份 |
+| 相机为 OV2640 + ESP32 图传 | 分辨率/延迟/曝光一般，目标检测精度有限 | 改用 Pi USB/CSI 相机，由 Edge Server 直接推 MJPEG |
 | 无深度/可靠测距 | 2D 激光只测一个平面，目标高度/距离估计受限 | 可选深度相机；否则用“激光方位距离 + bbox 高度”估距 |
 | 电源余量不足 | Pi 5V/3A、舵机 6V/5A 峰值容易导致复位/掉电 | 独立 5V/5A UBEC + 6V/5A BEC + 保险丝 |
 | 无硬件急停 | 软件急停依赖 Wi-Fi/节点存活 | 增加常闭急停按钮，切断电机使能/驱动电源 |
 | 无电量/电流检测 | 自主任务可能突然掉电 | 增加 INA226/INA219 或分压 ADC |
 | 无防跌落/碰撞 | 激光低矮盲区、台阶/桌沿风险 | 增加 2–3 路红外/超声波悬崖传感器 + 碰撞开关 |
-| 网络架构矛盾 | ESP32 AP 与 center_server 连接冲突 | 用 Pi 做 AP/STA 或独立路由器；导航必须在车上闭环 |
+| 网络架构矛盾 | 旧 ESP32 AP 与 center_server 连接冲突 | 已由 Pi 统一做 AP/STA；导航在车上闭环 |
 
 ---
 
@@ -103,7 +103,7 @@
 |---|---|---|---|
 | A. 导航在车上（推荐） | Pi 4B/5 跑 ROS2 驱动、EKF、SLAM、Nav2、目标检测 | center_server 的 VLA/任务编排可远程 | 网络不稳定、需要实时闭环 |
 | B. 全在车上 | Jetson Orin Nano 跑全部 center_server + VLA | 无 | 无网络、要本地 VLA |
-| C. 全在 PC（不推荐） | 仅 ESP32/STM32 | center_server 远程 | 仅演示；Wi-Fi 延迟/丢包会导致导航失败 |
+| C. 全在 PC（不推荐） | 仅 Pi Edge Server + STM32 | center_server 远程 | 降级演示；网页/底盘仍在 Pi 本地闭环 |
 
 `center_server` 的代码同时支持 A/B/C：导航、建图、搜索节点只依赖标准 ROS2 话题/动作；
 远程部署时把同一套节点放到 PC 即可，但 `/cmd_vel` 闭环必须在车上或低延迟局域网内。
@@ -119,7 +119,7 @@
 | 电机 IN1–IN4 | PA11, PA10, PA9, PA8 | 左前/左后 |
 | 电机 IN5–IN8 | PB15, PB14, PB13, PB12 | 右前/右后 |
 | 左/右使能 PWM | PB0 / PB1 | TIM3_CH3/CH4 |
-| ESP32 串口 | PB10 / PB11 | USART3，9600 |
+| Pi Edge Server 串口 | PB10 / PB11 | USART3，9600 |
 | 语音/JQ6500 | PA2 / PA3 | USART2，9600 |
 | LED | PC13 | 调试 |
 | SWD | PA13 / PA14 | 下载调试 |
@@ -131,9 +131,9 @@
 
 | 冲突 | 说明 | 处理 |
 |---|---|---|
-| PB10/PB11 = USART3 vs bit-bang I2C | `iic.c`、OLED、MPU6050 都用 PB10/PB11，和 ESP32 串口冲突 | I2C 改到 PB6/PB7 或 PB8/PB9；或 UART3 改到其他引脚 |
+| PB10/PB11 = USART3 vs bit-bang I2C | `iic.c`、OLED、MPU6050 都用 PB10/PB11，和 Pi Edge Server 串口冲突 | I2C 改到 PB6/PB7 或 PB8/PB9；或 UART3 改到其他引脚 |
 | PB6/PB7 与 PB8/PB9 都标 I2C1 | STM32F1 的 I2C1 只能选一组（默认或重映射），不能同时 | 只保留一组；另一组改 GPIO/别的外设 |
-| PA9/PA10 = USART1 vs 电机 IN3/IN2 | 原理图标注 TX1/RX1，但固件当电机方向脚 | 放弃 USART1；ESP32 走 USART3 |
+| PA9/PA10 = USART1 vs 电机 IN3/IN2 | 原理图标注 TX1/RX1，但固件当电机方向脚 | 放弃 USART1；Pi Edge Server 走 USART3 |
 | PA11/PA12 = USB D-/D+ vs 电机 IN1/IN8 | 当 GPIO 后 USB 不可用 | 用 ST-Link/UART 下载；或改电机引脚 |
 | 4 路编码器无空闲定时器 | TIM3 已用于 PB0/PB1 PWM；TIM1 的 PA8/PA9 被电机占用；TIM4 的 PB6/PB7 被 I2C 占用；只剩 TIM2（PA0/PA1） | **C8T6 无法直接接 4 路编码器**，需升级 MCU 或加计数芯片 |
 | RAM 余量 | 当前 `text 15.9KB + data 1.1KB + bss 16.8KB`，20KB RAM 仅剩约 2–3KB | 加编码器/IMU/里程计/协议栈风险高；升级到 48KB/64KB RAM 的型号 |
@@ -161,7 +161,7 @@
  ├─ 保险丝/总开关
  ├─ 急停（常闭，切断电机驱动使能或 12V）
  ├─ 电机驱动 12V（L298N/TB6612/BTS7960）
- ├─ 5V/5A UBEC → 树莓派/Orin、激光雷达、USB 相机、ESP32
+ ├─ 5V/5A UBEC → 树莓派/Orin、激光雷达、USB 相机
  ├─ 6V/5A BEC → PCA9685 + MG996 舵机（独立，不与 Pi 共地噪声）
  └─ 12V→3.3V LDO → STM32/IMU/OLED（低噪声）
 ```
@@ -201,7 +201,7 @@
 |---|---|---|---|
 | A（推荐） | ICM-20948 → 树莓派 I2C1（3.3V，SDA/SCL，INT 可选） | Pi 直接读，100 Hz | 需要 `python3-smbus2`；`imu_node` 已实现 |
 | B | ICM-20948 → STM32 I2C（PB6/PB7 或 PB8/PB9） | IMU 与电机控制同板 | 需解决 I2C 引脚冲突；STM32 通过 UART 转发 |
-| C | ICM-20948 → ESP32-S3 I2C | 仅遥控/图传 | 不推荐用于 SLAM，时间戳/带宽差 |
+| C | ICM-20948 → 旧 ESP32 I2C | 仅旧版回退 | 不推荐用于 SLAM；当前已并入 Pi |
 
 接线：
 - VCC 3.3V（不要 5V），GND 共地。
@@ -247,7 +247,7 @@ ICM-42688-P + 磁力计（如 MMC5983MA）组合。当前代码的驱动接口�
 要求：
 - 扫描频率 ≥ 10 Hz；角分辨率 ≤ 1°；量程 ≥ 8 m。
 - 安装高度避开底盘/轮子遮挡，360° 无遮挡；激光平面尽量低（15–25 cm）以看到桌腿/墙脚。
-- 接 Pi USB，udev 固定 `/dev/rplidar`；不要接 ESP32 再转发（带宽/时间戳/驱动都不合适）。
+- 接 Pi USB，udev 固定 `/dev/rplidar`；不要经旧 ESP32 桥转发（带宽/时间戳/驱动都不合适）。
 - 驱动输出 `/scan`，frame_id `laser_link`；TF `base_link→laser_link` 必须标定。
 
 参考：[LD19 产品页](https://littlebirdelectronics.com.au/products/dtof-ld19-laser-lidar-sensor-kit-12m)
@@ -262,9 +262,9 @@ ICM-42688-P + 磁力计（如 MMC5983MA）组合。当前代码的驱动接口�
 |---|---|---|
 | Pi USB 1080p 广角 | 即插即用、低延迟、可换镜头 | 需 USB 带宽/供电 |
 | Pi CSI 相机 | 低延迟、硬件编码 | 排线/型号适配 |
-| ESP32 OV2640 MJPEG | 已有、无线 | 延迟/分辨率/曝光有限，不适合精细检测 |
+| 旧 ESP32 OV2640 MJPEG | 仅旧版回退 | 延迟/分辨率/曝光有限，不适合精细检测 |
 
-建议：目标检测用 Pi USB 相机；OV2640 保留做图传/备份。相机 frame `camera_link`，
+建议：目标检测和图传都用 Pi USB/CSI 相机；OV2640 仅旧版回退。相机 frame `camera_link`，
 TF `base_link→camera_link` 标定；内参用棋盘格标定后填入 `perception.camera.fx/fy/cx/cy`。
 
 ### 8.2 目标距离估计

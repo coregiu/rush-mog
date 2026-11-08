@@ -1,4 +1,4 @@
-# 健康检查服务：ROS 原生客户端使用；外部 edge_center 用 HTTP 网关。
+# 健康检查服务：ROS 原生客户端使用；同机 Edge Server/dashboard 用 HTTP 网关。
 # 请求 device_ids 为空表示返回全部设备；include_metrics=false 时 metrics_json 为空。
 string[] device_ids
 bool include_metrics true
