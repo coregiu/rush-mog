@@ -39,10 +39,10 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 from tf2_ros import TransformBroadcaster
 
-from center_server.core.body_drive import BodyDriveConfig, twist_to_body_command
-from center_server.core.odometry import MecanumGeometry, WheelOdometry, wheel_names
-from center_server.utils.clock import create_steady_clock
-from center_server.utils.config import load_config
+from edge_server.core.body_drive import BodyDriveConfig, twist_to_body_command
+from edge_server.core.odometry import MecanumGeometry, WheelOdometry, wheel_names
+from edge_server.utils.clock import create_steady_clock
+from edge_server.utils.config import load_config
 from custom_msgs.msg import SafetyState
 
 

@@ -29,7 +29,7 @@ Orin Nano）负责相机/激光/里程计采集与底盘安全控制；中心服
 └──────────────────────────────┘
 ```
 
-- 机载 ROS 包（SLAM/导航/搜索/安全）在 [`software/ros`](../ros/README.md)。
+- 机载 ROS 包（SLAM/导航/搜索/安全）在 [`software/edge_server`](../edge_server/README.md)。
 - 本文只描述中心 VLA 推理服务；两者通过 HTTP 解耦，可分别部署/升级。
 
 ---
@@ -443,7 +443,7 @@ except CenterServerError as exc:
     # fallback: 规则桩 / 停车
 ```
 
-> 现有 `software/ros` 的 `VLAEngine` 仍是规则桩。若要正式接入，建议把 HTTP
+> 现有 `software/edge_server` 的 `VLAEngine` 仍是规则桩。若要正式接入，建议把 HTTP
 > 调用放到独立异步节点，保留规则桩作为降级路径，避免同步网络阻塞控制循环。
 
 ---

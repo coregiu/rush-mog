@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from center_server.core.health_monitor import HealthMonitor
+from edge_server.core.health_monitor import HealthMonitor
 
 CAMERA = {
     "type": "camera",

@@ -1,7 +1,7 @@
 # slam_toolbox 在线异步建图（2D 激光 + 轮式里程计/EKF）
 # 用法：
 #   ros2 launch slam_toolbox online_async_launch.py \
-#     slam_params_file:=<install>/share/center_server/config/slam_toolbox.yaml
+#     slam_params_file:=<install>/share/edge_server/config/slam_toolbox.yaml
 slam_toolbox:
   ros__parameters:
     use_sim_time: false

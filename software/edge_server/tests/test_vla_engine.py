@@ -1,7 +1,7 @@
 import numpy as np
 
-from center_server.core.data_preprocessor import SyncedDTO
-from center_server.core.vla_engine import VLAEngine
+from edge_server.core.data_preprocessor import SyncedDTO
+from edge_server.core.vla_engine import VLAEngine
 
 
 def make_dto(instruction: str) -> SyncedDTO:

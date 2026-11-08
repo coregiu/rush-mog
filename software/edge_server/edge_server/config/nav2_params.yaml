@@ -1,9 +1,9 @@
 # Nav2 Humble 起步配置（麦轮/全向，2D 激光）
 # 用法：
 #   ros2 launch nav2_bringup navigation_launch.py \
-#     params_file:=<install>/share/center_server/config/nav2_params.yaml
+#     params_file:=<install>/share/edge_server/config/nav2_params.yaml
 # 注意：
-#   1) Nav2 的最终速度话题必须重映射到 /nav/cmd_vel，避免与 center_server 的
+#   1) Nav2 的最终速度话题必须重映射到 /nav/cmd_vel，避免与 edge_server 的
 #      velocity_mux 抢 /cmd_vel。参考 launch/nav2_stack.launch.py。
 #   2) 本文件是起点，robot_radius、速度、膨胀半径需在实车调参。
 #   3) 建图阶段用 slam_toolbox，不启动 amcl/map_server；定位阶段二者互斥。

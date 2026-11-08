@@ -12,10 +12,10 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 
-from center_server.core.data_preprocessor import MultiModalPreprocessor
-from center_server.core.vla_engine import ActionIntentDTO, VLAEngine
-from center_server.utils.clock import create_steady_clock
-from center_server.utils.config import load_config
+from edge_server.core.data_preprocessor import MultiModalPreprocessor
+from edge_server.core.vla_engine import ActionIntentDTO, VLAEngine
+from edge_server.utils.clock import create_steady_clock
+from edge_server.utils.config import load_config
 from custom_msgs.msg import (
     ActionIntent,
     InferenceResult,

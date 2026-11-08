@@ -7,31 +7,31 @@ from collections import deque
 import numpy as np
 import pytest
 
-from center_server.core import base_protocol as proto
-from center_server.core.imu_monitor import HeadingEstimator, ImuMonitor
-from center_server.core.instruction_parser import InstructionParser
-from center_server.core.nav_supervisor import (
+from edge_server.core import base_protocol as proto
+from edge_server.core.imu_monitor import HeadingEstimator, ImuMonitor
+from edge_server.core.instruction_parser import InstructionParser
+from edge_server.core.nav_supervisor import (
     DirectController,
     Goal,
     GoalValidator,
     ProgressMonitor,
 )
-from center_server.core.object_search import SearchConfig, SearchCoordinator, SearchState
-from center_server.core.occupancy_map import Frontier, OccupancyMap
-from center_server.core.odometry import MecanumGeometry, WheelOdometry
-from center_server.core.pose_utils import Pose2D, pose_from_msg, wrap_angle
-from center_server.core.state_machine import State, TaskStateMachine
-from center_server.core.target_localizer import (
+from edge_server.core.object_search import SearchConfig, SearchCoordinator, SearchState
+from edge_server.core.occupancy_map import Frontier, OccupancyMap
+from edge_server.core.odometry import MecanumGeometry, WheelOdometry
+from edge_server.core.pose_utils import Pose2D, pose_from_msg, wrap_angle
+from edge_server.core.state_machine import State, TaskStateMachine
+from edge_server.core.target_localizer import (
     CameraModel,
     TargetLocalizer,
     approach_pose,
     lidar_distance,
 )
-from center_server.core.target_tracker import DetectionInput, TargetTracker, Track
-from center_server.core.velocity_mux import VelocityMux
-from center_server.core.vla_engine import VLAEngine
-from center_server.drivers.icm20948 import Calibration, ICM20948
-from center_server.core.data_preprocessor import SyncedDTO
+from edge_server.core.target_tracker import DetectionInput, TargetTracker, Track
+from edge_server.core.velocity_mux import VelocityMux
+from edge_server.core.vla_engine import VLAEngine
+from edge_server.drivers.icm20948 import Calibration, ICM20948
+from edge_server.core.data_preprocessor import SyncedDTO
 
 
 # --------------------------------------------------------------- instruction

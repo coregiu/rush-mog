@@ -1,9 +1,9 @@
-"""center_server 一键启动（仿真/桌面联调默认配置）。
+"""edge_server 一键启动（仿真/桌面联调默认配置）。
 
 实车：
-    ros2 launch center_server robot_bringup.launch.py
+    ros2 launch edge_server robot_bringup.launch.py
 或：
-    ros2 launch center_server center_server.launch.py \
+    ros2 launch edge_server edge_server.launch.py \
         config_file:=.../robot.yaml start_base_bridge:=true
 """
 
@@ -45,54 +45,54 @@ def generate_launch_description():
     ]
 
     nodes = [
-        Node(package="center_server", executable=name, output="screen", parameters=params)
+        Node(package="edge_server", executable=name, output="screen", parameters=params)
         for name in CORE_NODES
     ]
     nodes += [
         Node(
-            package="center_server",
+            package="edge_server",
             executable="velocity_mux_node",
             output="screen",
             parameters=params,
             condition=IfCondition(start_mux),
         ),
         Node(
-            package="center_server",
+            package="edge_server",
             executable="localization_node",
             output="screen",
             parameters=params,
             condition=IfCondition(start_localization),
         ),
         Node(
-            package="center_server",
+            package="edge_server",
             executable="map_manager_node",
             output="screen",
             parameters=params,
             condition=IfCondition(start_map),
         ),
         Node(
-            package="center_server",
+            package="edge_server",
             executable="navigation_node",
             output="screen",
             parameters=params,
             condition=IfCondition(start_nav),
         ),
         Node(
-            package="center_server",
+            package="edge_server",
             executable="target_detector_node",
             output="screen",
             parameters=params,
             condition=IfCondition(start_perception),
         ),
         Node(
-            package="center_server",
+            package="edge_server",
             executable="object_search_node",
             output="screen",
             parameters=params,
             condition=IfCondition(start_search),
         ),
         Node(
-            package="center_server",
+            package="edge_server",
             executable="edge_server_node",
             output="screen",
             parameters=params,
@@ -104,7 +104,7 @@ def generate_launch_description():
             ),
         ),
         Node(
-            package="center_server",
+            package="edge_server",
             executable="base_bridge_node",
             output="screen",
             parameters=params,
@@ -116,7 +116,7 @@ def generate_launch_description():
             ),
         ),
         Node(
-            package="center_server",
+            package="edge_server",
             executable="esp32_bridge_node",
             output="screen",
             parameters=params,
@@ -128,7 +128,7 @@ def generate_launch_description():
             ),
         ),
         Node(
-            package="center_server",
+            package="edge_server",
             executable="imu_node",
             output="screen",
             parameters=params,

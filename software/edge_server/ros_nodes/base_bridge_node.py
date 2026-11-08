@@ -22,10 +22,10 @@ from rclpy.node import Node
 from sensor_msgs.msg import BatteryState, Imu, JointState
 from std_msgs.msg import String
 
-from center_server.core import base_protocol as proto
-from center_server.core.odometry import MecanumGeometry, WheelOdometry, wheel_names
-from center_server.utils.clock import create_steady_clock
-from center_server.utils.config import load_config
+from edge_server.core import base_protocol as proto
+from edge_server.core.odometry import MecanumGeometry, WheelOdometry, wheel_names
+from edge_server.utils.clock import create_steady_clock
+from edge_server.utils.config import load_config
 from custom_msgs.msg import SafetyState
 
 

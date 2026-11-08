@@ -1,4 +1,4 @@
-from center_server.core.body_drive import BodyDriveConfig, twist_to_body_command
+from edge_server.core.body_drive import BodyDriveConfig, twist_to_body_command
 
 CFG = BodyDriveConfig(
     max_linear=0.35,

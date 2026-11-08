@@ -26,9 +26,9 @@ from rclpy.qos import (
 )
 from sensor_msgs.msg import BatteryState, LaserScan
 
-from center_server.core.safety_checker import SafetyChecker
-from center_server.utils.clock import create_steady_clock
-from center_server.utils.config import load_config
+from edge_server.core.safety_checker import SafetyChecker
+from edge_server.utils.clock import create_steady_clock
+from edge_server.utils.config import load_config
 from custom_msgs.msg import LocalizationStatus, MissionStatus, SafetyState, SyncedSensorData
 from custom_msgs.srv import EmergencyStop
 

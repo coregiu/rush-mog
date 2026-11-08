@@ -18,12 +18,12 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image, LaserScan
 
-from center_server.core.object_detector import make_detector
-from center_server.core.pose_utils import pose_from_msg
-from center_server.core.target_localizer import TargetLocalizer
-from center_server.core.target_tracker import DetectionInput, TargetTracker
-from center_server.utils.clock import create_steady_clock
-from center_server.utils.config import load_config
+from edge_server.core.object_detector import make_detector
+from edge_server.core.pose_utils import pose_from_msg
+from edge_server.core.target_localizer import TargetLocalizer
+from edge_server.core.target_tracker import DetectionInput, TargetTracker
+from edge_server.utils.clock import create_steady_clock
+from edge_server.utils.config import load_config
 from custom_msgs.msg import TargetDetection, TargetList, TaskRequest
 
 

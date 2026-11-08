@@ -29,11 +29,11 @@ from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 
-from center_server.core.instruction_parser import InstructionParser, MissionSpec
-from center_server.core.pose_utils import Pose2D, make_pose_stamped
-from center_server.core.state_machine import State, TaskStateMachine, mission_entry_event
-from center_server.utils.clock import create_steady_clock
-from center_server.utils.config import load_config
+from edge_server.core.instruction_parser import InstructionParser, MissionSpec
+from edge_server.core.pose_utils import Pose2D, make_pose_stamped
+from edge_server.core.state_machine import State, TaskStateMachine, mission_entry_event
+from edge_server.utils.clock import create_steady_clock
+from edge_server.utils.config import load_config
 from custom_msgs.action import (
     ExecuteMission,
     ExecuteTask,

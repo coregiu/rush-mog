@@ -1,4 +1,4 @@
-"""Raspberry Pi / center_server <-> STM32 底盘串口协议（v1）。
+"""Raspberry Pi / edge_server <-> STM32 底盘串口协议（v1）。
 
 帧格式（小端）：
 

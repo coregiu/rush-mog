@@ -58,7 +58,7 @@
 | 无硬件急停 | 软件急停依赖 Wi-Fi/节点存活 | 增加常闭急停按钮，切断电机使能/驱动电源 |
 | 无电量/电流检测 | 自主任务可能突然掉电 | 增加 INA226/INA219 或分压 ADC |
 | 无防跌落/碰撞 | 激光低矮盲区、台阶/桌沿风险 | 增加 2–3 路红外/超声波悬崖传感器 + 碰撞开关 |
-| 网络架构矛盾 | 旧 ESP32 AP 与 center_server 连接冲突 | 已由 Pi 统一做 AP/STA；导航在车上闭环 |
+| 网络架构矛盾 | 旧 ESP32 AP 与 edge_server 连接冲突 | 已由 Pi 统一做 AP/STA；导航在车上闭环 |
 
 ---
 
@@ -69,7 +69,7 @@
 ```text
 ┌──────────────────────────────────────────────────────────────┐
 │ 云/PC 端（可选）                                              │
-│   center_server：VLA 推理、任务编排、HMI、日志                 │
+│   edge_server：VLA 推理、任务编排、HMI、日志                 │
 │   —— 通过 Wi-Fi/以太网与车上 ROS2 通信                        │
 └──────────────────────────┬───────────────────────────────────┘
                            │ DDS / Wi-Fi（建议有线或 5GHz）
@@ -77,7 +77,7 @@
 │ 机载 Linux 计算平台（树莓派 4B/5 或 Jetson Orin Nano）         │
 │   ROS2 Humble：                                               │
 │   激光驱动 / 相机驱动 / base_bridge / EKF / slam_toolbox /    │
-│   Nav2 / center_server（导航与搜索部分）                       │
+│   Nav2 / edge_server（导航与搜索部分）                       │
 └───────┬──────────────────┬──────────────────┬────────────────┘
         │ USB/UART         │ USB              │ I2C
 ┌───────▼────────┐ ┌───────▼────────┐ ┌───────▼────────┐
@@ -101,11 +101,11 @@
 
 | 选项 | 车上 | 云端/PC | 适用 |
 |---|---|---|---|
-| A. 导航在车上（推荐） | Pi 4B/5 跑 ROS2 驱动、EKF、SLAM、Nav2、目标检测 | center_server 的 VLA/任务编排可远程 | 网络不稳定、需要实时闭环 |
-| B. 全在车上 | Jetson Orin Nano 跑全部 center_server + VLA | 无 | 无网络、要本地 VLA |
-| C. 全在 PC（不推荐） | 仅 Pi Edge Server + STM32 | center_server 远程 | 降级演示；网页/底盘仍在 Pi 本地闭环 |
+| A. 导航在车上（推荐） | Pi 4B/5 跑 ROS2 驱动、EKF、SLAM、Nav2、目标检测 | edge_server 的 VLA/任务编排可远程 | 网络不稳定、需要实时闭环 |
+| B. 全在车上 | Jetson Orin Nano 跑全部 edge_server + VLA | 无 | 无网络、要本地 VLA |
+| C. 全在 PC（不推荐） | 仅 Pi Edge Server + STM32 | edge_server 远程 | 降级演示；网页/底盘仍在 Pi 本地闭环 |
 
-`center_server` 的代码同时支持 A/B/C：导航、建图、搜索节点只依赖标准 ROS2 话题/动作；
+`edge_server` 的代码同时支持 A/B/C：导航、建图、搜索节点只依赖标准 ROS2 话题/动作；
 远程部署时把同一套节点放到 PC 即可，但 `/cmd_vel` 闭环必须在车上或低延迟局域网内。
 
 ---
@@ -218,7 +218,7 @@ ICM-20948 (100Hz) ──/imu/data──┐
 2D 激光 + 地图 ── AMCL ────────┴─ map→odom
 ```
 
-- EKF 配置见 `center_server/config/ekf.yaml`：`two_d_mode: true`，融合 `x,y,yaw,vx,vy,vyaw` + IMU `yaw,vyaw`。
+- EKF 配置见 `edge_server/config/ekf.yaml`：`two_d_mode: true`，融合 `x,y,yaw,vx,vy,vyaw` + IMU `yaw,vyaw`。
 - `localization_node` 不替代 EKF，只做健康度/质量门控与初始位姿服务。
 - 磁力计只在“可信”时慢速校正（`mag_blend=0.02`）；电机电流大/磁场异常时标记 `mag_ok=false`，不硬切航向。
 - 磁力计需做硬铁/软铁校准；`imu.calibration.mag_bias/mag_scale` 填入实测值。
@@ -333,7 +333,7 @@ JGB37-520 常见霍尔编码器：VCC 5V、GND、A、B。四轮共 8 路信号 +
 | 散热 | 风扇/散热片 | 1 | ¥15–40 | — | Pi5/Orin |
 | 结构 | 激光/相机/IMU 支架 | 1 套 | ¥30–80 | — | 3D 打印/铝板 |
 | 可选 | RGB-D 相机（Orbbec/RealSense） | 1 | ¥800–2500 | USB | 稳定目标定位 |
-| 可选 | 独立路由器/5GHz AP | 1 | ¥100–200 | — | 远程 center_server |
+| 可选 | 独立路由器/5GHz AP | 1 | ¥100–200 | — | 远程 edge_server |
 
 **最低可跑 SLAM+导航的增量预算约 ¥900–1500**（Pi 4B + LD19 + ICM-20948 + 驱动 + 电源 + 急停 + 主控升级）。
 
@@ -348,11 +348,11 @@ JGB37-520 常见霍尔编码器：VCC 5V、GND、A、B。四轮共 8 路信号 +
 5. **跑 EKF**：`robot_localization` 融合 `/odom` + `/imu/data`，确认 `odom→base_link` TF。
 6. **跑 SLAM**：`slam_toolbox` 建图，推车/遥控走一圈，保存地图。
 7. **跑定位**：AMCL + 地图，设置初始位姿，确认 `map→odom`。
-8. **跑导航**：Nav2 或 center_server 内置直航，先空载 1 m 到点，再加载。
+8. **跑导航**：Nav2 或 edge_server 内置直航，先空载 1 m 到点，再加载。
 9. **跑目标搜索**：相机 + 激光 + 目标检测，先静态目标，再动态目标。
 10. **加安全**：急停、悬崖、电量、看门狗、远程急停。
 
-每一步都用 `center_server` 的接口做验收，避免“全部接完再调试”。
+每一步都用 `edge_server` 的接口做验收，避免“全部接完再调试”。
 
 ---
 
@@ -372,9 +372,9 @@ JGB37-520 常见霍尔编码器：VCC 5V、GND、A、B。四轮共 8 路信号 +
 
 ---
 
-## 13. 与 center_server 的接口对应
+## 13. 与 edge_server 的接口对应
 
-| 硬件 | ROS2 话题/服务 | center_server 节点 |
+| 硬件 | ROS2 话题/服务 | edge_server 节点 |
 |---|---|---|
 | 激光 | `/scan` | `bridge_node`、`safety_manager_node`、`navigation_node` |
 | 编码器/底盘 | `/odom`、`/joint_states`、`/battery_state`、`/imu/data` | `base_bridge_node` |
@@ -387,4 +387,4 @@ JGB37-520 常见霍尔编码器：VCC 5V、GND、A、B。四轮共 8 路信号 +
 | 速度 | `/cmd_vel_raw`、`/nav/cmd_vel`、`/reverse/cmd_vel`、`/safety/cmd_vel_override` → `/cmd_vel` | `velocity_mux_node` |
 | 任务 | `/center/execute_task`、`/center/execute_mission` | `task_manager_node` |
 
-详细软件设计见 [`software/center_server/DESIGN.md`](../software/center_server/DESIGN.md)。
+详细软件设计见 [`software/edge_server/DESIGN.md`](../software/edge_server/DESIGN.md)。

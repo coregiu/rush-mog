@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from center_server.edge_web import EdgeHttpApp, EdgeHttpServer, MjpegServer
+from edge_server.edge_web import EdgeHttpApp, EdgeHttpServer, MjpegServer
 
 
 class FakeRuntime:

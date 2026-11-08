@@ -99,11 +99,11 @@ x-modules:
       ros_health: 8090
     source:
       - "edge_server/ros_nodes/edge_server_node.py"
-      - "edge_server/center_server/edge_web.py"
-      - "edge_server/center_server/edge_control.py"
+      - "edge_server/edge_server/edge_web.py"
+      - "edge_server/edge_server/edge_control.py"
       - "edge_server/ros_nodes/health_monitor_node.py"
-      - "edge_server/center_server/core/health_monitor.py"
-      - "edge_server/center_server/http_health.py"
+      - "edge_server/edge_server/core/health_monitor.py"
+      - "edge_server/edge_server/http_health.py"
       - "edge_server/web/"
     docs:
       - "edge_server/README.md"
@@ -139,7 +139,7 @@ x-edge-network:
   note: "树莓派 hostapd 提供该 AP（或接入现有局域网）；手机连上后打开 http://192.168.4.1 进入 PS2 手柄页面。"
 
 x-edge-http:
-  implementation: "edge_server/center_server/edge_web.py（stdlib ThreadingHTTPServer）"
+  implementation: "edge_server/edge_server/edge_web.py（stdlib ThreadingHTTPServer）"
   method_filtering: |
     `POST`：`/cmd`、`/cmd-button`、`/cmd-stick`、`/stop`、`/api/modules/report`、
     `/api/modules/edge/params`、`/api/modules/{id}/params`。
@@ -170,7 +170,7 @@ x-edge-motion-keepalive:
 
 x-edge-command-mapping:
   note: |
-    HTTP 控制消息到 STM32 UART 命令的映射（与 edge_server/center_server/edge_control.py 一致）。
+    HTTP 控制消息到 STM32 UART 命令的映射（与 edge_server/edge_server/edge_control.py 一致）。
     `down` 为按下事件，`up` 为松开事件；null 表示松开时不发送命令。
   button:
     up:

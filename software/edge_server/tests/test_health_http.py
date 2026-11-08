@@ -4,7 +4,7 @@ import urllib.request
 
 import pytest
 
-from center_server.http_health import HealthHttpServer
+from edge_server.http_health import HealthHttpServer
 
 
 def sample_payload(*, ready=True, emergency_stop=False):

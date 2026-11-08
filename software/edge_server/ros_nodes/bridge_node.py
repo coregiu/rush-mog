@@ -15,8 +15,8 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image, Imu, JointState, LaserScan
 
-from center_server.utils.config import load_config
-from center_server.utils.time_sync import make_approximate_synchronizer
+from edge_server.utils.config import load_config
+from edge_server.utils.time_sync import make_approximate_synchronizer
 from custom_msgs.msg import AudioData, RobotState, SyncedSensorData
 
 

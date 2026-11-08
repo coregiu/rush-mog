@@ -14,9 +14,9 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import JointState, LaserScan
 from trajectory_msgs.msg import JointTrajectory
 
-from center_server.core.action_planner import ActionPlanner
-from center_server.core.safety_checker import SafetyChecker
-from center_server.utils.config import load_config
+from edge_server.core.action_planner import ActionPlanner
+from edge_server.core.safety_checker import SafetyChecker
+from edge_server.utils.config import load_config
 from custom_msgs.msg import (
     ActionIntent,
     ReverseOperation,

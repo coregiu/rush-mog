@@ -22,12 +22,12 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 
-from center_server.core.object_search import SearchConfig, SearchCoordinator, SearchState
-from center_server.core.occupancy_map import Frontier
-from center_server.core.pose_utils import Pose2D, make_pose_stamped, pose_from_msg
-from center_server.core.target_tracker import Track
-from center_server.utils.clock import create_steady_clock
-from center_server.utils.config import load_config
+from edge_server.core.object_search import SearchConfig, SearchCoordinator, SearchState
+from edge_server.core.occupancy_map import Frontier
+from edge_server.core.pose_utils import Pose2D, make_pose_stamped, pose_from_msg
+from edge_server.core.target_tracker import Track
+from edge_server.utils.clock import create_steady_clock
+from edge_server.utils.config import load_config
 from custom_msgs.action import Explore, NavigateTo, SearchObject
 from custom_msgs.msg import (
     FrontierList,

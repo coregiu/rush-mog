@@ -1,9 +1,9 @@
 # 仅用于 tests/slam_nav_check.py + fake_slam_robot.py 的联调配置。
 # 用法：
-#   ros2 launch center_server center_server.launch.py \
-#     config_file:=<repo>/software/center_server/tests/config_test.yaml \
+#   ros2 launch edge_server edge_server.launch.py \
+#     config_file:=<repo>/software/edge_server/tests/config_test.yaml \
 #     start_perception:=false start_localization:=false
-center_server:
+edge_server:
   map_manager:
     map_frame: "map"
     map_dir: "/tmp/rush_mog_maps"

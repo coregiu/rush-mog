@@ -1,6 +1,6 @@
 """可选：启动 slam_toolbox 在线建图（需要 ros-humble-slam-toolbox）。
 
-    ros2 launch center_server slam_stack.launch.py
+    ros2 launch edge_server slam_stack.launch.py
 """
 
 from launch import LaunchDescription
@@ -18,7 +18,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "slam_params_file",
                 default_value=PathJoinSubstitution(
-                    [FindPackageShare("center_server"), "config", "slam_toolbox.yaml"]
+                    [FindPackageShare("edge_server"), "config", "slam_toolbox.yaml"]
                 ),
             ),
             DeclareLaunchArgument("use_sim_time", default_value="false"),

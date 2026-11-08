@@ -26,15 +26,15 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Imu
 from tf2_ros import Buffer, TransformListener
 
-from center_server.core.imu_monitor import ImuMonitor
-from center_server.core.pose_utils import (
+from edge_server.core.imu_monitor import ImuMonitor
+from edge_server.core.pose_utils import (
     Pose2D,
     make_pose_with_covariance,
     pose_from_msg,
     yaw_from_quaternion,
 )
-from center_server.utils.clock import create_steady_clock
-from center_server.utils.config import load_config
+from edge_server.utils.clock import create_steady_clock
+from edge_server.utils.config import load_config
 from custom_msgs.msg import LocalizationStatus
 from custom_msgs.srv import SetInitialPose
 

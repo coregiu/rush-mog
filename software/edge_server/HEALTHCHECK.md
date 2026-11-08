@@ -1,9 +1,9 @@
 # ROS 健康检查接口（healthcheck）
 
-> 版本：1.1（对应 Pi Edge Server 合并后的 `center_server` 0.2.0）
+> 版本：1.1（对应 Pi Edge Server 合并后的 `edge_server` 0.2.0）
 > 调用方：Edge Server（HTTP）；ROS 内部客户端也可用 ROS 2 服务/话题
-> 实现：`ros_nodes/health_monitor_node.py` + `center_server/core/health_monitor.py`
-> 统一接口归档：[`software/api.yaml`](../api.yaml) 的 `ROS Health Gateway` 分组
+> 实现：`ros_nodes/health_monitor_node.py` + `edge_server/core/health_monitor.py`
+> 统一接口归档：[`software/api.yaml`](../api.yaml) 的 `Edge Server` 分组
 
 ---
 
@@ -57,7 +57,7 @@ Edge Server 需要用一个接口回答三个问题：
 
 ### 3.1 端点
 
-规范路径以 `/ros/*` 为准；同时保留 `/v1/*`、`/health*` 兼容别名，便于和 `center_server` 的探针习惯保持一致。
+规范路径以 `/ros/*` 为准；同时保留 `/v1/*`、`/health*` 兼容别名，便于和 `edge_server` 的探针习惯保持一致。
 
 | 方法 | 路径 | 说明 | 成功码 |
 |---|---|---|---|
@@ -309,7 +309,7 @@ Edge Server 需要用一个接口回答三个问题：
 {
   "ok": true,
   "module": "ros",
-  "name": "ROS 2 center_server",
+  "name": "ROS 2 edge_server",
   "version": "0.2.0",
   "editable": true,
   "requires_restart": false,
@@ -705,7 +705,7 @@ curl -s -H 'Authorization: Bearer <key>' http://127.0.0.1:8090/ros/health
 ## 8. 配置参考
 
 ```yaml
-center_server:
+edge_server:
   health:
     enabled: true                 # false: 节点不订阅设备，整体报 disabled
     publish_rate: 1.0             # 话题/HTTP 快照频率 Hz
@@ -771,7 +771,7 @@ center_server:
 ### 10.1 单元测试
 
 ```bash
-cd software/ros
+cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests/test_health_monitor.py tests/test_health_http.py -q
 # 29 passed
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
@@ -790,7 +790,7 @@ PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
 
 ```bash
 # 终端 A
-ros2 launch center_server center_server.launch.py
+ros2 launch edge_server edge_server.launch.py
 
 # 终端 B
 python3 tests/fake_edge_publisher.py
@@ -815,7 +815,7 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck "{}"
 
 ## 11. 版本与兼容
 
-- 当前接口版本 `0.2.0`，与 `center_server` 包版本一致；
+- 当前接口版本 `0.2.0`，与 `edge_server` 包版本一致；
 - 新增字段保持向后兼容；客户端应忽略未知字段；
 - `status` 枚举稳定：`ok`/`starting`/`degraded`/`error`/`unknown`（设备）/`disabled`；
 - 破坏性变更（改字段含义/删字段/改路径）升 minor 或 major，并在 `README.md`/`api.yaml` 同步；

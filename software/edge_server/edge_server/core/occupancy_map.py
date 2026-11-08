@@ -1,6 +1,6 @@
 """栅格地图表示、前沿提取与 map_server 兼容的 PGM/YAML 存取。
 
-center_server 不直接实现 SLAM，而是消费 slam_toolbox / cartographer / map_server
+edge_server 不直接实现 SLAM，而是消费 slam_toolbox / cartographer / map_server
 发布的 nav_msgs/OccupancyGrid。本模块负责：
 
 - 把 OccupancyGrid 转成 numpy，计算覆盖率；
@@ -363,7 +363,7 @@ class OccupancyMap:
         image = image[::-1, :]
 
         with open(pgm_path, "wb") as f:
-            f.write(b"P5\n# CREATOR: rush-mog center_server\n")
+            f.write(b"P5\n# CREATOR: rush-mog edge_server\n")
             f.write(f"{self.width} {self.height}\n255\n".encode("ascii"))
             f.write(image.tobytes())
 

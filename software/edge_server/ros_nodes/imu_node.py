@@ -11,9 +11,9 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from sensor_msgs.msg import Imu
 
-from center_server.drivers.icm20948 import Calibration, ICM20948
-from center_server.utils.clock import create_steady_clock
-from center_server.utils.config import load_config
+from edge_server.drivers.icm20948 import Calibration, ICM20948
+from edge_server.utils.clock import create_steady_clock
+from edge_server.utils.config import load_config
 
 
 class ImuNode(Node):

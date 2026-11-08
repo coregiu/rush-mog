@@ -15,9 +15,9 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectory
 
-from center_server.core.reverse_handler import ReverseHandler
-from center_server.utils.clock import create_steady_clock
-from center_server.utils.config import load_config
+from edge_server.core.reverse_handler import ReverseHandler
+from edge_server.utils.clock import create_steady_clock
+from edge_server.utils.config import load_config
 from custom_msgs.msg import ReverseOperation
 
 

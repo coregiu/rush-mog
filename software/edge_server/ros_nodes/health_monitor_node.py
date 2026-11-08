@@ -4,7 +4,7 @@
     发布  /center/health          custom_msgs/HealthStatus（TRANSIENT_LOCAL，1 Hz）
     服务  /center/healthcheck     custom_msgs/HealthCheck
     HTTP  /ros/health 等         供同机 Edge Server/dashboard 等非 ROS 调用方使用
-                                 契约见 software/ros/HEALTHCHECK.md
+                                 契约见 software/edge_server/HEALTHCHECK.md
 
 监控范围：
     - 传感器/执行器：相机、雷达、IMU、麦克风、音箱、机械臂、底盘、电池、里程计；
@@ -37,16 +37,16 @@ from rclpy.qos import (
 from sensor_msgs.msg import BatteryState, Image, Imu, JointState, LaserScan
 from std_msgs.msg import String
 
-from center_server.core.health_monitor import (
+from edge_server.core.health_monitor import (
     DeviceSpec,
     HealthMonitor,
     HealthReport,
     SERVICE_NAME,
     SERVICE_VERSION,
 )
-from center_server.http_health import HealthHttpServer
-from center_server.utils.clock import create_steady_clock
-from center_server.utils.config import load_config
+from edge_server.http_health import HealthHttpServer
+from edge_server.utils.clock import create_steady_clock
+from edge_server.utils.config import load_config
 from custom_msgs.msg import AudioData, DeviceHealth, HealthStatus, SafetyState
 from custom_msgs.srv import HealthCheck
 
@@ -683,7 +683,7 @@ class HealthMonitorNode(Node):
         return {
             "ok": True,
             "module": "ros",
-            "name": "ROS 2 center_server",
+            "name": "ROS 2 edge_server",
             "version": SERVICE_VERSION,
             "editable": True,
             "requires_restart": False,

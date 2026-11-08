@@ -39,7 +39,7 @@ ESP32 与树莓派合并后，**ROS 2 与 Edge Server 同机运行**，ROS 健�
 
 ## 1. 前置条件
 
-- Pi 已部署 `software/ros` 的 `edge_server_node`（80/8080）和 ROS 健康网关（`:8090`）；
+- Pi 已部署 `software/edge_server` 的 `edge_server_node`（80/8080）和 ROS 健康网关（`:8090`）；
 - AP `RUSH-MOG` 由树莓派 hostapd 提供，或 CENTER 与 Pi 在同一局域网；
 - CENTER 主机有 Wi-Fi，并安装 NetworkManager（`nmcli`）；没有 `nmcli` 时脚本只会上报，不会主动切网；
 - Python 3.8+，并安装 PyYAML；

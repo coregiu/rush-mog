@@ -1,7 +1,7 @@
 """Healthcheck HTTP 网关（stdlib，无 ROS 依赖）。
 
 `health_monitor_node` 内嵌本模块，把最新的健康快照以 HTTP/JSON 暴露给
-同机 Edge Server/dashboard 等非 ROS 调用方。接口契约见 `software/ros/HEALTHCHECK.md`。
+同机 Edge Server/dashboard 等非 ROS 调用方。接口契约见 `software/edge_server/HEALTHCHECK.md`。
 
 设计要点：
 - HTTP 线程只读取节点预计算好的快照，不直接调用 rclpy，避免线程安全问题；
@@ -25,7 +25,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from .core.health_monitor import SERVICE_NAME, SERVICE_VERSION
 
-LOGGER = logging.getLogger("center_server.health_http")
+LOGGER = logging.getLogger("edge_server.health_http")
 
 _DEVICE_PATH = re.compile(r"^/(?:ros/health/devices|v1/health|healthcheck)/([^/]+)$")
 _DETAIL_PATHS = {"/health", "/healthcheck", "/v1/health", "/ros/health"}

@@ -2,7 +2,7 @@
 
 > 版本：0.1.0（2026-11）  
 > 对应上位机文档：[README.md](README.md)  
-> 对应机载 ROS 包：[`software/ros`](../ros/README.md)
+> 对应机载 ROS 包：[`software/edge_server`](../edge_server/README.md)
 
 ---
 
@@ -18,7 +18,7 @@
 | 实车验证 | 未做硬件在环；需联调相机、Wi-Fi、GPU 延迟 |
 
 本文描述的是**中心推理服务**，不包含机载 ROS 的 SLAM/导航/速度仲裁；
-那部分在 `software/ros` 的 center_server v2 包中。
+那部分在 `software/edge_server` 的 edge_server 包中。
 
 ---
 
@@ -38,7 +38,7 @@
 
 非目标：
 
-- 不做 SLAM/建图/导航/目标检测（在 `software/ros`）；
+- 不做 SLAM/建图/导航/目标检测（在 `software/edge_server`）；
 - 不做多机器人调度、模型热切换、训练；
 - 不做 TLS 终止（交给反向代理）。
 
@@ -405,7 +405,7 @@ response: actions[T][D] + base_cmd(第 1 步) + arm_cmd(第 1 步)
 5. HTTP 失败/超时 → 丢弃动作块、停车、回退规则桩；
 6. `confidence` 不由本服务伪造；执行门控由 ROS 基于安全检查/动作一致性实现。
 
-现有 `software/ros/center_server/core/vla_engine.py` 仍是规则桩；正式接入
+现有 `software/edge_server/edge_server/core/vla_engine.py` 仍是规则桩；正式接入
 建议新增异步 `smolvla_client_node`，保留规则桩作为降级路径，避免在 ROS
 定时器里同步阻塞网络请求。
 

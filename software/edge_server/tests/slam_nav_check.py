@@ -10,7 +10,7 @@
 6. ExecuteMission map 建图 + 探索 + 保存。
 
 用法：
-    ros2 launch center_server center_server.launch.py \
+    ros2 launch edge_server edge_server.launch.py \
         config_file:=$(pwd)/tests/config_test.yaml \
         start_perception:=false start_localization:=false
     python3 tests/fake_slam_robot.py

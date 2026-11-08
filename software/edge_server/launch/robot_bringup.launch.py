@@ -1,4 +1,4 @@
-"""实车 bringup：树莓派 Edge Server（网页/底盘） + center_server + 可选 ICM-20948。
+"""实车 bringup：树莓派 Edge Server（网页/底盘） + edge_server + 可选 ICM-20948。
 
 默认由 `edge_server_node` 直连 STM32 USART3（9600 ASCII 协议），同时提供
 80 端口网页/API 和 8080 MJPEG；`/cmd_vel` 与网页手动控制共用同一个串口出口。
@@ -8,7 +8,7 @@
 - 树莓派/Orin 已装 ROS2 Humble；
 - STM32 已烧录 body_control 固件，串口 9600 8N1，建议 udev 固定为 /dev/rush_base；
 - 激光雷达驱动、相机驱动、robot_localization EKF、slam_toolbox/Nav2 另行启动；
-- 80 端口需要 root 或 CAP_NET_BIND_SERVICE（systemd 示例见 software/ros/README.md）。
+- 80 端口需要 root 或 CAP_NET_BIND_SERVICE（systemd 示例见 software/edge_server/README.md）。
 """
 
 from launch import LaunchDescription
@@ -26,7 +26,7 @@ def generate_launch_description():
     center = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution(
-                [FindPackageShare("center_server"), "launch", "center_server.launch.py"]
+                [FindPackageShare("edge_server"), "launch", "edge_server.launch.py"]
             )
         ),
         launch_arguments={
@@ -48,7 +48,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "config_file",
                 default_value=PathJoinSubstitution(
-                    [FindPackageShare("center_server"), "config", "robot.yaml"]
+                    [FindPackageShare("edge_server"), "config", "robot.yaml"]
                 ),
                 description="Robot config.yaml",
             ),

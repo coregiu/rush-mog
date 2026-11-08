@@ -37,17 +37,17 @@ from sensor_msgs.msg import Image, JointState
 from std_msgs.msg import String
 from tf2_ros import TransformBroadcaster
 
-from center_server.core.body_drive import BodyDriveConfig, twist_to_body_command
-from center_server.core.odometry import MecanumGeometry, WheelOdometry, wheel_names
-from center_server.edge_control import (
+from edge_server.core.body_drive import BodyDriveConfig, twist_to_body_command
+from edge_server.core.odometry import MecanumGeometry, WheelOdometry, wheel_names
+from edge_server.edge_control import (
     BodyTelemetry,
     MotionState,
     dispatch_control_message,
     parse_body_line,
 )
-from center_server.edge_web import EdgeHttpApp, EdgeHttpServer, MjpegServer
-from center_server.utils.clock import create_steady_clock
-from center_server.utils.config import load_config
+from edge_server.edge_web import EdgeHttpApp, EdgeHttpServer, MjpegServer
+from edge_server.utils.clock import create_steady_clock
+from edge_server.utils.config import load_config
 from custom_msgs.msg import SafetyState
 
 try:  # 相机/图传是可降级能力，缺失时网页仍可用
@@ -407,7 +407,7 @@ class EdgeServerNode(Node):
         try:
             from ament_index_python.packages import get_package_share_directory
 
-            return os.path.join(get_package_share_directory("center_server"), "web")
+            return os.path.join(get_package_share_directory("edge_server"), "web")
         except Exception:  # noqa: BLE001
             return os.path.join(os.path.dirname(__file__), "..", "web")
 

@@ -1,4 +1,4 @@
-# center_server 详细设计（ROS2：Pi Edge Server + VLA + SLAM + 导航 + 目标搜索）
+# edge_server 详细设计（ROS2：Pi Edge Server + VLA + SLAM + 导航 + 目标搜索）
 
 > 版本：v2.0（2026-11）
 > 对应硬件目标：树莓派 4B/5 或 Jetson Orin Nano + STM32 + 2D 激光 + ICM-20948 + 4 路编码器。
@@ -10,9 +10,9 @@
 
 | 项目 | 状态 |
 |---|---|
-| 代码 | `software/ros`（ament_python，ROS2 Humble） |
+| 代码 | `software/edge_server`（ament_python，ROS2 Humble） |
 | 消息/动作 | `software/custom_msgs`（v0.2.0） |
-| 构建 | `colcon build --packages-select custom_msgs center_server` 通过 |
+| 构建 | `colcon build --packages-select custom_msgs edge_server` 通过 |
 | 单元测试 | `pytest tests -q`：94 passed（新增 Edge 控制/HTTP 25 项） |
 | 健康检查 | `test_health_monitor.py` + `test_health_http.py`：29 passed；ROS/HTTP 手工联调通过 |
 | VLA/安全端到端 | `end_to_end_check.py`：7/7 passed |
@@ -24,7 +24,7 @@
 
 ## 1. 设计目标
 
-`center_server` 是 Rush-MOG 的**决策与任务中心**，在 v1 的 VLA 推理/安全/反向操作之上，
+`edge_server` 是 Rush-MOG 的**决策与任务中心**，在 v1 的 VLA 推理/安全/反向操作之上，
 增加五类能力：
 
 1. **SLAM 建图**：消费 2D 激光与里程计，控制 slam_toolbox 建图、保存/加载地图、发布前沿。
@@ -50,14 +50,14 @@
 ```text
 ┌──────────────────────────────────────────────────────────────┐
 │ 云端 / PC（可选）                                             │
-│   center_server：VLA、任务编排、HMI、日志、地图管理             │
+│   edge_server：VLA、任务编排、HMI、日志、地图管理             │
 └──────────────────────────┬───────────────────────────────────┘
                            │ DDS / Wi-Fi（建议 5GHz 或有线）
 ┌──────────────────────────▼───────────────────────────────────┐
 │ 机载 Linux（Pi 4B/5 或 Orin Nano）                             │
 │   Edge Server :80/:8080（网页/API/图传 + STM32 串口）           │
 │   ROS2 Humble：激光/相机驱动、EKF、slam_toolbox、Nav2、          │
-│   center_server 的导航/搜索/定位节点                            │
+│   edge_server 的导航/搜索/定位节点                            │
 └───────┬──────────────────┬──────────────────┬────────────────┘
         │ USB/UART         │ USB/CSI          │ I2C
 ┌───────▼────────┐ ┌───────▼────────┐ ┌───────▼────────┐
@@ -79,7 +79,7 @@
 |---|---|---|---|
 | A（推荐） | Pi 跑驱动/EKF/SLAM/Nav2/搜索 | VLA/任务编排可远程 | 实时闭环在车上，网络差也可用 |
 | B | Orin Nano 跑全部 | 无 | 本地 VLA，成本高 |
-| C | 仅 Pi + STM32 | center_server 远程 | 降级演示；Web/底盘仍在 Pi 本地闭环 |
+| C | 仅 Pi + STM32 | edge_server 远程 | 降级演示；Web/底盘仍在 Pi 本地闭环 |
 
 代码对 A/B/C 相同；区别只是节点放在哪台机器、DDS 网络怎么配。
 
@@ -92,7 +92,7 @@ ESP32 与树莓派两个模块已合并为**一台树莓派 Edge Server**：
   解析 `$B,...` 编码器遥测；
 - 网页手柄/摇杆手动控制与 ROS `/cmd_vel` 共用同一个串口出口：网页手动优先，
   松开/停止后 ROS 导航恢复；ROS raw 命令保留第二字节并带 1s 租约；
-- ROS 侧仍由 `center_server` 的 VLA/SLAM/导航/搜索节点组成，与 Edge Server
+- ROS 侧仍由 `edge_server` 的 VLA/SLAM/导航/搜索节点组成，与 Edge Server
   同机运行；`health_monitor_node` 的 HTTP `:8090` 由 Edge Server 同机代理；
 - 旧的 `esp32_bridge_node`（Wi-Fi HTTP 桥）和 `base_bridge_node`（二进制串口）
   仅作为历史兼容保留，`robot.yaml` 默认 `base.transport=edge_serial`。
@@ -144,8 +144,8 @@ software/
 │   ├── msg/*.msg
 │   ├── srv/*.srv
 │   └── action/*.action
-└── ros/
-    ├── center_server/
+└── edge_server/                      # ROS 包根目录
+    ├── edge_server/                  # Python 包
     │   ├── config/
     │   │   ├── config.yaml           # 仿真/桌面默认
     │   │   ├── robot.yaml            # 实车覆盖
@@ -156,7 +156,7 @@ software/
     │   │   ├── action_planner.py
     │   │   ├── base_protocol.py      # STM32 二进制帧/CRC
     │   │   ├── data_preprocessor.py
-    │   │   ├── health_monitor.py      # 设备/节点健康状态机（纯逻辑）
+    │   │   ├── health_monitor.py     # 设备/节点健康状态机（纯逻辑）
     │   │   ├── imu_monitor.py        # ICM-20948 健康度/航向
     │   │   ├── instruction_parser.py # 文本 -> 任务
     │   │   ├── nav_supervisor.py     # 目标校验/停滞/直航
@@ -172,14 +172,16 @@ software/
     │   │   ├── target_tracker.py
     │   │   ├── velocity_mux.py
     │   │   └── vla_engine.py
+    │   ├── edge_control.py           # 网页按钮/摇杆/运动保活
+    │   ├── edge_web.py               # Edge 网页/API/MJPEG
     │   ├── http_health.py            # 健康检查 HTTP 网关（stdlib）
     │   ├── drivers/
     │   │   └── icm20948.py           # 寄存器级 I2C 驱动
     │   └── utils/
     ├── ros_nodes/                    # 16 个节点（含 edge_server_node）
-    ├── web/                          # 手柄页/dashboard/静态资源（原 edge_server/data）
+    ├── web/                          # 手柄页/dashboard/静态资源
     ├── launch/
-    │   ├── center_server.launch.py
+    │   ├── edge_server.launch.py
     │   ├── robot_bringup.launch.py
     │   ├── slam_stack.launch.py
     │   └── nav2_stack.launch.py
@@ -224,14 +226,14 @@ software/
 
 ```bash
 # 仿真/桌面（默认 config.yaml）
-ros2 launch center_server center_server.launch.py
+ros2 launch edge_server edge_server.launch.py
 
 # 实车（robot.yaml + 底盘串口）
-ros2 launch center_server robot_bringup.launch.py
+ros2 launch edge_server robot_bringup.launch.py
 
 # 可选外部栈
-ros2 launch center_server slam_stack.launch.py
-ros2 launch center_server nav2_stack.launch.py map:=/path/to/map.yaml
+ros2 launch edge_server slam_stack.launch.py
+ros2 launch edge_server nav2_stack.launch.py map:=/path/to/map.yaml
 ```
 
 ---
@@ -535,7 +537,7 @@ FAILED
 | Pi→STM32 | 两位命令，如 `15` / `95` | 方向/转向 + PWM 档位 1~9 |
 | STM32→Pi | `$B,<seq>,<uptime_ms>,<fl>,<fr>,<rl>,<rr>,<distance_mm>` | 四轮 mm/s、总里程 mm，约 10Hz |
 
-主机侧逻辑在 `center_server/edge_control.py`（纯逻辑，可单测）：
+主机侧逻辑在 `edge_server/edge_control.py`（纯逻辑，可单测）：
 
 - 按钮/摇杆消息映射与 `software/api.yaml` 完全一致；
 - 网页手动命令按下后保持，`edge_server_node` 每 `motion_keepalive_ms`
@@ -569,8 +571,8 @@ MJPEG 在 8080 端口，订阅 ROS `/camera/image_raw`，由 `cv_bridge` 转 JPE
 
 ### 6.14 配置与日志
 
-- 配置优先级：`config_file` 参数 > `CENTER_SERVER_CONFIG` 环境变量 > 安装目录 `config.yaml`；
-- 所有节点共享 `center_server:` 顶层命名空间；
+- 配置优先级：`config_file` 参数 > `EDGE_SERVER_CONFIG` 环境变量（兼容旧 `CENTER_SERVER_CONFIG`）> 安装目录 `config.yaml`；
+- 所有节点共享 `edge_server:` 顶层命名空间；
 - 日志用 `rclpy`/stdlib logging，不依赖 loguru；
 - 提供 `config.yaml`（仿真）与 `robot.yaml`（实车）；
 - `ekf.yaml`/`slam_toolbox.yaml`/`nav2_params.yaml` 为外部栈配置。
@@ -820,11 +822,11 @@ edge/Pi sensors → bridge_node → /center/synced_data
 
 ## 11. 实时性与安全
 
-- **速度闭环在车上**：`velocity_mux` + `edge_server_node` + STM32 看门狗；远程 center_server 断线时底盘自动回零。
+- **速度闭环在车上**：`velocity_mux` + `edge_server_node` + STM32 看门狗；远程 edge_server 断线时底盘自动回零。
 - **急停优先级最高**：安全覆盖 > 反向 > 遥控 > 导航 > VLA。
 - **超时**：每个速度源 0.5–0.6s 超时；STM32 自 0.5s 看门狗。
 - **QoS**：状态用 TRANSIENT_LOCAL；传感器用 best effort；地图发布 TRANSIENT_LOCAL。
-- **不要在 Wi-Fi 上跑底盘闭环**：Nav2 建议在 Pi/Orin 上运行，center_server 远程只做高层任务。
+- **不要在 Wi-Fi 上跑底盘闭环**：Nav2 建议在 Pi/Orin 上运行，edge_server 远程只做高层任务。
 - **硬件急停**：软件之外必须有常闭急停切断电机驱动。
 
 ---
@@ -838,24 +840,24 @@ edge/Pi sensors → bridge_node → /center/synced_data
 3. 启动相机：`/camera/image_raw`。
 4. 启动 Pi Edge Server（网页/API/MJPEG + STM32 串口 + ROS 桥）：
    ```bash
-   ros2 launch center_server robot_bringup.launch.py
+   ros2 launch edge_server robot_bringup.launch.py
    ```
    确认 `http://<pi-ip>/` 可打开、8080 `/stream` 有图、`/odom` 和 `/base/status` 正常；
    80 端口需要 root 或 `CAP_NET_BIND_SERVICE`。
 5. 启动 EKF：
    ```bash
    ros2 run robot_localization ekf_node --ros-args \
-     --params-file <install>/share/center_server/config/ekf.yaml
+     --params-file <install>/share/edge_server/config/ekf.yaml
    ```
 6. 建图（`robot_bringup` 已在第 4 步启动）：
    ```bash
-   ros2 launch center_server slam_stack.launch.py
+   ros2 launch edge_server slam_stack.launch.py
    ros2 action send_goal /center/execute_mission custom_msgs/action/ExecuteMission \
      "{mission_id: map1, mission_type: map, target_coverage: 0.9, save_map: true}"
    ```
 7. 定位：停 slam_toolbox，启动 Nav2 localization（map_server+AMCL）：
    ```bash
-   ros2 launch center_server nav2_stack.launch.py map:=$HOME/rush_mog/maps/rush_mog.yaml
+   ros2 launch edge_server nav2_stack.launch.py map:=$HOME/rush_mog/maps/rush_mog.yaml
    ```
 8. 导航/搜索：
    ```bash
@@ -874,7 +876,7 @@ edge/Pi sensors → bridge_node → /center/synced_data
 ### 12.2 仿真/桌面
 
 ```bash
-ros2 launch center_server center_server.launch.py
+ros2 launch edge_server edge_server.launch.py
 python3 tests/fake_edge_publisher.py
 python3 tests/end_to_end_check.py       # 7/7
 ```
@@ -882,8 +884,8 @@ python3 tests/end_to_end_check.py       # 7/7
 SLAM/导航/搜索联调：
 
 ```bash
-ros2 launch center_server center_server.launch.py \
-  config_file:=<repo>/software/ros/tests/config_test.yaml \
+ros2 launch edge_server edge_server.launch.py \
+  config_file:=<repo>/software/edge_server/tests/config_test.yaml \
   start_perception:=false start_localization:=false
 python3 tests/fake_slam_robot.py
 python3 tests/slam_nav_check.py          # 6/6
@@ -921,7 +923,7 @@ python3 tests/slam_nav_check.py          # 6/6
 > `ROS_DOMAIN_ID=77 ROS_LOCALHOST_ONLY=1 FASTDDS_BUILTIN_TRANSPORTS=UDPv4`。
 
 ```bash
-cd software/ros
+cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
 # 94 passed
 ```
@@ -999,7 +1001,7 @@ python3 tests/slam_nav_check.py
 
 ## 16. 总结
 
-`center_server` v2 在 v1 的 VLA 推理、安全、反向操作之上，补齐了 **SLAM 建图、ICM-20948 定位、
+`edge_server` v2 在 v1 的 VLA 推理、安全、反向操作之上，补齐了 **SLAM 建图、ICM-20948 定位、
 Nav2/直航导航、目标检测/搜索/接近、速度仲裁、底盘串口桥、健康检查**。软件链路已通过
 94 项单元测试（含 29 项健康检查）、7 项 VLA/安全端到端、6 项 SLAM/导航/搜索联调；
 实车落地还差 STM32 固件升级、硬件选型（见 `hardware/SLAM_NAV.md`）、现场标定，以及

@@ -7,12 +7,12 @@ RushMog智能系统包括语音控制系统，车体控制系统，视觉分析�
 - 激光雷达系统。由机载树莓派/Orin 接 2D 激光雷达，发布 `/scan`；`slam_toolbox` 建图，`AMCL` 定位。硬件方案见 [hardware/SLAM_NAV.md](../hardware/SLAM_NAV.md)。
 - VLA推理系统。由 `software/center_server` 的 SmolVLA HTTP 服务执行真实策略推理；机载 ROS 负责采集、安全门控与执行，规则桩保留为降级路径。
 - 机械臂系统。PCA9685 驱动，`/arm/trajectory` 接口；抓取/放置轨迹待 IK 接入。
-- SLAM/导航/目标搜索系统。由 `software/ros` 的 center_server v2 实现：建图、定位健康度、Nav2/直航、目标检测、前沿探索、目标确认与接近。
-- 健康检查系统。由 `software/ros` 的 `health_monitor_node` 实现：ROS 节点/话题 + 相机/雷达/IMU/麦克风/音箱/机械臂/底盘/电池等设备健康，HTTP 供同机 Edge Server/dashboard 代理。
+- SLAM/导航/目标搜索系统。由 `software/edge_server` 的 ROS 包 `edge_server` 实现：建图、定位健康度、Nav2/直航、目标检测、前沿探索、目标确认与接近。
+- 健康检查系统。由 `software/edge_server` 的 `health_monitor_node` 实现：ROS 节点/话题 + 相机/雷达/IMU/麦克风/音箱/机械臂/底盘/电池等设备健康，HTTP 供同机 Edge Server/dashboard 代理。
 
 ![](architechture.png)
 
-> **计算平台说明**：ESP32 与树莓派模块已合并，Wi-Fi/网页/底盘串口与 ROS2/slam_toolbox/Nav2 全部由机载树莓派 Edge Server 承担；`software/edge_server` 仅保留历史参考。
+> **计算平台说明**：ESP32 与树莓派模块已合并，Wi-Fi/网页/底盘串口与 ROS2/slam_toolbox/Nav2 全部由机载树莓派 Edge Server（`software/edge_server`）承担；旧 ESP32 固件已移除。
 > SLAM/导航/目标搜索必须在机载树莓派 4B/5 或 Jetson Orin Nano 上运行。
 
 
@@ -59,7 +59,7 @@ RushMog智能系统包括语音控制系统，车体控制系统，视觉分析�
 
 > 当前 STM32 固件使用 ASCII 命令协议，并通过 USART3 周期回传 `$B,...` 四轮编码器遥测；
 > Pi 上的 `edge_server_node` 已直接接入并发布 `/odom`、`/joint_states`、`/base/status`。
-> `center_server` 另保留二进制协议主机侧（`base_protocol.py` / `base_bridge_node`），
+> `edge_server` 另保留二进制协议主机侧（`base_protocol.py` / `base_bridge_node`），
 > 升级固件（4 路独立 PWM + 轮速 PID + 二进制帧）后可切换以获得更平滑的闭环。
 
 

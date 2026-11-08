@@ -5,11 +5,11 @@ import numpy as np
 from geometry_msgs.msg import Twist
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
-from center_server.core.action_planner import ActionPlanner
-from center_server.core.data_preprocessor import MultiModalPreprocessor
-from center_server.core.reverse_handler import ReverseHandler
-from center_server.core.safety_checker import SafetyChecker
-from center_server.core.state_machine import State, TaskStateMachine
+from edge_server.core.action_planner import ActionPlanner
+from edge_server.core.data_preprocessor import MultiModalPreprocessor
+from edge_server.core.reverse_handler import ReverseHandler
+from edge_server.core.safety_checker import SafetyChecker
+from edge_server.core.state_machine import State, TaskStateMachine
 
 
 def make_intent(intent="forward", value=0.5, target="base", reverse=False):

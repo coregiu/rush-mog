@@ -1,4 +1,4 @@
-center_server:
+edge_server:
   # ======================================================================
   # 默认配置：仿真/桌面联调（fake_edge_publisher）
   # 实车请用 config_file:=.../robot.yaml
@@ -285,7 +285,7 @@ center_server:
   # 健康检查（health_monitor_node）
   #   GET  http://127.0.0.1:8090/ros/health   -> Edge Server / dashboard
   #   ROS  /center/health + /center/healthcheck
-  # 接口契约与字段语义见 software/ros/HEALTHCHECK.md。
+  # 接口契约与字段语义见 software/edge_server/HEALTHCHECK.md。
   # 仿真默认：camera/lidar/odom/arm 由 fake_edge_publisher 提供；
   # imu/microphone/speaker 为可选；base/battery 关闭。
   # ======================================================================

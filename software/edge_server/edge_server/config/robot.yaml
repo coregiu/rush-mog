@@ -1,13 +1,13 @@
 # ============================================================================
 # Rush-MoG 实车配置（树莓派/Orin + STM32 + LD19/LD06 + ICM-20948）
 # 用法：
-#   ros2 launch center_server center_server.launch.py \
-#       config_file:=<install>/share/center_server/config/robot.yaml \
+#   ros2 launch edge_server edge_server.launch.py \
+#       config_file:=<install>/share/edge_server/config/robot.yaml \
 #       start_base_bridge:=true
 # 说明：本文件是“覆盖式”配置，未列出的参数使用节点内默认值；
 #       但为了可维护性，关键参数都在这里显式给出。
 # ============================================================================
-center_server:
+edge_server:
   sensor_topics:
     image: "/camera/image_raw"     # 树莓派 USB/CSI 相机（Edge Server 订阅后转 MJPEG）
     laser: "/scan"                  # LD19/LD06/RPLidar 驱动输出
@@ -69,7 +69,7 @@ center_server:
       host: "0.0.0.0"
       port: 80                     # 需要 root 或 CAP_NET_BIND_SERVICE
       stream_port: 8080
-      root: ""                     # 空 = share/center_server/web
+      root: ""                     # 空 = share/edge_server/web
       sdcard_dir: ""               # /sdcard/* 映射目录，空则 404
     camera:
       enabled: true
@@ -305,7 +305,7 @@ center_server:
   # 健康检查（health_monitor_node）
   #   GET  http://127.0.0.1:8090/ros/health   -> Edge Server/dashboard
   #   ROS  /center/health + /center/healthcheck
-  # 接口契约与字段语义见 software/ros/HEALTHCHECK.md。
+  # 接口契约与字段语义见 software/edge_server/HEALTHCHECK.md。
   #
   # 设备反馈缺口（当前代码未发布，状态会显示 unknown，不影响整体 ok）：
   #   - speaker: /body/audio_status（建议 STM32 桥接后发布 JSON）

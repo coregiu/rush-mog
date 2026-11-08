@@ -29,8 +29,8 @@ from rclpy.qos import (
 )
 from sensor_msgs.msg import LaserScan
 
-from center_server.core.pose_utils import Pose2D, quaternion_from_yaw
-from center_server.utils.clock import create_steady_clock
+from edge_server.core.pose_utils import Pose2D, quaternion_from_yaw
+from edge_server.utils.clock import create_steady_clock
 from custom_msgs.msg import (
     LocalizationStatus,
     SafetyState,

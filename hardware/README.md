@@ -101,13 +101,13 @@ ESP32 与树莓派两个模块已合并，Wi-Fi AP、网页手柄、MJPEG 图传
 #### 机载计算机
 树莓派 4B/5 或 Jetson Orin Nano，跑 Ubuntu 22.04 + ROS2 Humble：
 `edge_server_node`（网页/API/MJPEG/STM32 串口）、激光/相机驱动、
-`robot_localization` EKF、`slam_toolbox`、Nav2、`center_server` 的导航/搜索节点。
+`robot_localization` EKF、`slam_toolbox`、Nav2、`edge_server` 的导航/搜索节点。
 需要 5V/5A 供电和散热；80 端口需要 root 或 `CAP_NET_BIND_SERVICE`。
 
 #### ICM-20948 9 轴 IMU
 替代 MPU6050。3.3V I2C（0x68/0x69），AK09916 磁力计通过 bypass 访问。安装在底盘中心、
 刚性固定、远离电机/电池/大电流线。100 Hz 输出，用于 EKF 融合；磁力计受电机干扰时只做
-慢速校正，不硬切航向。驱动和标定见 `software/center_server/center_server/drivers/icm20948.py`
+慢速校正，不硬切航向。驱动和标定见 `software/edge_server/edge_server/drivers/icm20948.py`
 与 [SLAM_NAV.md](SLAM_NAV.md) §6。
 
 > ICM-20948 已进入 NRND/替代周期，新设计可评估 ICM-42688-P + 磁力计组合。
@@ -172,7 +172,7 @@ MPU6050 为旧方案（6 轴）；目标方案使用 ICM-20948（9 轴，含 AK0
 #### 树莓派
 <img src="modules/raspberry.jpg" />
 树莓派 4B/5（或 Orin Nano）作为机载 ROS2 计算平台：接激光雷达、相机、ICM-20948，
-通过 UART 与 STM32 通信，运行 EKF/SLAM/Nav2 与 center_server 的导航/搜索节点。
+通过 UART 与 STM32 通信，运行 EKF/SLAM/Nav2 与 edge_server 的导航/搜索节点。
 
 ## SLAM/导航硬件改造清单
 

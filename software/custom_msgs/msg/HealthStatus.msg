@@ -1,7 +1,7 @@
 # ROS 系统 + 全部连接设备的健康快照。
 # 发布：/center/health（TRANSIENT_LOCAL，约 1 Hz）
 # 服务：/center/healthcheck（custom_msgs/srv/HealthCheck）
-# HTTP：GET /ros/health（见 software/ros/HEALTHCHECK.md）
+# HTTP：GET /ros/health（见 software/edge_server/HEALTHCHECK.md）
 std_msgs/Header header
 
 # 整体状态：

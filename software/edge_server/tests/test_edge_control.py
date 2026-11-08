@@ -2,7 +2,7 @@
 
 import pytest
 
-from center_server.edge_control import (
+from edge_server.edge_control import (
     MotionState,
     button_command,
     dispatch_control_message,

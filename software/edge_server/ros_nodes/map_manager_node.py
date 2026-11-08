@@ -26,9 +26,9 @@ from rclpy.qos import (
     ReliabilityPolicy,
 )
 
-from center_server.core.occupancy_map import OccupancyMap
-from center_server.utils.clock import create_steady_clock
-from center_server.utils.config import load_config
+from edge_server.core.occupancy_map import OccupancyMap
+from edge_server.utils.clock import create_steady_clock
+from edge_server.utils.config import load_config
 from custom_msgs.msg import Frontier, FrontierList, MapInfo
 from custom_msgs.srv import MapControl
 

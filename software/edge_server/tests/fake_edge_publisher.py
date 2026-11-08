@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""模拟 edge_server 发布多模态传感器数据，用于 center_server 本地联调。
+"""模拟 edge_server 发布多模态传感器数据，用于 edge_server 本地联调。
 
 用法（先 source 工作空间 install/setup.bash）：
-    python3 software/center_server/tests/fake_edge_publisher.py
+    python3 software/edge_server/tests/fake_edge_publisher.py
 
 运行中动态调整前方障碍距离：
     ros2 topic pub --once /sim/obstacle_distance std_msgs/msg/Float32 "{data: 0.2}"
@@ -24,7 +24,7 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image, JointState, LaserScan
 from std_msgs.msg import Float32
 
-from center_server.utils.clock import create_steady_clock
+from edge_server.utils.clock import create_steady_clock
 from custom_msgs.msg import AudioData
 
 

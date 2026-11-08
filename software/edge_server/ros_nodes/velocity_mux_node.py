@@ -19,9 +19,9 @@ from geometry_msgs.msg import Twist
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 
-from center_server.core.velocity_mux import VelocityMux
-from center_server.utils.clock import create_steady_clock
-from center_server.utils.config import load_config
+from edge_server.core.velocity_mux import VelocityMux
+from edge_server.utils.clock import create_steady_clock
+from edge_server.utils.config import load_config
 from custom_msgs.msg import SafetyState, VelocityMuxStatus
 
 

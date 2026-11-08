@@ -1,7 +1,7 @@
 # robot_localization EKF：轮式里程计 + ICM-20948
 # 用法：
 #   ros2 run robot_localization ekf_node --ros-args \
-#     --params-file <install>/share/center_server/config/ekf.yaml
+#     --params-file <install>/share/edge_server/config/ekf.yaml
 #
 # 坐标树：
 #   map --(AMCL)--> odom --(EKF)--> base_link

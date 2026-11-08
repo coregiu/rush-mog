@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""center_server 端到端冒烟测试（需要 launch + fake_edge_publisher 已在运行）。"""
+"""edge_server 端到端冒烟测试（需要 launch + fake_edge_publisher 已在运行）。"""
 
 import collections
 import re
@@ -26,7 +26,7 @@ from custom_msgs.srv import EmergencyStop, SetMode
 
 class IntegrationTest(Node):
     def __init__(self):
-        super().__init__("center_server_integration_test")
+        super().__init__("edge_server_integration_test")
         self.lock = threading.Lock()
         self.cmds = collections.deque(maxlen=500)
         self.statuses = collections.deque(maxlen=100)

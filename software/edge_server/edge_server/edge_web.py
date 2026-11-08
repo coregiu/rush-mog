@@ -9,7 +9,7 @@
 
 运行时（ROS 节点/测试 fake）通过 ``runtime`` 注入，HTTP 线程只读快照，
 不直接调用 rclpy。接口契约见 ``software/api.yaml`` 和
-``software/ros/README.md``。
+``software/edge_server/README.md``。
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
-LOGGER = logging.getLogger("center_server.edge_web")
+LOGGER = logging.getLogger("edge_server.edge_web")
 
 _MODULE_ID = re.compile(r"^[A-Za-z0-9_-]{1,16}$")
 _MODULE_STALE_SEC = 15.0

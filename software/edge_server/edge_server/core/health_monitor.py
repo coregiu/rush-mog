@@ -7,7 +7,7 @@
 3. 按超时、频率、数据合法性、启动宽限期计算设备与整体状态；
 4. 生成可 JSON 序列化的健康快照。
 
-状态语义见 `software/ros/HEALTHCHECK.md`。
+状态语义见 `software/edge_server/HEALTHCHECK.md`。
 """
 
 from __future__ import annotations

@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>center_server</name>
+  <name>edge_server</name>
   <version>0.2.0</version>
-  <description>Rush-MoG center_server: Pi Edge Server (web/body) + ROS2 VLA/SLAM/navigation</description>
+  <description>Rush-MoG edge_server: Pi Edge Server (web/body) + ROS2 VLA/SLAM/navigation</description>
   <maintainer email="xxx@xxx.com">coregiu</maintainer>
   <license>Apache-2.0</license>
 

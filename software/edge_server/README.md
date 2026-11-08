@@ -1,4 +1,4 @@
-# center_server（ROS2：Pi Edge Server + VLA + SLAM + 导航 + 目标搜索 + 健康检查）
+# edge_server（ROS2：Pi Edge Server + VLA + SLAM + 导航 + 目标搜索 + 健康检查）
 
 设计文档：[`DESIGN.md`](DESIGN.md)。
 健康检查接口契约：[`HEALTHCHECK.md`](HEALTHCHECK.md)。
@@ -20,7 +20,7 @@
 
 | 项目 | 结果 |
 |---|---|
-| `colcon build --packages-select custom_msgs center_server` | 通过 |
+| `colcon build --packages-select custom_msgs edge_server` | 通过 |
 | `pytest tests -q` | 94 passed |
 | `tests/end_to_end_check.py` | 7/7 passed |
 | `tests/slam_nav_check.py` + `fake_slam_robot.py` | 6/6 passed |
@@ -55,16 +55,16 @@
 ```bash
 cd /path/to/rush-mog
 mkdir -p ~/rush_mog_ws/src
-ln -sfn "$(pwd)/software/ros" ~/rush_mog_ws/src/center_server
+ln -sfn "$(pwd)/software/edge_server" ~/rush_mog_ws/src/edge_server
 ln -sfn "$(pwd)/software/custom_msgs" ~/rush_mog_ws/src/custom_msgs
 
 cd ~/rush_mog_ws
 source /opt/ros/humble/setup.bash
-colcon build --packages-select custom_msgs center_server --symlink-install
+colcon build --packages-select custom_msgs edge_server --symlink-install
 source install/setup.bash
 ```
 
-修改源码后重新 `colcon build --packages-select custom_msgs center_server`。
+修改源码后重新 `colcon build --packages-select custom_msgs edge_server`。
 
 ---
 
@@ -73,16 +73,16 @@ source install/setup.bash
 ### 3.1 仿真/桌面联调（默认 config.yaml）
 
 ```bash
-ros2 launch center_server center_server.launch.py
+ros2 launch edge_server edge_server.launch.py
 # 或指定配置：
-ros2 launch center_server center_server.launch.py config_file:=/path/to/config.yaml
+ros2 launch edge_server edge_server.launch.py config_file:=/path/to/config.yaml
 ```
 
 启动核心节点（可选节点按 launch 参数裁剪）：
 
 ```bash
 # 只跑核心 VLA 链路
-ros2 launch center_server center_server.launch.py \
+ros2 launch edge_server edge_server.launch.py \
   start_perception:=false start_navigation:=false start_object_search:=false \
   start_map_manager:=false start_localization:=false
 ```
@@ -90,11 +90,11 @@ ros2 launch center_server center_server.launch.py \
 ### 3.2 实车（robot.yaml + Pi Edge Server 直连 STM32）
 
 ```bash
-ros2 launch center_server robot_bringup.launch.py
+ros2 launch edge_server robot_bringup.launch.py
 # IMU 直连 Pi I2C 时：
-ros2 launch center_server robot_bringup.launch.py start_imu:=true
+ros2 launch edge_server robot_bringup.launch.py start_imu:=true
 # 指定配置：
-ros2 launch center_server robot_bringup.launch.py config_file:=/path/to/robot.yaml
+ros2 launch edge_server robot_bringup.launch.py config_file:=/path/to/robot.yaml
 ```
 
 `robot_bringup.launch.py` 默认启动 `edge_server_node`（`base_transport:=edge_serial`）：
@@ -131,23 +131,23 @@ sudo setcap cap_net_bind_service=+ep /usr/bin/python3
 旧模式仍可用（不推荐）：
 ```bash
 # 旧二进制串口桥（需把 robot.yaml 的 base.baud 改回 921600）
-ros2 launch center_server robot_bringup.launch.py base_transport:=serial_binary
+ros2 launch edge_server robot_bringup.launch.py base_transport:=serial_binary
 # 旧 ESP32 HTTP 桥（需有 ESP32 固件/网络）
-ros2 launch center_server robot_bringup.launch.py base_transport:=esp32_http
+ros2 launch edge_server robot_bringup.launch.py base_transport:=esp32_http
 ```
 
 ### 3.3 外部 SLAM/Nav2 栈（可选）
 
 ```bash
 # 建图
-ros2 launch center_server slam_stack.launch.py
+ros2 launch edge_server slam_stack.launch.py
 
 # 定位/导航（注意：Nav2 最终速度被重映射到 /nav/cmd_vel）
-ros2 launch center_server nav2_stack.launch.py map:=$HOME/rush_mog/maps/rush_mog.yaml
+ros2 launch edge_server nav2_stack.launch.py map:=$HOME/rush_mog/maps/rush_mog.yaml
 
 # EKF（单独启动）
 ros2 run robot_localization ekf_node --ros-args \
-  --params-file <install>/share/center_server/config/ekf.yaml
+  --params-file <install>/share/edge_server/config/ekf.yaml
 ```
 
 若未安装 Nav2，`navigation.backend: auto` 会自动回退到内置直航，只需 `/scan`、`/center/pose`。
@@ -324,14 +324,14 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
 | `GET /stream`（8080） | ROS 相机的 MJPEG；80 端口返回 302 |
 
 完整 OpenAPI 定义见 [`software/api.yaml`](../api.yaml)；实现见
-`center_server/edge_web.py`、`center_server/edge_control.py` 和
+`edge_server/edge_web.py`、`edge_server/edge_control.py` 和
 `ros_nodes/edge_server_node.py`。
 
 ---
 
 ## 6. 配置
 
-默认配置安装到 `share/center_server/config/`：
+默认配置安装到 `share/edge_server/config/`：
 
 | 文件 | 用途 |
 |---|---|
@@ -375,7 +375,7 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
 ### 7.1 单元测试
 
 ```bash
-cd software/ros
+cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
 # 94 passed
 ```
@@ -393,7 +393,7 @@ PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests/test_health_monitor.py tests/te
 
 ```bash
 source ~/rush_mog_ws/install/setup.bash
-ros2 launch center_server center_server.launch.py
+ros2 launch edge_server edge_server.launch.py
 ```
 
 终端 B：
@@ -417,7 +417,7 @@ python3 tests/end_to_end_check.py
 
 ```bash
 export ROS_HOME=/tmp/roshome ROS_LOG_DIR=/tmp/roslog
-ros2 launch center_server center_server.launch.py \
+ros2 launch edge_server edge_server.launch.py \
   config_file:=$(pwd)/tests/config_test.yaml \
   start_perception:=false start_localization:=false
 ```
@@ -496,21 +496,21 @@ ros2 service call /center/emergency_stop custom_msgs/srv/EmergencyStop "{trigger
 ## 10. 目录
 
 ```text
-ros/
-├── center_server/
-│   ├── config/          # config.yaml / robot.yaml / ekf.yaml / slam_toolbox.yaml / nav2_params.yaml
-│   ├── core/            # 纯算法，可单测（含 health_monitor.py）
-│   ├── drivers/         # ICM-20948
-│   ├── edge_control.py  # 按钮/摇杆/运动保活/STM32 遥测纯逻辑
-│   ├── edge_web.py      # Edge 网页/API/MJPEG（stdlib）
-│   ├── http_health.py   # 健康检查 HTTP 网关（stdlib）
+software/edge_server/          # ROS 包根目录
+├── edge_server/               # Python 包
+│   ├── config/                # config.yaml / robot.yaml / ekf.yaml / slam_toolbox.yaml / nav2_params.yaml
+│   ├── core/                  # 纯算法，可单测（含 health_monitor.py）
+│   ├── drivers/               # ICM-20948
+│   ├── edge_control.py        # 按钮/摇杆/运动保活/STM32 遥测纯逻辑
+│   ├── edge_web.py            # Edge 网页/API/MJPEG（stdlib）
+│   ├── http_health.py         # 健康检查 HTTP 网关（stdlib）
 │   └── utils/
-├── ros_nodes/           # 16 个 ROS2 节点（含 edge_server_node / health_monitor_node）
-├── web/                 # 手柄页、dashboard、静态资源（原 edge_server/data）
-├── launch/              # center_server / robot_bringup / slam_stack / nav2_stack
-├── tests/               # 单元 + 仿真 + 联调（含 test_edge_*.py / test_health_*.py）
+├── ros_nodes/                 # 16 个 ROS2 节点（含 edge_server_node / health_monitor_node）
+├── web/                       # 手柄页、dashboard、静态资源
+├── launch/                    # edge_server / robot_bringup / slam_stack / nav2_stack
+├── tests/                     # 单元 + 仿真 + 联调（含 test_edge_*.py / test_health_*.py）
 ├── DESIGN.md
-├── HEALTHCHECK.md       # 健康检查接口契约（HTTP + ROS）
+├── HEALTHCHECK.md             # 健康检查接口契约（HTTP + ROS）
 ├── README.md
 ├── package.xml
 └── setup.py

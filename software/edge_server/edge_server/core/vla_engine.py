@@ -58,7 +58,7 @@ class VLAEngine:
             self.cfg.get("instruction") or self.cfg.get("instruction_parser") or self.cfg
         )
         self.model = None
-        self._logger = get_logger("center_server.vla")
+        self._logger = get_logger("edge_server.vla")
         self._load_model()
 
     def _load_model(self):

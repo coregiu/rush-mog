@@ -28,22 +28,22 @@ from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profi
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformListener
 
-from center_server.core.nav_supervisor import (
+from edge_server.core.nav_supervisor import (
     DirectController,
     Goal,
     GoalValidator,
     ProgressMonitor,
 )
-from center_server.core.occupancy_map import OccupancyMap
-from center_server.core.pose_utils import (
+from edge_server.core.occupancy_map import OccupancyMap
+from edge_server.core.pose_utils import (
     Pose2D,
     make_pose_stamped,
     pose_from_msg,
     yaw_from_quaternion,
 )
-from center_server.core.safety_checker import SafetyChecker
-from center_server.utils.clock import create_steady_clock
-from center_server.utils.config import load_config
+from edge_server.core.safety_checker import SafetyChecker
+from edge_server.utils.clock import create_steady_clock
+from edge_server.utils.config import load_config
 from custom_msgs.action import NavigateTo
 from custom_msgs.msg import LocalizationStatus, MapInfo, NavStatus, SafetyState
 
