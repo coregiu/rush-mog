@@ -126,6 +126,8 @@ class HealthMonitorNode(Node):
         self._payload: Optional[Dict[str, Any]] = None
         self._params_payload: Optional[Dict[str, Any]] = None
         self._pending_publish_rate: Optional[float] = None
+        self._odom_track: Dict[str, Tuple[float, float]] = {}
+        self._odom_distance: Dict[str, float] = {}
 
         status_qos = QoSProfile(
             depth=1,
@@ -366,20 +368,38 @@ class HealthMonitorNode(Node):
         elif isinstance(msg, Odometry):
             position = msg.pose.pose.position
             orientation = msg.pose.pose.orientation
+            twist = msg.twist.twist
             x = float(position.x)
             y = float(position.y)
+            vx = float(twist.linear.x)
+            vy = float(twist.linear.y)
+            wz = float(twist.angular.z)
             yaw = math.atan2(
                 2.0 * (float(orientation.w) * float(orientation.z)
                        + float(orientation.x) * float(orientation.y)),
                 1.0 - 2.0 * (float(orientation.y) ** 2 + float(orientation.z) ** 2),
             )
+            previous = self._odom_track.get(spec.id)
+            if previous is not None:
+                step = math.hypot(x - previous[0], y - previous[1])
+                # 忽略定位跳变，避免把重定位/仿真重置计入里程。
+                if 0.0 < step < 5.0:
+                    self._odom_distance[spec.id] = (
+                        self._odom_distance.get(spec.id, 0.0) + step
+                    )
+            self._odom_track[spec.id] = (x, y)
             metrics.update(
                 x=round(x, 3),
                 y=round(y, 3),
                 yaw=round(yaw, 4),
+                vx=round(vx, 3),
+                vy=round(vy, 3),
+                wz=round(wz, 3),
+                speed=round(math.hypot(vx, vy), 3),
+                distance=round(self._odom_distance.get(spec.id, 0.0), 3),
                 child_frame_id=str(msg.child_frame_id),
             )
-            if not all(math.isfinite(v) for v in (x, y, yaw)):
+            if not all(math.isfinite(v) for v in (x, y, yaw, vx, vy, wz)):
                 invalid = True
                 error = "non-finite odometry"
         elif isinstance(msg, String):

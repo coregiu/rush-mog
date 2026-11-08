@@ -245,6 +245,8 @@ class BaseBridgeNode(Node):
                 "estop": bool(msg.estop),
                 "encoder_ok": bool(msg.flags & proto.FLAG_ENCODER_OK),
                 "imu_ok": bool(msg.flags & proto.FLAG_IMU_OK),
+                "wheel_speeds": [round(float(value), 4) for value in msg.wheel_speeds],
+                "encoders": [int(value) for value in msg.encoders],
                 "uptime_ms": int(msg.uptime_ms),
             },
             ensure_ascii=False,

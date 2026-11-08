@@ -38,6 +38,21 @@ const DEVICE_META = {
 
 const DEFAULT_DEVICES = ['camera', 'lidar', 'imu', 'microphone', 'speaker', 'arm', 'base', 'battery', 'odom'];
 
+const BODY_MOTORS = [
+  { id: 'fl', name: '左前 FL' },
+  { id: 'fr', name: '右前 FR' },
+  { id: 'rl', name: '左后 RL' },
+  { id: 'rr', name: '右后 RR' },
+];
+
+const BODY_LIMITS = {
+  maxSpeed: 1.4,
+  maxWheel: 1.2,
+  wheelRadius: 0.048,
+  rotationRadius: 0.19,
+  history: 60,
+};
+
 const STATUS_LABEL = {
   ok: '正常',
   degraded: '降级',
@@ -63,6 +78,13 @@ const state = {
   polling: false,
   pollTimer: null,
   clockTimer: null,
+  body: {
+    lastOdom: null,
+    sessionDistance: 0,
+    history: [],
+    historySync: 0,
+    latest: null,
+  },
 };
 
 function $(selector, root = document) { return root.querySelector(selector); }
@@ -116,6 +138,27 @@ function fmtAge(ms) {
 
 function fmtTime(date = new Date()) {
   return date.toLocaleTimeString('zh-CN', { hour12: false });
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function wrapPi(rad) {
+  return Math.atan2(Math.sin(rad), Math.cos(rad));
+}
+
+function normalizeDegrees(deg) {
+  const value = deg % 360;
+  return value < 0 ? value + 360 : value;
+}
+
+function fmtDistance(meters) {
+  const n = numberOrNull(meters);
+  if (n === null) return { value: '--', unit: 'm' };
+  if (n >= 1000) return { value: (n / 1000).toFixed(2), unit: 'km' };
+  if (n >= 100) return { value: n.toFixed(1), unit: 'm' };
+  return { value: n.toFixed(2), unit: 'm' };
 }
 
 function statusLabel(status) { return STATUS_LABEL[status] || status || '未知'; }
@@ -301,9 +344,348 @@ function updateSyncText() {
   el.textContent = `${count} 个模块 · ${fmtAge(age)}前同步${state.lastError ? ' · ' + state.lastError : ''}`;
 }
 
+function mecanumWheelSpeeds(vx, vy, wz) {
+  const k = BODY_LIMITS.rotationRadius * wz;
+  return [vx - vy - k, vx + vy + k, vx + vy - k, vx - vy + k];
+}
+
+function bodyMotionLabel(data) {
+  if (!data.hasOdom || data.speed === null) return '待上报';
+  const vx = data.vx == null ? 0 : data.vx;
+  const vy = data.vy == null ? 0 : data.vy;
+  const wz = data.wz == null ? 0 : data.wz;
+  if (Math.abs(wz) > 0.2 && Math.abs(vx) < 0.05 && Math.abs(vy) < 0.05) return '原地转向';
+  if (Math.abs(vy) > 0.05 && Math.abs(vx) < 0.05) return '横移';
+  if (vx > 0.03) return '前进';
+  if (vx < -0.03) return '后退';
+  if (data.speed > 0.03) return '移动';
+  return '停止';
+}
+
+function collectBodyTelemetry(now = Date.now()) {
+  const ros = state.health.ros || {};
+  const devices = Array.isArray(ros.devices) ? ros.devices : [];
+  const byId = {};
+  for (const device of devices) {
+    if (device && device.id) byId[device.id] = device;
+  }
+  const odom = byId.odom || null;
+  const base = byId.base || null;
+  const battery = byId.battery || null;
+  const om = (odom && odom.metrics) || {};
+  const bm = (base && base.metrics) || {};
+  const bat = (battery && battery.metrics) || {};
+
+  const x = numberOrNull(om.x);
+  const y = numberOrNull(om.y);
+  const yaw = numberOrNull(om.yaw);
+  let vx = numberOrNull(om.vx);
+  let vy = numberOrNull(om.vy);
+  let wz = numberOrNull(om.wz);
+  let twistSource = 'none';
+  if (vx !== null && vy !== null && wz !== null) twistSource = 'telemetry';
+
+  const sampleTime = state.lastSync || now;
+  let derivedSpeed = null;
+  let derivedVx = null;
+  let derivedVy = null;
+  let derivedWz = null;
+
+  if (x !== null && y !== null) {
+    const last = state.body.lastOdom;
+    if (last && sampleTime > last.t) {
+      const dt = (sampleTime - last.t) / 1000;
+      if (dt >= 0.2 && dt <= 120) {
+        const dx = x - last.x;
+        const dy = y - last.y;
+        const step = Math.hypot(dx, dy);
+        if (step < 5) {
+          if (numberOrNull(om.distance) === null) {
+            state.body.sessionDistance += step;
+          }
+          const midYaw = yaw === null ? (last.yaw || 0) : yaw;
+          const c = Math.cos(midYaw);
+          const s = Math.sin(midYaw);
+          derivedVx = (dx * c + dy * s) / dt;
+          derivedVy = (-dx * s + dy * c) / dt;
+          derivedWz = yaw !== null && last.yaw !== null ? wrapPi(yaw - last.yaw) / dt : 0;
+          derivedSpeed = Math.hypot(derivedVx, derivedVy);
+        }
+      }
+    }
+    state.body.lastOdom = { x, y, yaw, t: sampleTime };
+  }
+
+  const telemetrySpeed = numberOrNull(om.speed);
+  let speed = telemetrySpeed;
+  if (speed === null && vx !== null && vy !== null) speed = Math.hypot(vx, vy);
+  if (speed === null) speed = derivedSpeed;
+  if (twistSource === 'none' && derivedVx !== null) {
+    vx = derivedVx;
+    vy = derivedVy;
+    wz = derivedWz;
+    twistSource = 'derived';
+  }
+
+  const telemetryDistance = numberOrNull(om.distance);
+  const distance = telemetryDistance === null ? state.body.sessionDistance : telemetryDistance;
+  const distanceSource = telemetryDistance === null ? 'session' : 'ros';
+
+  let wheelSpeeds = null;
+  let wheelSource = 'none';
+  const baseWheels = Array.isArray(bm.wheel_speeds) ? bm.wheel_speeds : null;
+  if (baseWheels && baseWheels.length >= 4 && baseWheels.slice(0, 4).every((value) => numberOrNull(value) !== null)) {
+    wheelSpeeds = baseWheels.slice(0, 4).map(Number);
+    wheelSource = 'base';
+  } else if (vx !== null && vy !== null && wz !== null) {
+    wheelSpeeds = mecanumWheelSpeeds(vx, vy, wz);
+    wheelSource = 'odom';
+  }
+
+  const voltage = numberOrNull(bat.voltage) !== null
+    ? numberOrNull(bat.voltage)
+    : (numberOrNull(bm.battery_mv) !== null ? numberOrNull(bm.battery_mv) / 1000 : null);
+  let percent = numberOrNull(bat.percentage);
+  if (percent !== null && percent < 0) percent = null;
+  const current = numberOrNull(bm.current_ma) === null ? null : numberOrNull(bm.current_ma) / 1000;
+  const encoderOk = typeof bm.encoder_ok === 'boolean' ? bm.encoder_ok : null;
+  const imuOk = typeof bm.imu_ok === 'boolean' ? bm.imu_ok : null;
+  const estop = typeof bm.estop === 'boolean'
+    ? bm.estop
+    : (ros.emergency_stop == null ? null : Boolean(ros.emergency_stop));
+
+  const hasOdom = Boolean(odom && (x !== null || y !== null || speed !== null));
+  return {
+    odom,
+    base,
+    battery,
+    status: odom ? (odom.status || 'unknown') : 'unknown',
+    hasOdom,
+    speed,
+    vx,
+    vy,
+    wz,
+    twistSource,
+    distance,
+    distanceSource,
+    wheelSpeeds,
+    wheelSource,
+    yaw,
+    rate: odom ? numberOrNull(odom.rate_hz) : null,
+    voltage,
+    percent,
+    current,
+    encoderOk,
+    imuOk,
+    estop,
+    baseOnline: Boolean(base),
+    sampleTime,
+  };
+}
+
+function initGauge() {
+  const ticks = $('#body-gauge-ticks');
+  if (!ticks || ticks.childElementCount) return;
+  const ns = 'http://www.w3.org/2000/svg';
+  for (let i = 0; i <= 6; i += 1) {
+    const angle = Math.PI - (i / 6) * Math.PI;
+    const inner = i % 2 === 0 ? 84 : 88;
+    const line = document.createElementNS(ns, 'line');
+    line.setAttribute('x1', (120 + Math.cos(angle) * 92).toFixed(2));
+    line.setAttribute('y1', (112 - Math.sin(angle) * 92).toFixed(2));
+    line.setAttribute('x2', (120 + Math.cos(angle) * inner).toFixed(2));
+    line.setAttribute('y2', (112 - Math.sin(angle) * inner).toFixed(2));
+    ticks.appendChild(line);
+  }
+}
+
+function initMotorCards() {
+  const grid = $('#motor-grid');
+  if (!grid || grid.childElementCount) return;
+  grid.innerHTML = BODY_MOTORS.map((motor) => `
+    <article class="motor-card" data-motor="${motor.id}" data-dir="idle">
+      <div class="motor-top">
+        <span class="motor-name">${escapeHtml(motor.name)}</span>
+        <span class="motor-dir" data-motor-dir>--</span>
+      </div>
+      <div class="motor-body">
+        <svg class="motor-wheel" viewBox="0 0 48 48" aria-hidden="true">
+          <circle class="mw-tire" cx="24" cy="24" r="20"/>
+          <g class="mw-spin">
+            <circle class="mw-rim" cx="24" cy="24" r="11"/>
+            <g class="mw-spokes"><path d="M24 7 V41 M7 24 H41 M12 12 L36 36 M12 36 L36 12"/></g>
+            <circle class="mw-hub" cx="24" cy="24" r="3"/>
+          </g>
+        </svg>
+        <div class="motor-read">
+          <div><strong data-motor-rpm>--</strong><span>RPM</span></div>
+          <div><strong data-motor-ms>--</strong><span>m/s</span></div>
+        </div>
+      </div>
+      <div class="motor-bar"><i data-motor-bar></i></div>
+    </article>`).join('');
+}
+
+function setFlag(element, stateClass, label) {
+  if (!element) return;
+  element.classList.remove('is-on', 'is-ok', 'is-fault');
+  if (stateClass) element.classList.add(stateClass);
+  if (label) element.textContent = label;
+}
+
+function renderSpeedSpark(data) {
+  const line = $('#speed-spark-line');
+  const area = $('#speed-spark-area');
+  const note = $('#body-hint');
+  if (note) {
+    if (!data.hasOdom) note.textContent = '等待 ROS /odom 上报';
+    else if (data.wheelSource === 'base') note.textContent = '轮速来自 /base/status · 速度/里程来自 /odom';
+    else if (data.twistSource === 'telemetry') note.textContent = '速度/轮速来自 /odom 实时 twist · 里程累计自 ROS';
+    else note.textContent = '速度/里程由 /odom 位姿推算 · 编码器遥测待固件上报';
+  }
+  if (!line || !area) return;
+  const values = state.body.history;
+  if (values.length < 2) {
+    line.setAttribute('points', '');
+    area.setAttribute('d', '');
+    return;
+  }
+  const width = 600;
+  const height = 56;
+  const pad = 4;
+  const max = Math.max(0.4, ...values) * 1.12;
+  const points = values.map((value, index) => {
+    const x = (index / (values.length - 1)) * width;
+    const y = height - pad - clamp(value / max, 0, 1) * (height - pad * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  line.setAttribute('points', points.join(' '));
+  area.setAttribute('d', `M 0 ${height} L ${points.join(' L ')} L ${width} ${height} Z`);
+}
+
+function renderBody() {
+  initGauge();
+  initMotorCards();
+  const data = collectBodyTelemetry();
+  state.body.latest = data;
+
+  const panel = $('#body-panel');
+  if (panel) panel.classList.toggle('is-empty', !data.hasOdom);
+
+  const led = $('#body-led');
+  if (led) led.className = `led status-${data.hasOdom ? data.status : 'unknown'}`;
+
+  const source = $('#body-source');
+  if (source) {
+    source.textContent = data.hasOdom
+      ? (data.twistSource === 'telemetry' ? 'ODOM 实时' : 'ODOM 推算')
+      : '等待 /odom';
+    source.className = `status-chip status-${data.hasOdom ? data.status : 'unknown'}`;
+  }
+
+  const time = $('#body-time');
+  if (time) time.textContent = state.lastSync ? fmtTime(new Date(state.lastSync)) : '--:--:--';
+
+  const speed = data.hasOdom ? data.speed : null;
+  const speedEl = $('#body-speed');
+  if (speedEl) speedEl.textContent = speed === null ? '--' : speed.toFixed(2);
+  const kmhEl = $('#body-speed-kmh');
+  if (kmhEl) kmhEl.textContent = speed === null ? '--' : (speed * 3.6).toFixed(2);
+  const motionEl = $('#body-motion');
+  if (motionEl) motionEl.textContent = bodyMotionLabel(data);
+
+  const pct = speed === null ? 0 : clamp(speed / BODY_LIMITS.maxSpeed, 0, 1);
+  const fill = $('#body-gauge-fill');
+  if (fill) fill.setAttribute('stroke-dasharray', `${(pct * 100).toFixed(1)} 100`);
+  const needle = $('#body-needle');
+  if (needle) needle.setAttribute('transform', `rotate(${(pct * 180).toFixed(1)} 120 112)`);
+
+  const rateEl = $('#body-odom-rate');
+  if (rateEl) rateEl.textContent = data.rate === null ? '--' : `${fmtNumber(data.rate)}Hz`;
+
+  const odo = data.hasOdom ? fmtDistance(data.distance) : { value: '--', unit: 'm' };
+  const odoEl = $('#body-odo');
+  if (odoEl) odoEl.textContent = odo.value;
+  const odoUnit = $('#body-odo-unit');
+  if (odoUnit) odoUnit.textContent = odo.unit;
+  const odoNote = $('#body-odo-note');
+  if (odoNote) {
+    odoNote.textContent = !data.hasOdom
+      ? '等待里程计'
+      : (data.distanceSource === 'ros' ? 'ROS 启动后累计' : '本次监控累计');
+  }
+
+  const headingEl = $('#body-heading');
+  if (headingEl) {
+    headingEl.textContent = data.yaw === null ? '--' : `${normalizeDegrees(data.yaw * 180 / Math.PI).toFixed(1)}°`;
+  }
+
+  const batteryEl = $('#body-battery');
+  if (batteryEl) {
+    if (data.voltage === null && data.percent === null) {
+      batteryEl.textContent = '--';
+    } else {
+      const volts = data.voltage === null ? '--' : `${data.voltage.toFixed(2)}V`;
+      const percentText = data.percent === null ? '--' : `${data.percent.toFixed(0)}%`;
+      batteryEl.textContent = `${volts} · ${percentText}`;
+    }
+  }
+  const currentEl = $('#body-current');
+  if (currentEl) currentEl.textContent = data.current === null ? '--' : `${data.current.toFixed(2)}A`;
+  const encoderEl = $('#body-encoder');
+  if (encoderEl) encoderEl.textContent = data.encoderOk === null ? '--' : (data.encoderOk ? 'OK' : 'FAULT');
+
+  setFlag($('#body-estop'), data.estop === null ? '' : (data.estop ? 'is-on' : 'is-ok'), 'E-STOP');
+  setFlag($('#body-imu'), data.imuOk === null ? '' : (data.imuOk ? 'is-ok' : 'is-fault'), 'IMU');
+  setFlag($('#body-link'), data.baseOnline ? 'is-ok' : '', '/BASE');
+
+  const wheelSpeeds = data.hasOdom ? data.wheelSpeeds : null;
+  BODY_MOTORS.forEach((motor, index) => {
+    const card = $(`.motor-card[data-motor="${motor.id}"]`);
+    if (!card) return;
+    const rpmEl = $('[data-motor-rpm]', card);
+    const msEl = $('[data-motor-ms]', card);
+    const dirEl = $('[data-motor-dir]', card);
+    const barEl = $('[data-motor-bar]', card);
+    const raw = wheelSpeeds && wheelSpeeds[index] !== undefined ? numberOrNull(wheelSpeeds[index]) : null;
+    if (raw === null) {
+      card.dataset.dir = 'idle';
+      card.classList.remove('is-spinning');
+      if (rpmEl) rpmEl.textContent = '--';
+      if (msEl) msEl.textContent = '--';
+      if (dirEl) dirEl.textContent = '--';
+      if (barEl) barEl.style.width = '0%';
+      return;
+    }
+    const rpm = Math.abs(raw) / (2 * Math.PI * BODY_LIMITS.wheelRadius) * 60;
+    const direction = raw > 0.02 ? 'fwd' : (raw < -0.02 ? 'rev' : 'idle');
+    card.dataset.dir = direction;
+    if (rpmEl) rpmEl.textContent = rpm >= 100 ? rpm.toFixed(0) : rpm.toFixed(1);
+    if (msEl) msEl.textContent = raw.toFixed(2);
+    if (dirEl) dirEl.textContent = direction === 'fwd' ? '正转' : (direction === 'rev' ? '反转' : '停');
+    if (barEl) barEl.style.width = `${clamp(Math.abs(raw) / BODY_LIMITS.maxWheel * 100, 0, 100).toFixed(1)}%`;
+    const spinning = Math.abs(raw) > 0.02;
+    card.classList.toggle('is-spinning', spinning);
+    if (spinning) {
+      const period = clamp(0.3 / Math.abs(raw), 0.25, 2.4);
+      card.style.setProperty('--spin', `${period.toFixed(2)}s`);
+    }
+  });
+
+  if (state.lastSync && state.body.historySync !== state.lastSync) {
+    state.body.historySync = state.lastSync;
+    if (speed !== null) {
+      state.body.history.push(speed);
+      if (state.body.history.length > BODY_LIMITS.history) state.body.history.shift();
+    }
+  }
+  renderSpeedSpark(data);
+}
+
 function renderAll() {
   renderOverall();
   renderModules();
+  renderBody();
   renderTwin();
   renderDevices();
   renderTelemetry();
@@ -318,6 +700,13 @@ function renderConnectionError() {
   }
   const stage = $('#twin-stage');
   if (stage) stage.dataset.overall = 'error';
+  const bodySource = $('#body-source');
+  if (bodySource) {
+    bodySource.textContent = 'EDGE API 不可达';
+    bodySource.className = 'status-chip status-error';
+  }
+  const bodyLed = $('#body-led');
+  if (bodyLed) bodyLed.className = 'led status-error';
   const footer = $('#footer-status');
   if (footer) footer.textContent = 'LINK LOST';
   updateSyncText();
@@ -473,6 +862,17 @@ function renderTwin() {
     const detail = device ? `${device.detail || ''}${device.rate_hz >= 0 ? ` · ${fmtNumber(device.rate_hz)}Hz` : ''}` : statusLabel(status);
     const title = hotspot.querySelector('title');
     if (title) title.textContent = `${id} · ${statusLabel(status)} · ${detail}`;
+  }
+
+  const vehicle = $('.twin-vehicle');
+  if (vehicle) {
+    const body = state.body.latest;
+    const speed = body && body.hasOdom && body.speed !== null ? Math.abs(body.speed) : 0;
+    const moving = speed > 0.02;
+    vehicle.classList.toggle('is-moving', moving);
+    if (moving) {
+      vehicle.style.setProperty('--wheel-spin', `${clamp(0.3 / speed, 0.25, 2.4).toFixed(2)}s`);
+    }
   }
 
   const time = $('#twin-time');
@@ -922,6 +1322,8 @@ function bindEvents() {
 
 function init() {
   bindEvents();
+  initGauge();
+  initMotorCards();
   state.clockTimer = setInterval(updateSyncText, 1000);
   startPolling();
 }
