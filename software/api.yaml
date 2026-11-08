@@ -2,21 +2,22 @@ openapi: 3.0.3
 
 info:
   title: Rush-MOG 模块接口
-  version: 1.3.0
+  version: 1.3.1
   description: |
     Rush-MOG 各模块接口归档，按模块分组：
 
     | 模块 | 传输 | 入口 | 说明 |
     | --- | --- | --- | --- |
-    | **Edge Server** | HTTP | `http://192.168.4.1`（80） | 树莓派 Edge Server：网页手柄、数字孪生、模块上报/代理、静态资源、MJPEG 图传、STM32 串口桥 |
+    | **Edge Server** | HTTP | `http://192.168.4.1`（80） | 树莓派 Edge Server：网页手柄、数字孪生、模块上报/代理、静态资源、MJPEG 图传、STM32 串口桥；内置 ROS 健康网关（`:8090`） |
     | **Center Server** | HTTP | `http://127.0.0.1:8000` | SmolVLA 多模态推理、健康检查、模型/参数信息 |
-    | **ROS Health Gateway** | HTTP | `http://127.0.0.1:8090` | ROS/设备健康检查，供同机 Edge Server/dashboard 代理 |
     | **Body Control** | UART | STM32 USART3，9600 8N1 | 树莓派 Edge Server → STM32 的 ASCII 运动/音频命令，无 ACK |
 
-    > **ROS 说明**：`software/ros` 的 ROS 2 话题/服务/Action 不是 HTTP，
-    > 未纳入本 OpenAPI 文件，详见 `software/ros/README.md`。
-    > `health_monitor_node` 额外提供 HTTP 健康网关，归档在下方
-    > `ROS Health Gateway` 分组，完整契约见 `software/ros/HEALTHCHECK.md`。
+    > **ROS 说明**：`software/edge_server` 的 ROS 2 话题/服务/Action 不是 HTTP，
+    > 未纳入本 OpenAPI 文件，详见 `software/edge_server/README.md`。
+    > ROS 健康网关已并入 Edge Server：`health_monitor_node` 默认在
+    > `127.0.0.1:8090` 提供 `/ros/*` 接口，80 端口通过
+    > `/api/modules/ros/health|params` 代理；完整契约见
+    > `software/edge_server/HEALTHCHECK.md`。
     >
     > **UART 说明**：OpenAPI/Swagger 只原生描述 HTTP。本文档用
     > `/body-control/uart/command` 作为**虚拟归档路径**，并在
@@ -24,9 +25,9 @@ info:
     > 该路径不是 HTTP 端点，请勿用 Swagger “Try it out” 调用。
 
     详细文档：
-    - Edge Server：`software/ros/README.md`（`edge_server_node`）
+    - Edge Server：`software/edge_server/README.md`（`edge_server_node`）
     - Center Server：`software/center_server/README.md`、`DESIGN.md`
-    - ROS Health Gateway：`software/ros/HEALTHCHECK.md`
+    - ROS 健康网关（Edge Server 内置）：`software/edge_server/HEALTHCHECK.md`
     - Body Control：`software/body_control/README.md`
 
   license:
@@ -52,7 +53,13 @@ tags:
       ROS 2 在同机由 `edge_server_node` 直接采集；CENTER 通过
       `/api/modules/report` 上报，页面通过 `/api/modules/{id}/health|params`
       由 Edge Server 代理访问模块。`ros` 是本地保留子系统 ID，不允许外部上报。
-    x-docs: "./ros/README.md"
+
+      内置 ROS 健康网关：`health_monitor_node` 默认监听 `127.0.0.1:8090`，
+      提供 `/ros/health`、`/ros/health/devices/{id}`、`/ros/params`、
+      `/ros/healthz`、`/ros/readyz`；80 端口通过
+      `/api/modules/ros/health|params` 代理。完整契约见
+      `software/edge_server/HEALTHCHECK.md`。
+    x-docs: "./edge_server/README.md"
   - name: Center Server
     description: |
       独立部署的 SmolVLA 中心推理服务，默认监听 `0.0.0.0:8000`。
@@ -64,14 +71,6 @@ tags:
       不单独占用 path，见 `x-center-server.root_response`；CORS 见
       `x-center-server.cors`。
     x-docs: "./center_server/README.md"
-  - name: ROS Health Gateway
-    description: |
-      `software/ros` 的 `health_monitor_node` 内嵌 HTTP 网关，默认
-      `127.0.0.1:8090`。返回 ROS 节点/话题状态，以及相机、雷达、IMU、
-      麦克风、音箱、机械臂、底盘、电池、里程计等设备的健康情况。
-      只读接口；默认仅回环，跨机调用需设置 `health.http.api_key`。
-      主路径为 `/ros/health`，同时保留 `/v1/health`、`/health` 别名。
-    x-docs: "./ros/HEALTHCHECK.md"
   - name: Body Control (UART)
     description: |
       STM32F103C8T6 车体控制器的 UART 命令协议。树莓派 Edge Server 的
@@ -84,7 +83,6 @@ x-tagGroups:
   - name: 车载控制
     tags:
       - Edge Server
-      - ROS Health Gateway
       - Body Control (UART)
   - name: 中心推理
     tags:
@@ -98,11 +96,18 @@ x-modules:
     ports:
       http: 80
       mjpeg: 8080
+      ros_health: 8090
     source:
-      - "ros/ros_nodes/edge_server_node.py"
-      - "ros/center_server/edge_web.py"
-      - "ros/center_server/edge_control.py"
-      - "ros/web/"
+      - "edge_server/ros_nodes/edge_server_node.py"
+      - "edge_server/center_server/edge_web.py"
+      - "edge_server/center_server/edge_control.py"
+      - "edge_server/ros_nodes/health_monitor_node.py"
+      - "edge_server/center_server/core/health_monitor.py"
+      - "edge_server/center_server/http_health.py"
+      - "edge_server/web/"
+    docs:
+      - "edge_server/README.md"
+      - "edge_server/HEALTHCHECK.md"
   - id: center_server
     name: Center Server
     transport: http
@@ -118,17 +123,6 @@ x-modules:
       - "body_control/src/src/ps2_receiver.c"
       - "body_control/src/src/controller.c"
       - "body_control/src/inc/command.h"
-  - id: ros_health
-    name: ROS Health Gateway
-    transport: http
-    base_url: "http://127.0.0.1:8090"
-    ports:
-      http: 8090
-    source:
-      - "ros/ros_nodes/health_monitor_node.py"
-      - "ros/center_server/core/health_monitor.py"
-      - "ros/center_server/http_health.py"
-    docs: "ros/HEALTHCHECK.md"
 
 x-edge-network:
   mode: AP
@@ -141,14 +135,16 @@ x-edge-network:
   ports:
     http: 80
     mjpeg: 8080
+    ros_health: 8090
   note: "树莓派 hostapd 提供该 AP（或接入现有局域网）；手机连上后打开 http://192.168.4.1 进入 PS2 手柄页面。"
 
 x-edge-http:
-  implementation: "ros/center_server/edge_web.py（stdlib ThreadingHTTPServer）"
+  implementation: "edge_server/center_server/edge_web.py（stdlib ThreadingHTTPServer）"
   method_filtering: |
     `POST`：`/cmd`、`/cmd-button`、`/cmd-stick`、`/stop`、`/api/modules/report`、
     `/api/modules/edge/params`、`/api/modules/{id}/params`。
-    `GET`：页面/静态资源、`/status`、`/api/body`、`/api/modules*`、`/stream`。
+    `GET`：页面/静态资源、`/status`、`/api/body`、`/api/modules*`、`/stream`；
+    以及 ROS 健康代理 `/api/modules/ros/health|params`。
   note: "控制类请求建议仍使用文档中的方法，避免中间代理/浏览器行为差异。"
 
 x-edge-motion-keepalive:
@@ -174,7 +170,7 @@ x-edge-motion-keepalive:
 
 x-edge-command-mapping:
   note: |
-    HTTP 控制消息到 STM32 UART 命令的映射（与 ros/center_server/edge_control.py 一致）。
+    HTTP 控制消息到 STM32 UART 命令的映射（与 edge_server/center_server/edge_control.py 一致）。
     `down` 为按下事件，`up` 为松开事件；null 表示松开时不发送命令。
   button:
     up:
@@ -256,6 +252,24 @@ x-edge-mjpeg:
     - "端口 80 的 /stream 返回 302 到 8080。"
     - "相机未就绪时端口 8080 返回 503，无响应体。"
     - "多个客户端共享最新帧；客户端断开不影响 ROS 节点。"
+
+x-edge-ros-health:
+  node: "health_monitor_node"
+  bind: "127.0.0.1:8090"
+  paths:
+    - "GET /ros/health"
+    - "GET /ros/health/devices/{device_id}"
+    - "GET/POST /ros/params"
+    - "GET /ros/healthz"
+    - "GET /ros/readyz"
+  proxied_by:
+    - "GET /api/modules/ros/health"
+    - "GET /api/modules/ros/params"
+    - "POST /api/modules/ros/params"
+  auth:
+    optional: true
+    note: "health.http.api_key 非空时，/ros/health 与 /ros/params 需要 Bearer 或 X-API-Key；/ros/healthz、/ros/readyz 保持匿名。"
+  docs: "edge_server/HEALTHCHECK.md"
 
 x-center-server:
   service: "rush-mog-center-server"
@@ -495,7 +509,7 @@ x-body-control-uart:
       second_byte: "忽略"
 
 x-docs:
-  edge_server: "./ros/README.md"
+  edge_server: "./edge_server/README.md"
   center_server: "./center_server/README.md"
   center_server_design: "./center_server/DESIGN.md"
   body_control: "./body_control/README.md"
@@ -1548,22 +1562,22 @@ paths:
   /ros/health:
     servers:
       - url: "http://127.0.0.1:8090"
-        description: ROS Health Gateway（默认只监听回环）
+        description: Edge Server 内置 ROS 健康网关（同机回环 :8090；外部经 80 端口 /api/modules/ros/* 代理）
     get:
-      tags: [ROS Health Gateway]
+      tags: [Edge Server]
       summary: ROS 与全部连接设备的详细健康
       description: |
         返回 ROS 节点/话题状态，以及相机、雷达、IMU、麦克风、音箱、机械臂、
         底盘、电池、里程计等设备的健康情况。HTTP 200 只代表健康数据可读；
         机器健康看 body 的 `status` / `healthy` / `ready`。
 
-        别名：`/v1/health`、`/health`、`/healthcheck`。完整字段、状态语义和
-        Edge Server/dashboard 接入示例见 `software/ros/HEALTHCHECK.md`。
-      operationId: rosHealth
+        同端口（`:8090`）别名：`/v1/health`、`/health`、`/healthcheck`。完整字段、状态语义和
+        Edge Server/dashboard 接入示例见 `software/edge_server/HEALTHCHECK.md`。
+      operationId: edgeRosHealth
       security:
         - {}
-        - rosHealthBearer: []
-        - rosHealthApiKey: []
+        - edgeRosHealthBearer: []
+        - edgeRosHealthApiKey: []
       parameters:
         - name: include_metrics
           in: query
@@ -1591,18 +1605,18 @@ paths:
   /ros/health/devices/{device_id}:
     servers:
       - url: "http://127.0.0.1:8090"
-        description: ROS Health Gateway（默认只监听回环）
+        description: Edge Server 内置 ROS 健康网关（同机回环 :8090；外部经 80 端口 /api/modules/ros/* 代理）
     get:
-      tags: [ROS Health Gateway]
+      tags: [Edge Server]
       summary: 单个设备健康
       description: |
         返回指定设备详情；`status` 仍是整体系统状态。
         设备 ID 示例：camera / lidar / imu / microphone / speaker / arm / base / battery / odom。
-      operationId: rosHealthDevice
+      operationId: edgeRosHealthDevice
       security:
         - {}
-        - rosHealthBearer: []
-        - rosHealthApiKey: []
+        - edgeRosHealthBearer: []
+        - edgeRosHealthApiKey: []
       parameters:
         - name: device_id
           in: path
@@ -1640,19 +1654,19 @@ paths:
   /ros/params:
     servers:
       - url: "http://127.0.0.1:8090"
-        description: ROS Health Gateway（默认只监听回环）
+        description: Edge Server 内置 ROS 健康网关（同机回环 :8090；外部经 80 端口 /api/modules/ros/* 代理）
     get:
-      tags: [ROS Health Gateway]
+      tags: [Edge Server]
       summary: ROS 健康监控参数描述
       description: |
         返回可编辑的 health monitor 参数（发布频率、宽限期、设备频率/超时/
         必需标志等）和只读 topic/message_type。参数修改运行时生效，重启后
         回到 YAML 配置。
-      operationId: rosParams
+      operationId: edgeRosParams
       security:
         - {}
-        - rosHealthBearer: []
-        - rosHealthApiKey: []
+        - edgeRosHealthBearer: []
+        - edgeRosHealthApiKey: []
       responses:
         '200':
           description: 参数描述
@@ -1675,17 +1689,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/CenterErrorResponse'
     post:
-      tags: [ROS Health Gateway]
+      tags: [Edge Server]
       summary: 修改 ROS 健康监控参数
       description: |
         请求体 `{"updates": {"publish_rate": 2.0, "device.lidar.timeout_sec": 2.0}}`；
         也接受 `application/x-www-form-urlencoded`。只允许 health monitor 参数，
         topic/message_type 只读。
-      operationId: rosParamsUpdate
+      operationId: edgeRosParamsUpdate
       security:
         - {}
-        - rosHealthBearer: []
-        - rosHealthApiKey: []
+        - edgeRosHealthBearer: []
+        - edgeRosHealthApiKey: []
       requestBody:
         required: true
         content:
@@ -1722,12 +1736,12 @@ paths:
   /ros/healthz:
     servers:
       - url: "http://127.0.0.1:8090"
-        description: ROS Health Gateway（默认只监听回环）
+        description: Edge Server 内置 ROS 健康网关（同机回环 :8090；外部经 80 端口 /api/modules/ros/* 代理）
     get:
-      tags: [ROS Health Gateway]
+      tags: [Edge Server]
       summary: 存活探针
-      description: HTTP 线程存活即 200，不检查设备；等价别名 `/healthz`、`/livez`。
-      operationId: rosHealthLiveness
+      description: HTTP 线程存活即 200，不检查设备；同端口（`:8090`）等价别名 `/healthz`、`/livez`。
+      operationId: edgeRosHealthLiveness
       responses:
         '200':
           description: 存活
@@ -1739,14 +1753,14 @@ paths:
   /ros/readyz:
     servers:
       - url: "http://127.0.0.1:8090"
-        description: ROS Health Gateway（默认只监听回环）
+        description: Edge Server 内置 ROS 健康网关（同机回环 :8090；外部经 80 端口 /api/modules/ros/* 代理）
     get:
-      tags: [ROS Health Gateway]
+      tags: [Edge Server]
       summary: 就绪探针
       description: |
         整体 `ok`/`degraded` 且未急停返回 200；`starting`/`error`/`disabled`
-        或急停返回 503。等价别名 `/readyz`。
-      operationId: rosHealthReadiness
+        或急停返回 503。同端口（`:8090`）等价别名 `/readyz`。
+      operationId: edgeRosHealthReadiness
       responses:
         '200':
           description: 就绪
@@ -1827,15 +1841,15 @@ components:
       in: header
       name: X-API-Key
       description: "Center Server 可选的 API Key（server.api_key）"
-    rosHealthBearer:
+    edgeRosHealthBearer:
       type: http
       scheme: bearer
-      description: "ROS Health Gateway 可选的 Bearer Token（health.http.api_key）"
-    rosHealthApiKey:
+      description: "Edge Server 内置 ROS 健康网关可选的 Bearer Token（health.http.api_key）"
+    edgeRosHealthApiKey:
       type: apiKey
       in: header
       name: X-API-Key
-      description: "ROS Health Gateway 可选的 API Key（health.http.api_key）"
+      description: "Edge Server 内置 ROS 健康网关可选的 API Key（health.http.api_key）"
 
   responses:
     CenterBadRequest:
