@@ -113,11 +113,16 @@ ESP32 与树莓派两个模块已合并，Wi-Fi AP、网页手柄、MJPEG 图传
 > ICM-20948 已进入 NRND/替代周期，新设计可评估 ICM-42688-P + 磁力计组合。
 
 #### 轮式编码器与轮速闭环
-JGB37-520 自带霍尔编码器，现已接入 STM32 的 PA12/PA15/PB3~PB8，固件用 EXTI
-软件四倍频解码（8 路 A/B 相，无需空闲定时器），通过 USART3（与 PS2 接收器同一串口）
-向树莓派 Edge Server 上报四轮速度和总里程，dashboard 的 **BODY CONTROL** 面板实时显示。
+JGB37-520 自带霍尔编码器，现已接入 STM32 的 PA0~PA7（左前 A0/A1、右前 A2/A3、
+左后 A4/A5、右后 A6/A7），固件用 EXTI 软件四倍频解码（8 路 A/B 相，无需空闲定时器），
+通过 USART3（与 PS2 接收器同一串口）向树莓派 Edge Server 上报四轮速度和总里程，
+dashboard 的 **BODY CONTROL** 面板实时显示。
 编码器 → 轮速闭环 → `/odom` 由 `edge_server_node` 发布，可直接接入 EKF/Nav2；
 详见 [SLAM_NAV.md](SLAM_NAV.md) §9。
+
+> ⚠️ PA0~PA7 不是 5V 容忍引脚，编码器 A/B 必须用 3.3V 电平（编码器改 3.3V 供电或加电平转换）。
+> 其中 PA2/PA3 原本是 USART2 TX/RX（ASR PRO 语音板 / JQ6500 MP3），编码器占用后语音与 MP3 功能失效。
+
 
 #### 小车底盘
 小车底盘是拼多多淘的底盘+JGB37 520电机+万向轮组装。拼多多也有成套的，成套的更贵一点。

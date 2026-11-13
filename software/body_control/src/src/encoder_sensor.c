@@ -13,6 +13,10 @@
 
 #define ENCODER_TELEMETRY_BUFFER_SIZE 96
 
+/* 编码器 EXTI 抢占优先级。必须比 USART2/USART3(3) 低（数值更大），
+ * 否则编码器边沿密集时会压住 USART3 的收数中断，命令可能丢字节。 */
+#define ENCODER_EXTI_PREEMPT_PRIORITY 4
+
 struct encoder_pins
 {
     GPIO_TypeDef *port_a;
@@ -21,12 +25,14 @@ struct encoder_pins
     uint16_t pin_b;
 };
 
-/* A/B 相与电机对应关系：FL, FR, RL, RR。 */
+/* A/B 相与电机对应关系：FL, FR, RL, RR，依次使用 PA0~PA7。
+ * 注意：PA2/PA3 同时是 USART2 的 TX/RX（语音板 ASR PRO / JQ6500），
+ *       改用这组引脚后语音与 MP3 功能会失效，详见 encoder_sensor.h。 */
 static const struct encoder_pins s_encoder_pins[ENCODER_COUNT] = {
-    {GPIOA, GPIO_Pin_12, GPIOA, GPIO_Pin_15},
-    {GPIOB, GPIO_Pin_3, GPIOB, GPIO_Pin_4},
-    {GPIOB, GPIO_Pin_5, GPIOB, GPIO_Pin_6},
-    {GPIOB, GPIO_Pin_7, GPIOB, GPIO_Pin_8},
+    {GPIOA, GPIO_Pin_0, GPIOA, GPIO_Pin_1},
+    {GPIOA, GPIO_Pin_2, GPIOA, GPIO_Pin_3},
+    {GPIOA, GPIO_Pin_4, GPIOA, GPIO_Pin_5},
+    {GPIOA, GPIO_Pin_6, GPIOA, GPIO_Pin_7},
 };
 
 static const int8_t s_encoder_sign[ENCODER_COUNT] = {
@@ -236,17 +242,15 @@ static void encoder_exti_init(void)
     GPIO_InitTypeDef gpio;
     NVIC_InitTypeDef nvic;
 
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA | RCC_APB2Periph_GPIOB | RCC_APB2Periph_AFIO, ENABLE);
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA | RCC_APB2Periph_AFIO, ENABLE);
 
-    /* PB3/PB4 默认是 JTAG，PA15 默认是 JTDI；关闭 JTAG、保留 SWD。 */
-    GPIO_PinRemapConfig(GPIO_Remap_SWJ_JTAGDisable, ENABLE);
-
+    /* PA0~PA7 全部作为编码器输入，内部上拉。
+     * 不再使用 PA15/PB3/PB4，因此不需要关闭 JTAG。 */
     gpio.GPIO_Speed = GPIO_Speed_50MHz;
     gpio.GPIO_Mode = GPIO_Mode_IPU;
-    gpio.GPIO_Pin = GPIO_Pin_12 | GPIO_Pin_15;
+    gpio.GPIO_Pin = GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_2 | GPIO_Pin_3 |
+                    GPIO_Pin_4 | GPIO_Pin_5 | GPIO_Pin_6 | GPIO_Pin_7;
     GPIO_Init(GPIOA, &gpio);
-    gpio.GPIO_Pin = GPIO_Pin_3 | GPIO_Pin_4 | GPIO_Pin_5 | GPIO_Pin_6 | GPIO_Pin_7 | GPIO_Pin_8;
-    GPIO_Init(GPIOB, &gpio);
 
     for (uint8_t i = 0; i < ENCODER_COUNT; i++)
     {
@@ -254,35 +258,42 @@ static void encoder_exti_init(void)
         s_encoder_counts[i] = 0;
     }
 
-    GPIO_EXTILineConfig(GPIO_PortSourceGPIOA, GPIO_PinSource12);
-    GPIO_EXTILineConfig(GPIO_PortSourceGPIOA, GPIO_PinSource15);
-    GPIO_EXTILineConfig(GPIO_PortSourceGPIOB, GPIO_PinSource3);
-    GPIO_EXTILineConfig(GPIO_PortSourceGPIOB, GPIO_PinSource4);
-    GPIO_EXTILineConfig(GPIO_PortSourceGPIOB, GPIO_PinSource5);
-    GPIO_EXTILineConfig(GPIO_PortSourceGPIOB, GPIO_PinSource6);
-    GPIO_EXTILineConfig(GPIO_PortSourceGPIOB, GPIO_PinSource7);
-    GPIO_EXTILineConfig(GPIO_PortSourceGPIOB, GPIO_PinSource8);
+    GPIO_EXTILineConfig(GPIO_PortSourceGPIOA, GPIO_PinSource0);
+    GPIO_EXTILineConfig(GPIO_PortSourceGPIOA, GPIO_PinSource1);
+    GPIO_EXTILineConfig(GPIO_PortSourceGPIOA, GPIO_PinSource2);
+    GPIO_EXTILineConfig(GPIO_PortSourceGPIOA, GPIO_PinSource3);
+    GPIO_EXTILineConfig(GPIO_PortSourceGPIOA, GPIO_PinSource4);
+    GPIO_EXTILineConfig(GPIO_PortSourceGPIOA, GPIO_PinSource5);
+    GPIO_EXTILineConfig(GPIO_PortSourceGPIOA, GPIO_PinSource6);
+    GPIO_EXTILineConfig(GPIO_PortSourceGPIOA, GPIO_PinSource7);
 
-    encoder_exti_enable(EXTI_Line3 | EXTI_Line4 | EXTI_Line5 | EXTI_Line6 |
-                        EXTI_Line7 | EXTI_Line8 | EXTI_Line12 | EXTI_Line15);
+    encoder_exti_enable(EXTI_Line0 | EXTI_Line1 | EXTI_Line2 | EXTI_Line3 |
+                        EXTI_Line4 | EXTI_Line5 | EXTI_Line6 | EXTI_Line7);
 
+    /* 与 audio/ps2 初始化保持一致：4 位抢占优先级，无子优先级。 */
     NVIC_PriorityGroupConfig(NVIC_PriorityGroup_4);
 
-    nvic.NVIC_IRQChannel = EXTI3_IRQn;
-    nvic.NVIC_IRQChannelPreemptionPriority = 2;
+    nvic.NVIC_IRQChannelPreemptionPriority = ENCODER_EXTI_PREEMPT_PRIORITY;
     nvic.NVIC_IRQChannelSubPriority = 0;
     nvic.NVIC_IRQChannelCmd = ENABLE;
+
+    nvic.NVIC_IRQChannel = EXTI0_IRQn;
+    NVIC_Init(&nvic);
+
+    nvic.NVIC_IRQChannel = EXTI1_IRQn;
+    NVIC_Init(&nvic);
+
+    nvic.NVIC_IRQChannel = EXTI2_IRQn;
+    NVIC_Init(&nvic);
+
+    nvic.NVIC_IRQChannel = EXTI3_IRQn;
     NVIC_Init(&nvic);
 
     nvic.NVIC_IRQChannel = EXTI4_IRQn;
     NVIC_Init(&nvic);
 
+    /* EXTI5~EXTI7 共用 EXTI9_5 向量。 */
     nvic.NVIC_IRQChannel = EXTI9_5_IRQn;
-    nvic.NVIC_IRQChannelSubPriority = 1;
-    NVIC_Init(&nvic);
-
-    nvic.NVIC_IRQChannel = EXTI15_10_IRQn;
-    nvic.NVIC_IRQChannelSubPriority = 2;
     NVIC_Init(&nvic);
 }
 
@@ -298,7 +309,39 @@ void encoder_sensor_init(void)
     }
 }
 
-/* ---------------- EXTI 中断服务函数 ---------------- */
+/* ---------------- EXTI 中断服务函数 ----------------
+ * FL = PA0(A) / PA1(B) -> EXTI0 / EXTI1
+ * FR = PA2(A) / PA3(B) -> EXTI2 / EXTI3
+ * RL = PA4(A) / PA5(B) -> EXTI4 / EXTI9_5(line5)
+ * RR = PA6(A) / PA7(B) -> EXTI9_5(line6/line7)
+ */
+
+void EXTI0_IRQHandler(void)
+{
+    if (encoder_exti_pending(EXTI_Line0))
+    {
+        encoder_exti_clear(EXTI_Line0);
+        encoder_update(ENCODER_FL);
+    }
+}
+
+void EXTI1_IRQHandler(void)
+{
+    if (encoder_exti_pending(EXTI_Line1))
+    {
+        encoder_exti_clear(EXTI_Line1);
+        encoder_update(ENCODER_FL);
+    }
+}
+
+void EXTI2_IRQHandler(void)
+{
+    if (encoder_exti_pending(EXTI_Line2))
+    {
+        encoder_exti_clear(EXTI_Line2);
+        encoder_update(ENCODER_FR);
+    }
+}
 
 void EXTI3_IRQHandler(void)
 {
@@ -314,7 +357,7 @@ void EXTI4_IRQHandler(void)
     if (encoder_exti_pending(EXTI_Line4))
     {
         encoder_exti_clear(EXTI_Line4);
-        encoder_update(ENCODER_FR);
+        encoder_update(ENCODER_RL);
     }
 }
 
@@ -328,30 +371,11 @@ void EXTI9_5_IRQHandler(void)
     if (encoder_exti_pending(EXTI_Line6))
     {
         encoder_exti_clear(EXTI_Line6);
-        encoder_update(ENCODER_RL);
+        encoder_update(ENCODER_RR);
     }
     if (encoder_exti_pending(EXTI_Line7))
     {
         encoder_exti_clear(EXTI_Line7);
         encoder_update(ENCODER_RR);
-    }
-    if (encoder_exti_pending(EXTI_Line8))
-    {
-        encoder_exti_clear(EXTI_Line8);
-        encoder_update(ENCODER_RR);
-    }
-}
-
-void EXTI15_10_IRQHandler(void)
-{
-    if (encoder_exti_pending(EXTI_Line12))
-    {
-        encoder_exti_clear(EXTI_Line12);
-        encoder_update(ENCODER_FL);
-    }
-    if (encoder_exti_pending(EXTI_Line15))
-    {
-        encoder_exti_clear(EXTI_Line15);
-        encoder_update(ENCODER_FL);
     }
 }

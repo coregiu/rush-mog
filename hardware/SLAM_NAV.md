@@ -33,7 +33,7 @@
 |---|---|---|
 | STM32F103C8T6 | 车体控制，FreeRTOS，电机/音频/PS2 协议 | 可作为实时运动控制 MCU，但引脚/定时器/RAM 不足，见 §4 |
 | L298N 四驱板 | 8 路方向 + 2 路使能 | 能驱动四轮，但只有 2 路 PWM，无法四轮独立调速 |
-| JGB37-520 电机 ×4 | 自带霍尔编码器 | 已接入 STM32 PA12/PA15/PB3~PB8，EXTI 四倍频解码，USART3 上报 Pi Edge Server；`edge_server_node` 直接发布 `/odom` |
+| JGB37-520 电机 ×4 | 自带霍尔编码器 | 已接入 STM32 PA0~PA7，EXTI 四倍频解码，USART3 上报 Pi Edge Server；`edge_server_node` 直接发布 `/odom` |
 | 树莓派 Edge Server | Wi-Fi AP、网页手柄、MJPEG 图传、STM32 串口 | 与 ROS 同机；承担网页/底盘/图传，ESP32-S3-CAM 仅旧版回退 |
 | PCA9685 + 机械臂 | 16 路舵机驱动 | 抓取执行；不参与导航定位 |
 | JQ6500 | 音频播放 | 与导航无关 |
@@ -285,10 +285,12 @@ Orbbec Astra Pro Plus / RealSense D435i 等 RGB-D，或用 AprilTag/二维码辅
 ### 9.1 编码器接线
 
 JGB37-520 常见霍尔编码器：VCC 5V、GND、A、B。四轮共 8 路信号 + 电源。
-- 每路 A/B 接 STM32 EXTI：左前 PA12/PA15、右前 PB3/PB4、左后 PB5/PB6、右后 PB7/PB8；
-  固件关闭 JTAG、保留 SWD，软件四倍频解码。
-- 编码器若是 5V 推挽输出，PA12（USB D+）的耐压需按数据手册确认；建议编码器用 3.3V
-  供电，或加电平转换/分压。开漏输出可用 STM32 内部上拉（本固件已启用）。
+- 每路 A/B 接 STM32 EXTI：左前 PA0/PA1、右前 PA2/PA3、左后 PA4/PA5、右后 PA6/PA7；
+  软件四倍频解码（不再占用 JTAG 引脚）。
+- PA0~PA7 不是 5V 容忍(FT)引脚，编码器 A/B 必须是 3.3V 电平：编码器改 3.3V 供电，
+  或加电平转换/分压。开漏输出可用 STM32 内部上拉（本固件已启用）。
+- ⚠️ PA2/PA3 与 USART2（ASR PRO 语音板 / JQ6500 MP3）复用，编码器占用后语音与 MP3 失效；
+  需要语音功能时把这路编码器改到 PB3/PB4。
 - 串联 100–330Ω + 100nF 到地做 RC 滤波；长线用屏蔽线，屏蔽层单端接地。
 - 编码器电源与电机电源分开，避免 PWM 噪声。
 
