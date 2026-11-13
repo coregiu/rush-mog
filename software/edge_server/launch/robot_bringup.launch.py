@@ -1,12 +1,12 @@
 """实车 bringup：树莓派 Edge Server（网页/底盘） + edge_server + 可选 ICM-20948。
 
-默认由 `edge_server_node` 直连 STM32 USART3（9600 ASCII 协议），同时提供
+默认由 `edge_server_node` 直连 STM32 USART3（115200 ASCII 协议），同时提供
 80 端口网页/API 和 8080 MJPEG；`/cmd_vel` 与网页手动控制共用同一个串口出口。
 旧版 ESP32 HTTP 桥仅在 `base_transport:=esp32_http` 时启用。
 
 启动前请确认：
 - 树莓派/Orin 已装 ROS2 Humble；
-- STM32 已烧录 body_control 固件，串口 9600 8N1，建议 udev 固定为 /dev/rush_base；
+- STM32 已烧录 body_control 固件，串口 115200 8N1，建议 udev 固定为 /dev/rush_base；
 - 激光雷达驱动、相机驱动、robot_localization EKF、slam_toolbox/Nav2 另行启动；
 - 80 端口需要 root 或 CAP_NET_BIND_SERVICE（systemd 示例见 software/edge_server/README.md）。
 """

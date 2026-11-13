@@ -17,7 +17,7 @@ edge_server:
     imu: "/imu/data"                # imu_node（Pi I2C）或旧 base_bridge（STM32 转发）
 
   # ---------------------------------------------------------------- 底盘
-  # 树莓派 Edge Server 直连 STM32 USART3（9600 8N1，ASCII 命令 + $B 遥测）：
+  # 树莓派 Edge Server 直连 STM32 USART3（115200 8N1，ASCII 命令 + $B 遥测）：
   #   STM32 编码器 -> USART3 -> edge_server_node -> /odom、/base/status
   #   /cmd_vel -> edge_server_node -> UART -> STM32
   # 旧版 ESP32 HTTP 桥（esp32_bridge_node）仅作为历史兼容保留，不再默认启动。
@@ -25,7 +25,7 @@ edge_server:
     enabled: true
     transport: "edge_serial"         # edge_serial | serial_binary | esp32_http(legacy)
     port: "/dev/ttyUSB0"             # 推荐 udev 固定为 /dev/rush_base
-    baud: 9600                       # 当前 body_control 固件固定 9600
+    baud: 115200                     # 与 body_control 的 BODY_UART_BAUD_RATE 保持一致
     odom_rate_hz: 20.0
     watchdog_sec: 0.5
     odom_frame: "odom"

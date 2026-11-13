@@ -12,7 +12,7 @@
 - **自主导航**：Nav2 或内置直航，目标校验、停滞检测、超时/急停；
 - **目标搜索**：颜色/YOLO 检测、激光测距、map 投影、前沿探索、确认、接近；
 - **速度仲裁**：VLA/Nav2/反向/安全统一到唯一 `/cmd_vel`；
-- **Pi Edge Server**：80 端口网页/API、8080 MJPEG、树莓派直连 STM32 USART3（9600 ASCII）、
+- **Pi Edge Server**：80 端口网页/API、8080 MJPEG、树莓派直连 STM32 USART3（115200 ASCII）、
   网页手动控制与 ROS `/cmd_vel` 共用串口出口；旧 ESP32 HTTP 桥仅保留历史兼容；
 - **健康检查**：ROS 节点/话题 + 相机/雷达/IMU/麦克风/音箱/机械臂等设备，
   HTTP 供 Pi 上的 Edge Server/dashboard 代理，另有 ROS 话题/服务。
@@ -100,7 +100,7 @@ ros2 launch edge_server robot_bringup.launch.py config_file:=/path/to/robot.yaml
 
 `robot_bringup.launch.py` 默认启动 `edge_server_node`（`base_transport:=edge_serial`）：
 - 80 端口提供手柄页、dashboard、`/cmd`、`/status`、`/api/*`；8080 提供 MJPEG；
-- 树莓派 UART 直连 STM32 USART3，9600 8N1，发送 ASCII 方向+PWM 命令，
+- 树莓派 UART 直连 STM32 USART3，115200 8N1，发送 ASCII 方向+PWM 命令，
   解析 `$B,...` 四轮编码器遥测；
 - 发布 `/odom`、`/joint_states`、`/base/status`；订阅 `/cmd_vel` 并量化成
   `方向+PWM` 命令；

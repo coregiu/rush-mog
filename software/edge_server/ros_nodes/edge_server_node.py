@@ -4,7 +4,7 @@
 
 - HTTP 80：手柄页、数字孪生 dashboard、``/cmd``、``/status``、``/api/*``；
 - HTTP 8080：ROS 相机 ``/camera/image_raw`` 的 MJPEG 图传；
-- UART：树莓派直连 STM32 USART3（9600 8N1，ASCII 命令 + ``$B`` 遥测）；
+- UART：树莓派直连 STM32 USART3（115200 8N1，ASCII 命令 + ``$B`` 遥测）；
 - ROS：``/cmd_vel`` -> STM32，STM32 遥测 -> ``/odom``、``/joint_states``、
   ``/base/status``。
 
@@ -316,7 +316,7 @@ class EdgeServerNode(Node):
         self.serial_enabled = bool(base_cfg.get("enabled", True))
         self.serial = SerialLink(
             str(base_cfg.get("port", "/dev/ttyUSB0")),
-            int(base_cfg.get("baud", 9600)),
+            int(base_cfg.get("baud", 115200)),
             self._on_serial_line,
             self._on_serial_state,
             reconnect_sec=float((base_cfg.get("edge_serial") or {}).get("reconnect_sec", 2.0)),

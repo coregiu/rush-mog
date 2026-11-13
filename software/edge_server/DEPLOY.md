@@ -45,7 +45,7 @@
   - Web：`0.0.0.0:80`
   - MJPEG：`0.0.0.0:8080`
   - ROS 健康网关：`127.0.0.1:8090`
-  - STM32 串口：`/dev/ttyUSB0`，9600 8N1
+  - STM32 串口：`/dev/ttyUSB0`，115200 8N1
   - 状态文件：`/var/lib/edge_server/edge_params.json`
   - 健康检查：只监控当前 5 个设备，`check_nodes=false`、
     `safety_required=false`，缺设备按 `degraded` 而不是 `error` 上报

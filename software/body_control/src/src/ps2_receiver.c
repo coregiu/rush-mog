@@ -32,8 +32,8 @@ void init_ps2_state()
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU;
     GPIO_Init(GPIOB, &GPIO_InitStructure);
 
-    // 串口配置
-    USART_InitStructure.USART_BaudRate = 9600;
+    // 串口配置（底盘链路，与树莓派 edge_server 的 base.baud 一致）
+    USART_InitStructure.USART_BaudRate = BODY_UART_BAUD_RATE;
     USART_InitStructure.USART_WordLength = USART_WordLength_8b;
     USART_InitStructure.USART_StopBits = USART_StopBits_1;
     USART_InitStructure.USART_Parity = USART_Parity_No;

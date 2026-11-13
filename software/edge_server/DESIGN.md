@@ -88,7 +88,7 @@
 ESP32 与树莓派两个模块已合并为**一台树莓派 Edge Server**：
 
 - `edge_server_node` 在 Pi 上提供 80 端口网页/API、8080 MJPEG；
-- 直接通过 Pi UART 连接 STM32 USART3（9600 8N1），发送 ASCII 方向+PWM 命令，
+- 直接通过 Pi UART 连接 STM32 USART3（115200 8N1），发送 ASCII 方向+PWM 命令，
   解析 `$B,...` 编码器遥测；
 - 网页手柄/摇杆手动控制与 ROS `/cmd_vel` 共用同一个串口出口：网页手动优先，
   松开/停止后 ROS 导航恢复；ROS raw 命令保留第二字节并带 1s 租约；
@@ -529,7 +529,7 @@ FAILED
 ### 6.13 底盘桥（`edge_server_node` + STM32 ASCII）
 
 当前 body_control 固件使用 **ASCII 命令 + 行遥测**，由 Pi 上的
-`edge_server_node` 直接经 UART 连接 STM32 USART3（9600 8N1）：
+`edge_server_node` 直接经 UART 连接 STM32 USART3（115200 8N1）：
 
 | 方向 | 格式 | 说明 |
 |---|---|---|
@@ -790,7 +790,7 @@ edge/Pi sensors → bridge_node → /center/synced_data
 | `health.min_rate_ratio` | 0.5 | 低于期望频率比例判 degraded |
 | `health.strict_unknown` | false | 可选设备 unknown 是否降级整体 |
 | `health.http.host/port` | 127.0.0.1/8090 | HTTP 网关绑定（Edge Server 同机代理） |
-| `base.transport/port/baud` | edge_serial//dev/ttyUSB0/9600 | Pi 直连 STM32 |
+| `base.transport/port/baud` | edge_serial//dev/ttyUSB0/115200 | Pi 直连 STM32 |
 | `edge.web.port/stream_port` | 80/8080 | Edge Web 与 MJPEG |
 | `edge.motion.keepalive_ms` | 200 | 手动/raw 命令重发周期 |
 | `health.devices.<id>.required` | 按设备 | 缺失是否 error |

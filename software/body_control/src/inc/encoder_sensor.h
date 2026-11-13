@@ -41,7 +41,7 @@
 #define ENCODER_UM_X10_PER_COUNT \
     ((ENCODER_WHEEL_DIAMETER_MM * 31416 + ENCODER_CPR / 2) / ENCODER_CPR)
 
-/* 遥测周期；实际周期还会叠加 9600 波特率下的发送时间。 */
+/* 遥测周期；实际周期还会叠加 115200 波特率下的发送时间（约 4~5ms）。 */
 #define ENCODER_TELEMETRY_PERIOD_MS 50
 
 /* 如果某个轮子前进时计数为负，把对应符号改成 -1。 */

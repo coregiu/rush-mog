@@ -1,13 +1,40 @@
 # SLAM 建图 / 自主导航 / 目标搜索：硬件方案与缺口分析
 
+> 本次刷新对应：`hardware/README.md` 新 BOM（Pi 4B + D6 激光 + ICM-20948 + Astra Pro + LM393 悬崖）、
+> 编码器改到 PA0~PA7 的 body_control 固件、以及 2026-11-13 刷新后的 KiCad 原理图 `hardware/pcb_design/ago.kicad_sch`。
+
 本文回答两个问题：
 
-1. 以“SLAM 建图 + 自主导航去找物体 + ICM-20948 定位”为目标，现有 RUSH MOG 硬件还缺什么？
+1. 以“SLAM 建图 + 自主导航去找物体 + ICM-20948 定位”为目标，当前 RUSH MOG 硬件还缺什么？
 2. 推荐的实车硬件拓扑、接口、引脚与标定方案是什么？
 
-结论先行：**现有硬件能完成遥控、语音、机械臂和基础视觉演示，但不能直接跑 SLAM + Nav2。**
-必须补三块：**机载 Linux 计算平台、2D 激光雷达、轮式编码器闭环**；ICM-20948 是定位链路的必要补充，
-但只加 IMU 不足以实现导航。旧 ESP32 不能替代机载计算机；现 ESP32 已与 Pi 合并为 Edge Server。
+## 0. 结论先行
+
+**2D SLAM 建图的三个必要件已经齐了**：D6 激光雷达（Pi UART4）、4 路轮式编码器（STM32 PA0~PA7，
+EXTI 四倍频，USART3 上报 Pi）、ICM-20948（Pi I2C1）。理论上接完线、标定完就能跑
+`slam_toolbox` 建图。
+
+**但离“能稳定建图 + 导航”还差这些，按优先级：**
+
+| 优先级 | 缺口 | 为什么卡 SLAM |
+|---|---|---|
+| P0 | **5V/5A UBEC 等电源扩容**（现在 5V/3A） | Pi 4B 峰值 1.5A + 深度相机 ~0.7A + 激光 ~0.6A，3A 会在建图途中掉电重启，地图直接废 |
+| P0 | **4 路独立 PWM 电机驱动**（L298N 只有 2 路使能） | 麦轮四轮不能独立调速，轮速闭环和 `holonomic` 运动学做不准，`/odom` 漂移大 |
+| P0 | **编码器电平处理**（PA0~PA7 不是 5V 容忍） | JGB37-520 编码器多为 5V 推挽输出，直连会倒灌/计数乱跳，里程计不可信 |
+| P0 | **硬件急停 + 保险丝 + 总开关** | 建图时人在车后，Wi-Fi/节点挂了只能靠硬件断电 |
+| P1 | **激光/IMU/相机支架** | 原理图里这些器件都还没连线，更没有安装结构；IMU 必须刚性固定在底盘中心 |
+| P1 | **INA226 电量检测** | 自主建图/导航途中掉电没有预警 |
+| P1 | **悬崖传感器补到 2~3 路并分配 GPIO** | 现在只有 GPIO27 一个信号脚，激光盲区看不到桌沿 |
+| P2 | 散热/高耐久存储、碰撞开关、5GHz AP、USB 声卡 | 长时间建图稳定性/体验 |
+
+> ✅ 已解决（2026-11-14）：USART3 波特率 **9600 → 115200**，固件 `BODY_UART_BAUD_RATE` 与
+> `edge_server/config/robot.yaml` 的 `base.baud` 已同步。原来 37~48 字符/50 ms 的遥测在
+> 9600 下要占 77%~100% 带宽，现在 115200 下一帧只要约 4~5 ms。
+
+**原理图（2026-11-13 刷新版）现状**：器件已经摆齐（Pi 4、STM32、ICM-20948、L298N、4 电机、
+4 编码器、2×LM393、喇叭），但**只画通了 STM32→L298N→电机这一条链**；Pi 排针、IMU、4 个编码器、
+LM393、喇叭的引脚全部悬空。另外 12V 接在 L298N 的 `Vss(9)`、`Vs(4)` 悬空，按 L298N 数据手册
+`Vs` 才是电机电源、`Vss` 是 5V 逻辑电源，**投板前必须核对**。详见 §5。
 
 ---
 
@@ -21,213 +48,266 @@
 | 目标搜索 | 相机、激光、地图、定位 | 目标位姿、接近点 | 相机、激光、目标检测、导航 |
 | 安全 | 障碍、电量、急停、定位健康 | 急停/回零 | 急停按钮、电压检测、看门狗 |
 
-目标场景是室内 10–30 m²、地面平整、光照可控。若要做室外/多楼层/动态人群，硬件要求更高。
+目标场景：室内 10–30 m²、地面平整、光照可控。室外/多楼层/动态人群要求更高。
 
 ---
 
 ## 2. 现有硬件盘点
 
-### 2.1 已有且可复用
+### 2.1 已到位 / 已选型
 
 | 模块 | 现状 | 对 SLAM/导航的价值 |
 |---|---|---|
-| STM32F103C8T6 | 车体控制，FreeRTOS，电机/音频/PS2 协议 | 可作为实时运动控制 MCU，但引脚/定时器/RAM 不足，见 §4 |
-| L298N 四驱板 | 8 路方向 + 2 路使能 | 能驱动四轮，但只有 2 路 PWM，无法四轮独立调速 |
-| JGB37-520 电机 ×4 | 自带霍尔编码器 | 已接入 STM32 PA0~PA7，EXTI 四倍频解码，USART3 上报 Pi Edge Server；`edge_server_node` 直接发布 `/odom` |
-| 树莓派 Edge Server | Wi-Fi AP、网页手柄、MJPEG 图传、STM32 串口 | 与 ROS 同机；承担网页/底盘/图传，ESP32-S3-CAM 仅旧版回退 |
-| PCA9685 + 机械臂 | 16 路舵机驱动 | 抓取执行；不参与导航定位 |
-| JQ6500 | 音频播放 | 与导航无关 |
-| OLED / GY-53 TOF | 调试/短距测距 | 可做辅助，不能替代 360° 激光 |
-| 12V 电池 + 降压板 | 12V/5V/3.3V | 需为新增计算平台和舵机扩容，见 §5 |
-| MPU6050 | 6 轴，代码存在但未真正接入主循环 | 可被 ICM-20948 替代；6 轴无磁力计 |
-| KiCad PCB | 含 STM32/PCA9685/L298N/ESP32（legacy）/电机/舵机/喇叭 | **没有 IMU、激光、编码器、树莓派接口**，需改板或转接 |
+| 树莓派 4B | Edge Server：Wi-Fi AP、网页手柄、MJPEG、STM32 串口、ROS2 Humble | 机载计算平台，跑 EKF / slam_toolbox / Nav2 |
+| STM32F103C8T6 | FreeRTOS，电机 + 编码器 + USART3；音频已关闭 | 实时运动控制 + 编码器采集 |
+| JGB37-520 电机 ×4 | 自带霍尔编码器，已接 PA0~PA7（EXTI 四倍频） | 轮式里程计 `/odom`（20 Hz 上报） |
+| D6 2D 激光 | 已选型，接 Pi UART4 GPIO8/9 | SLAM 建图/定位/避障的主传感器 |
+| ICM-20948 | 已选型，接 Pi I2C1 GPIO2/3 | EKF 的角速度/航向，补编码器短时误差 |
+| Astra Pro 深度相机 | 已选型，USB 接 Pi | 目标检测/接近；2D 建图非必需 |
+| LM393 红外悬崖 ×2 | 已选型，输出接 Pi GPIO27 | 激光盲区安全（桌沿/台阶） |
+| USB 全向麦克风 / 蓝牙音箱 | 已选型 | 语音交互，与导航解耦 |
+| 12V 3600mAh + 12V→5V 3A / 3.3V 1A | 已选型 | 供电（**3A 偏紧，见 §6**） |
+| L298N 四驱板 | 已有 | 能驱动四轮，但只有 2 路使能（**P0 瓶颈**） |
+| PCA9685 + 机械臂 | 已有 | 抓取执行，不参与定位；注意机械臂会遮挡激光 |
 
-### 2.2 缺失或不足
+### 2.2 仍缺 / 不足
 
 | 缺口 | 影响 | 结论 |
 |---|---|---|
-| 无机载 Linux 计算平台 | 旧 ESP32 无 Linux；网页/底盘/ROS 合并后必须由 Pi 承担 | **使用** 树莓派 4B/5 或 Jetson Orin Nano 作为 Edge Server |
-| 无 2D 激光雷达 | 无法建图/定位/避障；`edge_server` 只开了 9600 UART，没有解析 | **必须增加** LD19/LD06/RPLIDAR A1 等 |
-| 编码器未接线/未闭环 | 无轮式里程计，EKF/Nav2 精度差，麦轮打滑无法校正 | **必须补** 4 路正交编码器 + 轮速 PID |
-| STM32F103C8T6 资源不足 | 4 路编码器需要 4 个定时器；引脚冲突多；RAM 仅剩约 2–3 KB | **建议升级** STM32F103RCT6/RET6 或 STM32F411 |
-| L298N 只有 2 路使能 | 四轮不能独立调速，麦轮全向运动学无法精确执行 | **建议换** 4 路独立 PWM 驱动（TB6612×2/DRV8871/BTS7960） |
-| 无 ICM-20948 | 只有 6 轴 MPU6050，航向漂移快，EKF 缺少可靠角速度 | **增加** ICM-20948（或替代型号），见 §6 |
-| 相机为 OV2640 + ESP32 图传 | 分辨率/延迟/曝光一般，目标检测精度有限 | 改用 Pi USB/CSI 相机，由 Edge Server 直接推 MJPEG |
-| 无深度/可靠测距 | 2D 激光只测一个平面，目标高度/距离估计受限 | 可选深度相机；否则用“激光方位距离 + bbox 高度”估距 |
-| 电源余量不足 | Pi 5V/3A、舵机 6V/5A 峰值容易导致复位/掉电 | 独立 5V/5A UBEC + 6V/5A BEC + 保险丝 |
-| 无硬件急停 | 软件急停依赖 Wi-Fi/节点存活 | 增加常闭急停按钮，切断电机使能/驱动电源 |
-| 无电量/电流检测 | 自主任务可能突然掉电 | 增加 INA226/INA219 或分压 ADC |
-| 无防跌落/碰撞 | 激光低矮盲区、台阶/桌沿风险 | 增加 2–3 路红外/超声波悬崖传感器 + 碰撞开关 |
-| 网络架构矛盾 | 旧 ESP32 AP 与 edge_server 连接冲突 | 已由 Pi 统一做 AP/STA；导航在车上闭环 |
+| 5V 只有 3A | Pi + 相机 + 激光峰值可能超 3A，掉电重启 | **换 5V/5A UBEC**，Pi 单独一路、电机 12V 单独一路 |
+| L298N 只有 2 路使能 | 四轮不能独立调速，麦轮全向/轮速 PID 做不准 | **换** TB6612FNG×2 / DRV8871×4 / BTS7960×2 |
+| PA0~PA7 非 5V 容忍 | 编码器 5V 输出倒灌，计数乱跳/损坏 IO | 编码器改 3.3V 供电或加分压/电平转换 |
+| USART3 9600 已饱和 ✅ | 遥测挤占命令，`/odom` 抖动 | 已改 **115200**（固件 + `robot.yaml` 同步） |
+| 无急停/保险丝 | 失控只能拔电 | 常闭急停 + 保险丝 + 总开关 |
+| 无电量检测 | 建图中途掉电，地图/参数丢失 | INA226/INA219（I2C） |
+| 无安装结构 | 激光/IMU/相机没有刚性基准，TF 标不准 | 3D 打印/铝板支架，IMU 加减震柱 |
+| 悬崖只有 1 个 GPIO | 多路传感器无法区分方向 | 2~3 路各占一个 GPIO，或二极管 OR 后接一个 |
+| 深度相机驱动待确认 | Astra Pro 是老款结构光，ROS2 支持有限 | 先验证出 `/camera/depth/image_raw`，否则换 Astra Pro Plus / Gemini 2 / D435i |
+| PCB 未布线 | `ago.kicad_pcb` 只有空骨架 | 目前只能面包板/杜邦线，投板前先按 §5 修原理图 |
+| Flash/RAM 余量 | Flash 17.5KB/64KB 够；RAM 18.0KB/20KB（88%） | 再加功能要换 F103RCT6/F411 或精简缓冲区 |
 
 ---
 
-## 3. 推荐目标架构
-
-### 3.1 三层硬件
+## 3. 实际硬件拓扑
 
 ```text
-┌──────────────────────────────────────────────────────────────┐
-│ 云/PC 端（可选）                                              │
-│   edge_server：VLA 推理、任务编排、HMI、日志                 │
-│   —— 通过 Wi-Fi/以太网与车上 ROS2 通信                        │
-└──────────────────────────┬───────────────────────────────────┘
-                           │ DDS / Wi-Fi（建议有线或 5GHz）
-┌──────────────────────────▼───────────────────────────────────┐
-│ 机载 Linux 计算平台（树莓派 4B/5 或 Jetson Orin Nano）         │
-│   ROS2 Humble：                                               │
-│   激光驱动 / 相机驱动 / base_bridge / EKF / slam_toolbox /    │
-│   Nav2 / edge_server（导航与搜索部分）                       │
-└───────┬──────────────────┬──────────────────┬────────────────┘
-        │ USB/UART         │ USB              │ I2C
-┌───────▼────────┐ ┌───────▼────────┐ ┌───────▼────────┐
-│ 2D 激光雷达     │ │ USB/CSI 相机    │ │ ICM-20948      │
-│ LD19/LD06      │ │ 1080p 广角      │ │ 9 轴 IMU       │
-└────────────────┘ └────────────────┘ └────────────────┘
-        │
-┌───────▼──────────────────────────────────────────────────────┐
-│ STM32 实时控制 MCU（建议 F103RCT6/F411）                       │
-│   4 路编码器捕获 + 4 路 PWM + 轮速 PID + 看门狗 + 急停          │
-│   UART 与 Pi 通信：速度指令 / 编码器 / 电池 / IMU 转发          │
-└───────┬──────────────────────────────────────────────────────┘
-        │
-┌───────▼──────────────────────────────────────────────────────┐
-│ 4 路电机驱动（TB6612×2 / DRV8871 / BTS7960） + 12V 电池        │
-│ 独立 5V/5A UBEC（Pi） + 6V/5A BEC（舵机） + 保险丝 + 急停       │
-└──────────────────────────────────────────────────────────────┘
+                          Wi-Fi 5GHz / 有线
+                                  │
+┌─────────────────────────────────▼─────────────────────────────────┐
+│ 树莓派 4B（Ubuntu 22.04 + ROS2 Humble + edge_server）              │
+│  UART3 GPIO4/5  ── 115200 8N1 ─── STM32 USART3 (PB10/PB11)        │
+│  UART4 GPIO8/9  ── TTL UART ───── D6 激光雷达（5V 独立供电）        │
+│  I2C1  GPIO2/3  ── 3.3V I2C ───── ICM-20948（0x68）               │
+│  GPIO27         ◄── LM393 悬崖输出（3.3V 电平）                    │
+│  USB3           ◄── Astra Pro 深度相机                            │
+│  USB2           ◄── USB 全向麦克风                                │
+│  蓝牙           ──► 蓝牙音箱                                      │
+└───────────────┬───────────────────────────────────────────────────┘
+                │ UART3（ASCII 命令 + $B 遥测）
+┌───────────────▼───────────────────────────────────────────────────┐
+│ STM32F103C8T6（body_control，FreeRTOS）                            │
+│  PA0~PA7   ◄── 4 路编码器 A/B（EXTI 四倍频）                       │
+│  PA8~PA11  ──► L298N IN1~IN4（左前/左后）                          │
+│  PB12~PB15 ──► L298N IN5~IN8（右前/右后）                          │
+│  PB0/PB1   ──► L298N ENA+EnB / EnC+EnD（TIM3_CH3/CH4，左右两组）    │
+│  PC13      ──► 调试 LED                                           │
+│  PA13/PA14 ──  SWD 下载调试（不能当 IO）                            │
+└───────────────┬───────────────────────────────────────────────────┘
+                │
+┌───────────────▼───────────────────────────────────────────────────┐
+│ 电源：12V 电池 → 保险丝/总开关/急停 → 电机 12V                      │
+│                    └→ 5V/5A UBEC → Pi / D6 / 相机 / 麦             │
+│                    └→ 3.3V 1A  → IMU / 编码器上拉（若需要）         │
+│ 要求：Pi、STM32、激光、IMU、电机驱动 **单点共地**                    │
+└───────────────────────────────────────────────────────────────────┘
 ```
 
-### 3.2 两个部署选项
+---
 
-| 选项 | 车上 | 云端/PC | 适用 |
-|---|---|---|---|
-| A. 导航在车上（推荐） | Pi 4B/5 跑 ROS2 驱动、EKF、SLAM、Nav2、目标检测 | edge_server 的 VLA/任务编排可远程 | 网络不稳定、需要实时闭环 |
-| B. 全在车上 | Jetson Orin Nano 跑全部 edge_server + VLA | 无 | 无网络、要本地 VLA |
-| C. 全在 PC（不推荐） | 仅 Pi Edge Server + STM32 | edge_server 远程 | 降级演示；网页/底盘仍在 Pi 本地闭环 |
+## 4. 接口、电平与树莓派配置
 
-`edge_server` 的代码同时支持 A/B/C：导航、建图、搜索节点只依赖标准 ROS2 话题/动作；
-远程部署时把同一套节点放到 PC 即可，但 `/cmd_vel` 闭环必须在车上或低延迟局域网内。
+### 4.1 接线表（以 `hardware/README.md` 与固件为准）
+
+| 信号 | 树莓派 | 对方 | 电平/方向 | 备注 |
+|---|---|---|---|---|
+| STM32 串口 | UART3 GPIO4 (TX) / GPIO5 (RX) | STM32 PB11 (RX) / PB10 (TX) | 3.3V TTL，交叉 | 115200 8N1（已配置） |
+| 激光雷达 | UART4 GPIO8 (TX) / GPIO9 (RX) | D6 的 RX / TX | 3.3V TTL，交叉 | 5V 独立供电，共地 |
+| IMU | I2C1 GPIO2 (SDA) / GPIO3 (SCL) | ICM-20948 SDA/SCL | 3.3V，0x68 | 4.7k 上拉，线尽量短 |
+| 悬崖 | GPIO27 | LM393 OUT | 3.3V 输入 | 需要多路时另占 GPIO |
+| 深度相机 | USB3 | Astra Pro | USB 2.0 设备 | 不要经 USB Hub，避免带宽/供电 |
+| 麦克风 | USB2 | USB 全向麦 | USB | 与相机分开口 |
+| 音箱 | 蓝牙 | 蓝牙音箱 | — | 2.4G Wi-Fi 与蓝牙会互相干扰 |
+
+### 4.2 电平与接地方向
+
+- **GPIO4/5/8/9/2/3/27 全部是 3.3V**，不能接 5V 信号；D6 / ICM-20948 若是 5V 供电模块，
+  要先确认其 UART/I2C 输出是 3.3V 还是 5V，必要时加电平转换。
+- STM32 的 PB10/PB11 是 5V 容忍，接 Pi 3.3V 没问题；但**必须共地**，否则串口随机丢字节。
+- 激光雷达、电机、Pi 的地要单点汇合；电机 PWM 大电流地不要穿过 Pi 的地线。
+- 串口线建议串 100~330Ω 限流电阻，长线用双绞/屏蔽。
+
+### 4.3 树莓派系统配置
+
+```ini
+# /boot/firmware/config.txt（Pi 4）
+dtoverlay=uart3          # GPIO4/5，给 STM32
+dtoverlay=uart4          # GPIO8/9，给 D6 激光
+# enable_uart=1 只在使用 GPIO14/15 主串口时才需要，这里可不加
+# 注意：GPIO8=SPI0 CE0、GPIO9=SPI0 MISO，确认没有开 spi；GPIO4 默认是 1-Wire，确认没开 w1-gpio
+```
+
+```bash
+# 设备名以实际为准（Pi 4 上通常是 ttyAMA2 / ttyAMA3）
+ls -l /dev/ttyAMA* /dev/serial*
+# 关掉串口控制台（如果用 GPIO14/15 做主 UART 才需要）
+sudo systemctl disable --now serial-getty@ttyAMA0.service
+```
+
+建议用 udev 固定名字，避免重启后设备号变化：
+
+```bash
+# /etc/udev/rules.d/99-rush-mog.rules
+KERNEL=="ttyAMA2", SYMLINK+="rush_base"
+KERNEL=="ttyAMA3", SYMLINK+="rush_lidar"
+```
+
+并把用户加入 `dialout` 组：`sudo usermod -aG dialout $USER`（重新登录生效）。
+
+### 4.4 edge_server 配置要同步改的地方
+
+| 文件/字段 | 现在 | 改成 |
+|---|---|---|
+| `edge_server/config/robot.yaml` → `base.port` | `/dev/ttyUSB0` | `/dev/rush_base`（UART3） |
+| `base.baud` | `9600` | `115200` ✅（固件 `BODY_UART_BAUD_RATE` 已同步） |
+| `imu.enabled` | `false` | `true`（IMU 接 Pi I2C1） |
+| `imu.i2c_bus` / `address` | `1` / `0x68` | 实物 SA0 接地为 `0x68`，接 3.3V 为 `0x69` |
+| `perception.camera.fx/fy/cx/cy` | `0` | 棋盘格标定后填入 |
+| `navigation.direct.holonomic` | `true` | 换 4 路独立驱动前先设 `false`（L298N 2 路使能做不了真全向） |
+
+启动：`ros2 launch edge_server robot_bringup.launch.py start_imu:=true`。
 
 ---
 
-## 4. STM32F103C8T6 引脚/资源冲突（关键）
+## 5. 原理图（2026-11-13 刷新版）审查
 
-### 4.1 当前固件实际分配
+### 5.1 已画出的连接
 
-| 功能 | 引脚 | 说明 |
+| 网络 | 连接 |
+|---|---|
+| 电机方向 | STM32 PA11/PA10/PA9/PA8 → L298N IN1~IN4；PB15/PB14/PB13/PB12 → IN5~IN8 |
+| 电机使能 | STM32 PB0 → ENA+EnB；PB1 → EnC+EnD |
+| 电机输出 | L298N OUT1~OUT8 → 4 个直流电机 |
+| 电源 | 12V → L298N `Vss(9)`；GND → L298N GND |
+
+### 5.2 还没画的连接（当前全部悬空）
+
+| 器件 | 悬空引脚 | 说明 |
 |---|---|---|
-| 电机 IN1–IN4 | PA11, PA10, PA9, PA8 | 左前/左后 |
-| 电机 IN5–IN8 | PB15, PB14, PB13, PB12 | 右前/右后 |
-| 左/右使能 PWM | PB0 / PB1 | TIM3_CH3/CH4 |
-| Pi Edge Server 串口 | PB10 / PB11 | USART3，9600 |
-| 语音/JQ6500 | PA2 / PA3 | USART2，9600 |
-| LED | PC13 | 调试 |
-| SWD | PA13 / PA14 | 下载调试 |
+| J1 树莓派 4（40 pin） | 全部 | UART3/UART4/I2C1/GPIO27/5V/3V3 都还没接 |
+| U1 ICM-20948 | SDA/SCL/INT/VDD/GND/… | 应接 Pi I2C1 GPIO2/3 |
+| SW1~SW4 旋转编码器 | A/B/C | 应接 STM32 PA0~PA7（软件四倍频） |
+| U2 LM393 ×2 | +/−/OUT | 悬崖传感器，输出接 Pi GPIO（建议 2~3 路） |
+| 喇叭 | 1/2 | 与当前“音频已关闭”的固件一致，可删或保留 |
 
-> 硬件 README 旧表把 IN6/IN8 写成 PA14/PA12，与固件不符；以固件为准。
-> PA13/PA14 是 SWD，不能当普通 IO，否则无法下载调试。
+### 5.3 需要修正/确认的点
 
-### 4.2 冲突清单
-
-| 冲突 | 说明 | 处理 |
-|---|---|---|
-| PB10/PB11 = USART3 vs bit-bang I2C | `iic.c`、OLED、MPU6050 都用 PB10/PB11，和 Pi Edge Server 串口冲突 | I2C 改到 PB6/PB7 或 PB8/PB9；或 UART3 改到其他引脚 |
-| PB6/PB7 与 PB8/PB9 都标 I2C1 | STM32F1 的 I2C1 只能选一组（默认或重映射），不能同时 | 只保留一组；另一组改 GPIO/别的外设 |
-| PA9/PA10 = USART1 vs 电机 IN3/IN2 | 原理图标注 TX1/RX1，但固件当电机方向脚 | 放弃 USART1；Pi Edge Server 走 USART3 |
-| PA11/PA12 = USB D-/D+ vs 电机 IN1/IN8 | 当 GPIO 后 USB 不可用 | 用 ST-Link/UART 下载；或改电机引脚 |
-| 4 路编码器无空闲定时器 | TIM3 已用于 PB0/PB1 PWM；TIM1 的 PA8/PA9 被电机占用；TIM4 的 PB6/PB7 被 I2C 占用；只剩 TIM2（PA0/PA1） | **C8T6 无法直接接 4 路编码器**，需升级 MCU 或加计数芯片 |
-| RAM 余量 | 当前 `text 15.9KB + data 1.1KB + bss 16.8KB`，20KB RAM 仅剩约 2–3KB | 加编码器/IMU/里程计/协议栈风险高；升级到 48KB/64KB RAM 的型号 |
-| Flash 余量 | 64KB 中已用约 17KB | 加功能尚可，但 RAM 是瓶颈 |
-
-### 4.3 升级建议
-
-| 方案 | 优点 | 缺点 |
-|---|---|---|
-| STM32F103RCT6/RET6（64 pin，256KB Flash/48KB RAM，4 个定时器 + 更多 GPIO） | 同系列 StdPeriph 代码基本可迁移；引脚/定时器够 4 路编码器 | PCB 需重画/转接板 |
-| STM32F411CEU6（Black Pill，100MHz，512KB/128KB，5 个 UART） | 性能强、便宜、社区资料多 | 需换 HAL/寄存器层；3.3V |
-| 保留 C8T6 + 外部编码器计数芯片（LS7366R ×4，SPI） | 不改主控 | 成本/布线增加；SPI 也要引脚 |
-| 保留 C8T6 + 只做 2 路编码器（左右侧） | 改动最小 | 麦轮全向控制/里程计精度差，不推荐 |
-
-推荐 **STM32F103RCT6 + 4 路定时器编码器 + 4 路 PWM**，与现有 FreeRTOS/StdPeriph 工程最兼容。
+1. **12V 接到了 L298N `Vss(9)`，`Vs(4)` 悬空**。L298N 数据手册：`Vs`=电机电源（12V），
+   `Vss`=逻辑 5V。若这是按“四路 L298N 模块”画的符号，请在符号里把 12V 输入改到 `Vs`，
+   并把 `Vss` 接到模块的 5V（或注明由模块内部稳压供电），否则投板会烧逻辑。
+2. **编码器没有电平处理**：PA0~PA7 是 TC 类型（非 5V 容忍），原理图里缺少分压电阻/电平转换。
+3. **没有激光雷达、深度相机、电源转换、电池、急停、INA226 的符号**：这些目前还是外挂件，
+   建议在原理图里补连接器（至少把 Pi 的 UART4/I2C1/GPIO27 引到排针）。
+4. **`ago.kicad_pcb` 只有 50 字节的空骨架**：PCB 还没开始布线，当前只能用转接板/杜邦线。
+5. **4 个编码器用了 `Device:RotaryEncoder` 符号**（A/B/C 三脚），实际 JGB37-520 是
+   VCC/GND/A/B 四线，建议换成 4 pin 连接器符号，避免接线时接错电源。
+6. **两个 LM393 符号重叠**：U2 出现了两次，且都在 `(43.18, 109.22)`，参考号也相同。
+   删掉一个或改参考号/位置，否则 ERC/网表会出现重复位号。
+7. **L298N 的 4 路使能只接了两路**（PB0→ENA+EnB、PB1→EnC+EnD），这与固件一致，
+   但意味着左前/左后、右前/右后不能独立调速——和 §10.3 的限制同源，升级驱动时一起改。
 
 ---
 
-## 5. 电源与安全
+## 6. 电源与安全
 
-### 5.1 电源树
+### 6.1 电源树（建议）
 
 ```text
-12V 锂电池（建议 3S/4S，≥10Ah，带保护板）
+12V 锂电池（3S/4S，≥3600mAh，带保护板）
  ├─ 保险丝/总开关
  ├─ 急停（常闭，切断电机驱动使能或 12V）
- ├─ 电机驱动 12V（L298N/TB6612/BTS7960）
- ├─ 5V/5A UBEC → 树莓派/Orin、激光雷达、USB 相机
+ ├─ 电机驱动 12V（L298N → 后续换 TB6612/BTS7960）
+ ├─ 5V/5A UBEC → 树莓派 4B（单独一路，线径 ≥20AWG）
+ │              ├→ D6 激光（5V，启动电流可达 1A 以上）
+ │              └→ Astra Pro / USB 麦（经 Pi USB 时注意总电流）
  ├─ 6V/5A BEC → PCA9685 + MG996 舵机（独立，不与 Pi 共地噪声）
- └─ 12V→3.3V LDO → STM32/IMU/OLED（低噪声）
+ └─ 3.3V 1A → STM32 / ICM-20948 / 编码器上拉（低噪声）
 ```
 
-要求：
-- Pi 与 STM32、激光、IMU **共地**；舵机电源与逻辑电源分开走线，单点共地。
-- 5V 输出至少 5A 峰值；Pi 5 建议 5V/5A，Orin Nano 用官方电源/12V。
-- 电池加 INA226/INA219 或分压 ADC，`base_bridge_node` 发布 `/battery_state`。
-- 急停按钮建议常闭回路，直接切断电机驱动使能；同时把状态反馈到 MCU GPIO，软件再发零速度。
-- 增加保险丝、防反接、TVS。
+### 6.2 功耗估算（决定 5V 电源选型）
 
-### 5.2 建议增加的传感器
+| 负载 | 典型 | 峰值 | 备注 |
+|---|---|---|---|
+| Pi 4B | 3~5 W（0.6~1.0 A） | ~1.5 A | USB 外设另算 |
+| Astra Pro | ~2.5 W（0.5 A） | ~0.8 A | USB 供电 |
+| D6 激光 | ~2 W（0.4 A） | >1 A 启动 | 不要从 Pi 的 5V 排针取电 |
+| USB 麦 | ~0.5 W | 0.2 A | |
+| STM32 + 逻辑 | ~0.5 W | 0.1 A | |
+| **合计（5V 侧）** | **~8~10 W** | **~3.5 A** | **5V/3A 不够，建议 5V/5A** |
 
-| 传感器 | 作用 | 接口 |
-|---|---|---|
-| ICM-20948 | 9 轴 IMU，EKF 角速度/航向 | I2C 0x68/0x69 |
-| LD19/LD06 | 360° 2D 激光，SLAM/避障 | USB/UART 230400 |
-| USB 相机 | 目标检测/VLA 视觉 | USB/CSI |
-| INA226 | 电池电压/电流 | I2C |
-| 2–3 路红外/超声波 | 悬崖/低矮障碍 | GPIO/ADC |
-| 碰撞开关 | 激光盲区碰撞 | GPIO |
-| 硬件急停 | 安全 | 常闭回路 |
+电池：12V 3600mAh ≈ 43Wh，整机平均 12W 左右 → 理论 3h，实际约 1.5~2h（含电机）。
+
+### 6.3 安全件（目前全缺）
+
+- **常闭急停**：直接断电机使能或 12V，同时把状态反馈到 MCU/Pi GPIO。
+- **保险丝 + 防反接 + TVS**：电池入口。
+- **INA226/INA219**：发布 `/battery_state`，低于阈值自动回充/停机。
+- **看门狗**：Pi 侧节点心跳丢失 → STM32 0.5s 内回零（固件已有命令看门狗，需联调）。
 
 ---
 
-## 6. ICM-20948 定位方案
+## 7. ICM-20948 定位方案
 
-### 6.1 为什么加 ICM-20948
+### 7.1 接法（方案 A：接 Pi）
 
-- MPU6050 只有 6 轴，yaw 靠陀螺积分，几分钟就漂移；没有磁力计无法绝对校正。
-- ICM-20948 = 3 轴加速度 + 3 轴陀螺 + AK09916 三轴磁力计，100 Hz 输出足够 EKF。
-- 轮式里程计 + 陀螺仪：短时平滑；激光/AMCL：长期绝对定位；磁力计：静止/低速时慢速校正。
+| 项 | 值 |
+|---|---|
+| 总线 | Pi I2C1：GPIO2 (SDA) / GPIO3 (SCL) |
+| 地址 | SA0 接地 `0x68`；接 3.3V 为 `0x69` |
+| 供电 | 3.3V（不要 5V），与 Pi 共地 |
+| 上拉 | 模块自带 4.7k 即可；长线加双绞/屏蔽 |
+| 中断 | INT 可选，当前 `imu_node` 轮询 100 Hz，不接也能跑 |
 
-### 6.2 接法（推荐）
+### 7.2 软件配置
 
-| 方案 | 连接 | 适用 | 备注 |
-|---|---|---|---|
-| A（推荐） | ICM-20948 → 树莓派 I2C1（3.3V，SDA/SCL，INT 可选） | Pi 直接读，100 Hz | 需要 `python3-smbus2`；`imu_node` 已实现 |
-| B | ICM-20948 → STM32 I2C（PB6/PB7 或 PB8/PB9） | IMU 与电机控制同板 | 需解决 I2C 引脚冲突；STM32 通过 UART 转发 |
-| C | ICM-20948 → 旧 ESP32 I2C | 仅旧版回退 | 不推荐用于 SLAM；当前已并入 Pi |
-
-接线：
-- VCC 3.3V（不要 5V），GND 共地。
-- SDA/SCL 4.7k 上拉到 3.3V；长线加屏蔽/双绞。
-- SA0 接地 = 0x68；接 3.3V = 0x69。
-- 安装在底盘中心、刚性固定、远离电机/电池/大电流线；磁力计尤其怕电机磁场。
-
-### 6.3 数据与融合
-
-```text
-ICM-20948 (100Hz) ──/imu/data──┐
-轮式编码器 (30–50Hz) ──/odom────┼─ robot_localization EKF ── odom→base_link
-                               │
-2D 激光 + 地图 ── AMCL ────────┴─ map→odom
+```yaml
+imu:
+  enabled: true
+  i2c_bus: 1
+  address: "0x68"
+  rate_hz: 100.0
+  mount_yaw_rad: 0.0      # 安装偏航，实测填入
+  mag_declination_rad: 0.0
 ```
 
-- EKF 配置见 `edge_server/config/ekf.yaml`：`two_d_mode: true`，融合 `x,y,yaw,vx,vy,vyaw` + IMU `yaw,vyaw`。
-- `localization_node` 不替代 EKF，只做健康度/质量门控与初始位姿服务。
-- 磁力计只在“可信”时慢速校正（`mag_blend=0.02`）；电机电流大/磁场异常时标记 `mag_ok=false`，不硬切航向。
-- 磁力计需做硬铁/软铁校准；`imu.calibration.mag_bias/mag_scale` 填入实测值。
+```bash
+sudo apt install python3-smbus2
+ros2 launch edge_server robot_bringup.launch.py start_imu:=true
+ros2 topic hz /imu/data     # 应约 100 Hz
+```
 
-### 6.4 供应风险
+### 7.3 安装与标定
 
-ICM-20948 已进入 NRND/替代周期，TDK 提供 transition guide；新设计可评估
-ICM-42688-P + 磁力计（如 MMC5983MA）组合。当前代码的驱动接口与单位已封装，
-替换芯片只需改 `drivers/icm20948.py` 的寄存器映射。
+- 安装在**底盘几何中心**、刚性固定；加橡胶减震柱可降低电机振动，但不要软到产生相对转动。
+- 远离电机、电池、大电流线；磁力计尤其怕电机磁场。
+- 静止采集 2~3 分钟做零偏；六面法做加速度计校准；磁力计做硬铁/软铁校准后填
+  `imu.calibration.*`。
+- 融合链路：编码器 `/odom`（20 Hz）+ IMU（100 Hz）→ `robot_localization` EKF →
+  `odom→base_link`；激光 + 地图 → AMCL → `map→odom`。
+
+### 7.4 供应风险
+
+ICM-20948 已进入 NRND/替代周期。新设计可评估 ICM-42688-P + 磁力计（如 MMC5983MA）；
+驱动接口已封装在 `edge_server/drivers/icm20948.py`，替换只需改寄存器映射。
 
 参考：
 - [TDK ICM-20948 Design Transition Guide](https://www.symmetryelectronics.com/blog/invensense-icm-20948-design-transition-guide/)
@@ -235,152 +315,183 @@ ICM-42688-P + 磁力计（如 MMC5983MA）组合。当前代码的驱动接口�
 
 ---
 
-## 7. 激光雷达选型
+## 8. 激光雷达（D6）
 
-| 型号 | 量程 | 扫描 | 接口 | 价格区间 | 备注 |
-|---|---|---|---|---|---|
-| LD19 / LD06 (D300) | 0.02–12 m | 360°, 10 Hz | UART/USB 转接 | ¥250–400 | 体积小、ROS2 驱动多，推荐入门 |
-| RPLIDAR A1M8 | 0.15–12 m | 360°, 5.5 Hz | USB | ¥400–600 | 生态成熟，扫描频率低 |
-| RPLIDAR A2M8/A2M12 | 0.15–16 m | 360°, 10–15 Hz | USB | ¥800+ | 精度更好 |
-| YDLIDAR X2/X3 | 0.1–8 m | 360° | UART | ¥200–350 | 便宜，量程短 |
+### 8.1 接口与供电
 
-要求：
-- 扫描频率 ≥ 10 Hz；角分辨率 ≤ 1°；量程 ≥ 8 m。
-- 安装高度避开底盘/轮子遮挡，360° 无遮挡；激光平面尽量低（15–25 cm）以看到桌腿/墙脚。
-- 接 Pi USB，udev 固定 `/dev/rplidar`；不要经旧 ESP32 桥转发（带宽/时间戳/驱动都不合适）。
-- 驱动输出 `/scan`，frame_id `laser_link`；TF `base_link→laser_link` 必须标定。
+| 项 | 要求 |
+|---|---|
+| 接口 | TTL UART（TX/RX/GND），接 Pi UART4 GPIO8/9 |
+| 电平 | 3.3V TTL；若模块是 5V TTL 必须加电平转换 |
+| 波特率 | 按说明书确认（D6 类产品常见 230400 或 921600），Pi UART4 两种都能跑 |
+| 供电 | 5V，独立一路；启动电流可达 1A 以上，**不要从 Pi 5V 排针取电** |
+| 数据 | 360°，≥10 Hz，量程按型号（建图建议 ≥12 m） |
 
-参考：[LD19 产品页](https://littlebirdelectronics.com.au/products/dtof-ld19-laser-lidar-sensor-kit-12m)
+### 8.2 驱动与 `/scan`
 
----
+- 仓库里**没有**激光驱动，需另装 ROS2 驱动（如 `ldlidar_stl_ros2`，或厂家提供的 D6 ROS2 包），
+  输出 `/scan`、frame_id `laser_link`。
+- 若 D6 是自定义协议，需要写一个解析节点：串口读帧 → `sensor_msgs/LaserScan`。
+- `edge_server` 已默认订阅 `/scan`（`sensor_topics.laser`），无需改代码。
 
-## 8. 相机与目标定位
+### 8.3 安装与 TF
 
-### 8.1 相机
+- 安装高度 15~25 cm，360° 无遮挡；注意**机械臂/相机支架不要挡扫描面**。
+- 激光平面尽量低，能看到桌腿、墙脚；但太低会被麦轮/底盘挡。
+- TF：`base_link → laser_link`（x/y/z + yaw）按实测填写，建议写进 launch 的
+  `static_transform_publisher`；标定误差 1 cm/1° 都会让建图重影。
 
-| 方案 | 优点 | 缺点 |
-|---|---|---|
-| Pi USB 1080p 广角 | 即插即用、低延迟、可换镜头 | 需 USB 带宽/供电 |
-| Pi CSI 相机 | 低延迟、硬件编码 | 排线/型号适配 |
-| 旧 ESP32 OV2640 MJPEG | 仅旧版回退 | 延迟/分辨率/曝光有限，不适合精细检测 |
+### 8.4 验收
 
-建议：目标检测和图传都用 Pi USB/CSI 相机；OV2640 仅旧版回退。相机 frame `camera_link`，
-TF `base_link→camera_link` 标定；内参用棋盘格标定后填入 `perception.camera.fx/fy/cx/cy`。
-
-### 8.2 目标距离估计
-
-`target_detector_node` 当前支持：
-
-1. **2D 激光**：在目标方位 ±3° 内取最近有效距离（`lidar`），精度最好，但目标必须落在激光平面；
-2. **bbox 高度**：`distance = fy * real_height / bbox_height_px`（`bbox_height`），需要类别先验高度；
-3. **深度相机**（预留）：接 RGB-D 后可在 `TargetLocalizer.estimate` 增加 depth 分支。
-
-局限：激光可能打到目标后面的墙；bbox 高度受姿态/遮挡影响。若要做稳定抓取，建议加
-Orbbec Astra Pro Plus / RealSense D435i 等 RGB-D，或用 AprilTag/二维码辅助。
+```bash
+ros2 topic hz /scan          # ≈10 Hz
+ros2 run tf2_ros tf2_echo base_link laser_link
+# rviz2 里 LaserScan 应 360° 完整、无固定盲区
+```
 
 ---
 
-## 9. 编码器与轮速闭环
+## 9. 深度相机（Astra Pro）
 
-### 9.1 编码器接线
+### 9.1 用途定位
 
-JGB37-520 常见霍尔编码器：VCC 5V、GND、A、B。四轮共 8 路信号 + 电源。
-- 每路 A/B 接 STM32 EXTI：左前 PA0/PA1、右前 PA2/PA3、左后 PA4/PA5、右后 PA6/PA7；
-  软件四倍频解码（不再占用 JTAG 引脚）。
-- PA0~PA7 不是 5V 容忍(FT)引脚，编码器 A/B 必须是 3.3V 电平：编码器改 3.3V 供电，
-  或加电平转换/分压。开漏输出可用 STM32 内部上拉（本固件已启用）。
-- ⚠️ PA2/PA3 与 USART2（ASR PRO 语音板 / JQ6500 MP3）复用，编码器占用后语音与 MP3 失效；
-  需要语音功能时把这路编码器改到 PB3/PB4。
-- 串联 100–330Ω + 100nF 到地做 RC 滤波；长线用屏蔽线，屏蔽层单端接地。
+- **2D SLAM 建图不需要深度相机**：激光 + 编码器 + IMU 足够。
+- 深度相机用于**目标接近/抓取**（`target_detector_node` 的 depth 分支）和低矮障碍补盲。
+- 不要用 Pi 4B 跑 RGB-D SLAM（RTAB-Map 全分辨率很吃力）；要用就降到 320×240 / 5 Hz。
+
+### 9.2 供电、带宽与驱动
+
+| 项 | 注意 |
+|---|---|
+| USB | Astra Pro 是 USB 2.0 设备；插 Pi 4 的 **USB 3.0 口**（兼容 2.0，供电更足），不要经 Hub |
+| 带宽 | 深度 640×480@30 + RGB 同开接近 USB 2.0 上限，降帧率/分辨率更稳 |
+| 驱动 | Astra Pro 属老款结构光，官方 ROS2 `orbbec_camera` 主要覆盖 Astra 2 / Pro Plus / Gemini 系列；**先确认能出 `/camera/depth/image_raw`**，否则换 Astra Pro Plus / Gemini 2 / RealSense D435i |
+| 供电 | 相机峰值 ~0.8A，计入 5V 预算 |
+
+### 9.3 标定
+
+- RGB 内参：棋盘格 → `perception.camera.fx/fy/cx/cy`。
+- 深度-彩色外参：用厂家工具或 `camera_calibration`。
+- TF：`base_link → camera_link`（含俯仰角），目标定位依赖它。
+
+---
+
+## 10. 编码器与轮速闭环
+
+### 10.1 接线（已实现）
+
+JGB37-520 霍尔编码器：VCC、GND、A、B。
+
+| 轮子 | A | B | EXTI |
+|---|---|---|---|
+| 左前 FL | PA0 | PA1 | EXTI0 / EXTI1 |
+| 右前 FR | PA2 | PA3 | EXTI2 / EXTI3 |
+| 左后 RL | PA4 | PA5 | EXTI4 / EXTI9_5(5) |
+| 右后 RR | PA6 | PA7 | EXTI9_5(6/7) |
+
+- **PA0~PA7 不是 5V 容忍(FT)引脚**：编码器必须 3.3V 电平（3.3V 供电或分压/电平转换）。
+- 编码器 EXTI 抢占优先级为 4（低于 USART3 的 3），避免边沿中断挤掉串口收数。
+- 每路串 100~330Ω + 100nF 到地做 RC 滤波；长线用屏蔽线，屏蔽层单端接地。
 - 编码器电源与电机电源分开，避免 PWM 噪声。
 
-### 9.2 参数标定
+### 10.2 固件现状
 
-| 参数 | 含义 | 标定方法 |
-|---|---|---|
-| `wheel_radius` | 轮半径 | 卷尺量直径/2；或推 1 m 数编码器 |
-| `encoder_cpr` | 输出轴每圈计数 | 手动转一圈读计数（含减速比与 4 倍频） |
-| `wheelbase_x` / `track_y` | 轴距/轮距 | 卷尺量；麦轮用 (L+W)/2 作为旋转半径 |
-| `sign_*` | 电机/编码器方向 | 单轮正转，确认计数增加方向 |
-| PID | 轮速闭环 | 先 P 后 I，限制积分饱和；空载/负载分别调 |
+- 软件四倍频（EXTI 双沿），`ENCODER_CPR = 1320`，轮径 96 mm。
+- 50 ms 周期通过 USART3（**115200 8N1**，`BODY_UART_BAUD_RATE`）上报
+  `$B,<seq>,<uptime>,<fl>,<fr>,<rl>,<rr>,<dist>\n`，一帧约 4~5 ms。
+- `edge_server` 解析后发布 `/odom`（20 Hz，`base.odom_rate_hz`）。
 
-### 9.3 验收
+### 10.3 标定与验收
 
-- 直行 1 m，里程计误差 < 2%。
-- 原地转 360°，yaw 误差 < 3°。
-- 麦轮横移 1 m，横向误差 < 5 cm。
-- 推车/堵转时看门狗 0.5 s 内回零。
+| 参数 | 标定方法 |
+|---|---|
+| `wheel_radius` | 卷尺量直径/2，或推 1 m 数编码器 |
+| `encoder_cpr` | 手动转一圈读计数（含减速比与 4 倍频） |
+| `wheelbase_x` / `track_y` | 卷尺量；麦轮用 (L+W)/2 作旋转半径 |
+| `sign_*` | 单轮正转，确认计数方向 |
 
----
+验收：直行 1 m 误差 <2%；原地 360° yaw 误差 <3°；堵转/推车 0.5 s 内回零。
 
-## 10. 采购清单（增量）
-
-价格为目标区间，按 2026 年国内电商/淘宝估算。
-
-| 物料 | 建议型号 | 数量 | 价格 | 接口 | 备注 |
-|---|---|---|---|---|---|
-| 机载计算机 | 树莓派 4B 4GB/8GB 或 Pi 5 8GB | 1 | ¥400–700 | — | 跑 ROS2/SLAM/Nav2；VLA 用 Orin Nano |
-| 2D 激光 | LD19/LD06 | 1 | ¥250–400 | USB/UART | 12 m/360°/10 Hz |
-| IMU | ICM-20948 模块 | 1 | ¥30–60 | I2C | 3.3V；NRND 风险 |
-| 相机 | USB 1080p 广角 | 1 | ¥80–200 | USB | 目标检测 |
-| 电机驱动 | TB6612×2 或 DRV8871×4/BTS7960×2 | 1 套 | ¥40–120 | PWM/GPIO | 四轮独立 PWM |
-| 主控升级 | STM32F103RCT6 最小系统/转接板 | 1 | ¥25–50 | — | 4 编码器 + 4 PWM |
-| 5V 电源 | 5V/5A UBEC | 1 | ¥30–60 | — | Pi/激光/相机 |
-| 6V 电源 | 6V/5A BEC | 1 | ¥25–50 | — | 舵机独立 |
-| 电量检测 | INA226/INA219 模块 | 1 | ¥15–30 | I2C | 电压/电流 |
-| 急停 | 常闭急停按钮 | 1 | ¥10–25 | — | 切电机使能 |
-| 悬崖/避障 | 红外或超声波模块 | 2–3 | ¥10–20/个 | GPIO/ADC | 激光盲区 |
-| 碰撞开关 | 微动开关 | 2 | ¥5/个 | GPIO | 前/后 |
-| 存储 | 64GB 高耐久 SD 或 NVMe | 1 | ¥50–150 | — | 地图/rosbag |
-| 散热 | 风扇/散热片 | 1 | ¥15–40 | — | Pi5/Orin |
-| 结构 | 激光/相机/IMU 支架 | 1 套 | ¥30–80 | — | 3D 打印/铝板 |
-| 可选 | RGB-D 相机（Orbbec/RealSense） | 1 | ¥800–2500 | USB | 稳定目标定位 |
-| 可选 | 独立路由器/5GHz AP | 1 | ¥100–200 | — | 远程 edge_server |
-
-**最低可跑 SLAM+导航的增量预算约 ¥900–1500**（Pi 4B + LD19 + ICM-20948 + 驱动 + 电源 + 急停 + 主控升级）。
+> ⚠️ L298N 只有 2 路使能：左前/左后共用 PB0，右前/右后共用 PB1。换 4 路独立驱动前，
+> 不要开 `navigation.direct.holonomic`，否则横移指令跟踪会很差。
 
 ---
 
-## 11. 从现有车到目标车的改造顺序
+## 11. 采购清单（增量，按当前进度更新）
 
-1. **先解决计算平台**：Pi 4B/5 装 Ubuntu 22.04 + ROS2 Humble；能跑 `ros2 topic list`。
-2. **接激光雷达**：USB 接 Pi，装 LD19 驱动，确认 `/scan` 10 Hz、360°。
-3. **接编码器**：升级 MCU 或加计数芯片；实现 4 路编码器 + 轮速 PID；串口回传 `/odom`。
-4. **接 ICM-20948**：Pi I2C 或 STM32 转发；确认 `/imu/data` 100 Hz；做静态/六面标定。
-5. **跑 EKF**：`robot_localization` 融合 `/odom` + `/imu/data`，确认 `odom→base_link` TF。
-6. **跑 SLAM**：`slam_toolbox` 建图，推车/遥控走一圈，保存地图。
-7. **跑定位**：AMCL + 地图，设置初始位姿，确认 `map→odom`。
-8. **跑导航**：Nav2 或 edge_server 内置直航，先空载 1 m 到点，再加载。
-9. **跑目标搜索**：相机 + 激光 + 目标检测，先静态目标，再动态目标。
-10. **加安全**：急停、悬崖、电量、看门狗、远程急停。
+### 11.1 已购/已有
 
-每一步都用 `edge_server` 的接口做验收，避免“全部接完再调试”。
+树莓派 4B、STM32F103C8T6、D6 激光、ICM-20948、Astra Pro、LM393 悬崖、底盘 + JGB37-520×4、
+L298N、12V 3600mAh 电池、12V→5V 3A / 3.3V 1A、USB 麦、蓝牙音箱。
+
+### 11.2 还要买（P0 优先）
+
+| 物料 | 建议型号 | 数量 | 价格 | 备注 |
+|---|---|---|---|---|
+| 5V/5A UBEC | 5V 5A 降压模块（带使能/欠压保护） | 1 | ¥30~60 | Pi + 激光 + 相机 |
+| 4 路电机驱动 | TB6612FNG×2 或 DRV8871×4 / BTS7960×2 | 1 套 | ¥40~120 | 4 路独立 PWM |
+| 电平转换/分压 | 8 路双向电平转换板或电阻分压 | 1 | ¥10~20 | 编码器 5V→3.3V |
+| 急停按钮 | 常闭，10A | 1 | ¥10~25 | 切电机使能/12V |
+| 保险丝座 + 保险丝 | 15~20A | 1 套 | ¥10~20 | 电池入口 |
+| INA226 模块 | I2C 0.1Ω 分流 | 1 | ¥15~30 | `/battery_state` |
+| 支架 | 激光/IMU/相机 3D 打印/铝板 | 1 套 | ¥30~80 | 刚性、可复现 |
+| 散热 | Pi 4 风扇/散热片 | 1 | ¥15~40 | 长时间建图 |
+| 存储 | 64GB 高耐久 SD 或 SSD | 1 | ¥50~150 | 地图/rosbag |
+
+### 11.3 可选（P2）
+
+碰撞开关 ×2、第二/第三路悬崖、5GHz AP 或有线网卡、USB 声卡（替代蓝牙）、
+备用 IMU（ICM-42688-P）、UPS/电量模块。
+
+**最低可跑 SLAM 建图的增量预算：约 ¥200~400**（电源 + 电平 + 急停 + 支架；驱动升级另算 ¥40~120）。
 
 ---
 
-## 12. 主要风险与对策
+## 12. 从现有车到目标车的改造顺序
+
+1. **电源先改**：5V/5A UBEC + 保险丝 + 急停 + 共地；Pi 单独供电，先保证不掉电。
+2. **编码器电平/滤波**：分压或 3.3V 供电；示波器/逻辑分析仪看 A/B 波形干净。
+3. **串口提速（已完成）**：STM32 `BODY_UART_BAUD_RATE` 与 `robot.yaml` 都已改 115200，确认 `/odom` 20 Hz 不掉帧。
+4. **接 IMU**：Pi I2C1 + `start_imu:=true`，`/imu/data` 100 Hz；做零偏/磁校准。
+5. **接激光**：Pi UART4 + 驱动，`/scan` 10 Hz；标 `base_link→laser_link`。
+6. **跑 EKF**：`/odom` + `/imu/data` → `odom→base_link`；推车 1 m 看轨迹。
+7. **建图**：`slam_toolbox` 推车走一圈，保存地图；检查墙体重影/闭环。
+8. **定位**：AMCL + 地图，设初始位姿，确认 `map→odom` 稳定。
+9. **导航**：Nav2 或内置直航，先空载 1 m 到点，再加载。
+10. **安全与升级**：悬崖/碰撞/电量接入；换 4 路独立驱动后再开麦轮全向。
+11. **目标搜索**：相机 + 激光 + 目标检测，先静态目标，再动态目标。
+
+每一步都用 `edge_server` 的接口验收，避免“全部接完再调试”。
+
+---
+
+## 13. 主要风险与对策
 
 | 风险 | 表现 | 对策 |
 |---|---|---|
-| ICM-20948 停产/缺货 | 采购困难 | 备选 ICM-42688-P + MMC5983MA；驱动接口抽象 |
-| 磁力计受电机干扰 | yaw 跳变 | 不硬融合；`mag_ok` 门控；远离大电流线；校准 |
-| L298N 压降/发热 | 速度不准、驱动保护 | 换 MOSFET 驱动；加散热；电流检测 |
-| 编码器噪声 | 里程计跳变 | RC 滤波、屏蔽线、软件限幅/中值 |
-| Pi 供电不足 | 重启/掉盘 | 5V/5A UBEC、独立舵机 BEC、保险丝、UPS |
-| Wi-Fi 丢包 | 远程导航抖动 | 导航在车上闭环；5GHz/有线；DDS 调参 |
-| 激光盲区 | 撞桌腿/台阶 | 低矮障碍传感器、碰撞开关、减速策略 |
+| 5V 3A 不够 | Pi 重启/掉盘，地图丢失 | 5V/5A UBEC，Pi 独立一路；加电容 |
+| 编码器 5V 直连 PA0~PA7 | 计数乱跳、IO 损坏、串口偶发异常 | 3.3V 供电或分压/电平转换 |
+| 9600 带宽饱和（已改 115200） | `/odom` 抖动、命令延迟/丢失 | 固件与 `robot.yaml` 必须同时改；再降回 9600 会复现 |
+| UART4 与 SPI0/1-Wire 复用 | 激光打不开/设备号变化 | 关 spi/w1 overlay；udev 固定设备名 |
+| Astra Pro 驱动不支持 | 没有 `/camera/depth/image_raw` | 先验证；换 Astra Pro Plus/Gemini 2/D435i |
+| 深度相机 USB 带宽/供电 | 掉帧、掉设备 | 插 USB3 口、不经 Hub、降分辨率 |
+| L298N 压降/发热/只有 2 路 PWM | 速度不准、麦轮全向做不了 | 换 MOSFET 驱动；先关 holonomic |
+| 激光被机械臂遮挡 | 建图出现固定缺口/重影 | 调整安装高度/位置；机械臂收拢 |
+| IMU 振动/磁干扰 | yaw 跳变、EKF 发散 | 减震柱、远离电机、磁校准、mag 门控 |
 | 麦轮打滑 | 里程计漂移 | 激光/AMCL 校正；轮速闭环；地面清理 |
+| 建图时 Wi-Fi 丢包 | 远程看不到地图 | 建图在车上闭环；5GHz/有线；DDS 调参 |
 | 地图过大 | 前沿提取慢 | `frontier_max_cells` 下采样；分区建图 |
 
 ---
 
-## 13. 与 edge_server 的接口对应
+## 14. 与 edge_server 的接口对应
 
 | 硬件 | ROS2 话题/服务 | edge_server 节点 |
 |---|---|---|
-| 激光 | `/scan` | `bridge_node`、`safety_manager_node`、`navigation_node` |
-| 编码器/底盘 | `/odom`、`/joint_states`、`/battery_state`、`/imu/data` | `base_bridge_node` |
-| ICM-20948 | `/imu/data` | `base_bridge_node` 或 `imu_node` |
+| D6 激光 | `/scan` | `bridge_node`、`safety_manager_node`、`navigation_node` |
+| 编码器/底盘 | `/odom`、`/joint_states`、`/base/status` | `edge_server_node`（`base_bridge_node` 为旧方案） |
+| ICM-20948 | `/imu/data` | `imu_node`（Pi I2C） |
+| 电量 | `/battery_state` | `edge_server_node`（接 INA226 后） |
 | 地图 | `/map`、`/center/map_info`、`/center/frontiers` | `map_manager_node` |
 | 定位 | `/amcl_pose`、TF、`/center/pose`、`/center/localization_status` | `localization_node` |
 | 导航 | `/center/navigate_to`、`/nav/cmd_vel` | `navigation_node` |
@@ -388,5 +499,12 @@ JGB37-520 常见霍尔编码器：VCC 5V、GND、A、B。四轮共 8 路信号 +
 | 搜索 | `/center/search_object`、`/center/explore` | `object_search_node` |
 | 速度 | `/cmd_vel_raw`、`/nav/cmd_vel`、`/reverse/cmd_vel`、`/safety/cmd_vel_override` → `/cmd_vel` | `velocity_mux_node` |
 | 任务 | `/center/execute_task`、`/center/execute_mission` | `task_manager_node` |
+
+启动与配置文件：
+
+```bash
+ros2 launch edge_server robot_bringup.launch.py start_imu:=true
+# 激光驱动、EKF、slam_toolbox、Nav2 另行 launch（见 software/edge_server/launch/）
+```
 
 详细软件设计见 [`software/edge_server/DESIGN.md`](../software/edge_server/DESIGN.md)。

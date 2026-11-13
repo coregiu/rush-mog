@@ -107,7 +107,7 @@ void encoder_sensor_get_counts(int32_t counts[ENCODER_COUNT])
     taskEXIT_CRITICAL();
 }
 
-/* 阻塞发送一帧；9600 波特率下约 40~55ms。遥测任务优先级较低，
+/* 阻塞发送一帧；115200 波特率下约 4~5ms。遥测任务优先级较低，
  * 发送期间命令任务仍可抢占 CPU，不影响电机控制。 */
 static void encoder_uart_write(const char *data, uint16_t length)
 {

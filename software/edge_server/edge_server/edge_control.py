@@ -4,7 +4,7 @@
 迁移到树莓派后，集中放在本模块，便于单元测试和 HTTP/ROS 两层复用。
 
 约定：
-- STM32 USART3 9600 8N1，ASCII 命令以 ``\\n`` 结尾；
+- STM32 USART3 115200 8N1，ASCII 命令以 ``\\n`` 结尾；
 - 遥测行 ``$B,<seq>,<uptime_ms>,<fl>,<fr>,<rl>,<rr>,<distance_mm>``；
 - 按钮/摇杆命令沿用原网页协议（见 ``software/api.yaml``）。
 """

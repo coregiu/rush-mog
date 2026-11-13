@@ -10,7 +10,7 @@ info:
     | --- | --- | --- | --- |
     | **Edge Server** | HTTP | `http://192.168.4.1`（80） | 树莓派 Edge Server：网页手柄、数字孪生、模块上报/代理、静态资源、MJPEG 图传、STM32 串口桥；内置 ROS 健康网关（`:8090`） |
     | **Center Server** | HTTP | `http://127.0.0.1:8000` | SmolVLA 多模态推理、健康检查、模型/参数信息 |
-    | **Body Control** | UART | STM32 USART3，9600 8N1 | 树莓派 Edge Server → STM32 的 ASCII 运动/音频命令，无 ACK |
+    | **Body Control** | UART | STM32 USART3，115200 8N1 | 树莓派 Edge Server → STM32 的 ASCII 运动/音频命令，无 ACK |
 
     > **ROS 说明**：`software/edge_server` 的 ROS 2 话题/服务/Action 不是 HTTP，
     > 未纳入本 OpenAPI 文件，详见 `software/edge_server/README.md`。
@@ -75,7 +75,7 @@ tags:
     description: |
       STM32F103C8T6 车体控制器的 UART 命令协议。树莓派 Edge Server 的
       UART（`/dev/rush_base` 或 `/dev/ttyUSB0`）连接 STM32 USART3
-      （PB10 TX / PB11 RX），9600 8N1，命令以 `\n` 结束。命令无 ACK；
+      （PB10 TX / PB11 RX），115200 8N1，命令以 `\n` 结束。命令无 ACK；
       USART3 会周期回传 `$B,...` 编码器遥测，Edge Server 通过 `/api/body` 暴露。
     x-docs: "./body_control/README.md"
 
@@ -333,7 +333,7 @@ x-body-control-uart:
     stm32_pins: "PB10 TX / PB11 RX"
     peer: "Raspberry Pi Edge Server UART"
     peer_pins: "/dev/rush_base（或 /dev/ttyUSB0）TX/RX"
-    baudrate: 9600
+    baudrate: 115200
     data_bits: 8
     parity: none
     stop_bits: 1
@@ -1783,7 +1783,7 @@ paths:
         **这不是 HTTP 端点，请勿通过 HTTP 调用。**
 
         该路径仅用于在 Swagger/OpenAPI 中展示 Body Control 的 UART 命令，
-        实际传输为 STM32 USART3：9600 8N1，命令以 `\n` 结束。
+        实际传输为 STM32 USART3：115200 8N1，命令以 `\n` 结束。
         完整的帧格式、命令表、PWM/曲目第二字节语义见
         `x-body-control-uart`。
 
