@@ -25,9 +25,7 @@ struct encoder_pins
     uint16_t pin_b;
 };
 
-/* A/B 相与电机对应关系：FL, FR, RL, RR，依次使用 PA0~PA7。
- * 注意：PA2/PA3 同时是 USART2 的 TX/RX（语音板 ASR PRO / JQ6500），
- *       改用这组引脚后语音与 MP3 功能会失效，详见 encoder_sensor.h。 */
+/* A/B 相与电机对应关系：FL, FR, RL, RR，依次使用 PA0~PA7。*/
 static const struct encoder_pins s_encoder_pins[ENCODER_COUNT] = {
     {GPIOA, GPIO_Pin_0, GPIOA, GPIO_Pin_1},
     {GPIOA, GPIO_Pin_2, GPIOA, GPIO_Pin_3},

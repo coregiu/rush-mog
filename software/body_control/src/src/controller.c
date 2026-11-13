@@ -60,12 +60,15 @@ void init_modules()
 
     motor_pwm_executor.init();
     arm_roboot_executor.init();
-    audio_executor.init();
 
-    /* 必须放在 audio_executor.init() 之后：
-     * 编码器占用 PA2/PA3(USART2 TX/RX)，而 audio_executor/audio_receiver 都会
-     * 把这两个脚重新配成串口复用功能。后初始化的一方生效，否则 PA2 会被
-     * USART2 抢走，左前编码器 A 相读数全错。 */
+    /* 音频播放已关闭（JQ6500 不初始化、不开机播放）。
+     * audio_executor.c 的代码全部保留，需要恢复时把下面一行取消注释即可。 */
+    // audio_executor.init();
+
+    /* 必须放在 audio_receiver.init() 之后：
+     * 编码器占用 PA2/PA3(USART2 TX/RX)，而 audio_receiver 会把这两个脚重新
+     * 配成串口复用功能。后初始化的一方生效，否则 PA2 会被 USART2 抢走，
+     * 左前编码器 A 相读数全错。 */
     encoder_sensor_init();
 }
 
@@ -103,10 +106,12 @@ void execute_command(struct command_context *command_context)
         }
         motor_direct_executor.update_state(command_context);
 
+        /* 音频播放已关闭（代码保留，恢复时取消注释即可）：
         struct command_context audio_command_context = {0};
         audio_command_context.commands[0] = COMMAND_AUDIO_PLAY;
         audio_command_context.commands[1] = V8_START;
         audio_executor.update_state(&audio_command_context);
+        */
 
         break;
     case MODULE_MOTOR_PWM:
@@ -116,14 +121,15 @@ void execute_command(struct command_context *command_context)
         arm_roboot_executor.update_state(command_context);
         break;
     case MODULE_AUDIO:
-        audio_executor.update_state(command_context);
+        /* 音频播放已关闭（代码保留）：
+         * audio_executor.update_state(command_context); */
         break;
     case MODULE_RESET:
         reset_command_queue();
         motor_pwm_executor.reset();
         motor_direct_executor.reset();
         arm_roboot_executor.reset();
-        audio_executor.reset();
+        /* 音频播放已关闭（代码保留）：audio_executor.reset(); */
         break;
 
     default:

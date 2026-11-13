@@ -33,6 +33,7 @@ Open `http://192.168.4.1/dashboard.html` (or tap **RUSH-MOG TWIN** on the contro
 | **Union Power Supply** | Onboard module | Provides stable 12V / 5V / 3.3V rails; pure hardware, no software module. |
 | **Center Server** | Center server module | Provides VLA inference capability and high-level decision-making compute for the vehicle. |
 | **Terminal** | User terminal | A phone, tablet, or PC; opens the Edge Server operator web UI in a browser. |
+| **ArmBot** | ArmBot | Move things. |
 
 
 **Module context and APIs:**
