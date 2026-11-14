@@ -13,7 +13,7 @@
 | 代码 | `software/edge_server`（ament_python，ROS2 Humble） |
 | 消息/动作 | `software/custom_msgs`（v0.2.0） |
 | 构建 | `colcon build --packages-select custom_msgs edge_server` 通过 |
-| 单元测试 | `pytest tests -q`：94 passed（新增 Edge 控制/HTTP 25 项） |
+| 单元测试 | `pytest tests -q`：107 passed（新增 Edge 控制/HTTP 25 项） |
 | 健康检查 | `test_health_monitor.py` + `test_health_http.py`：29 passed；ROS/HTTP 手工联调通过 |
 | VLA/安全端到端 | `end_to_end_check.py`：7/7 passed |
 | SLAM/导航/搜索联调 | `slam_nav_check.py` + `fake_slam_robot.py`：6/6 passed |
@@ -607,7 +607,7 @@ health_monitor_node
 
 1. **纯逻辑与 ROS 解耦**：`core/health_monitor.py` 不 import rclpy，29 项单测覆盖状态机；
 2. **配置驱动**：设备 topic/message_type/频率/超时/required 全部在 YAML，新增设备无需改代码；
-3. **诚实报告 unknown**：音箱/机械臂当前无反馈话题，报 `unknown`，不伪造 `ok`；
+3. **诚实报告 unknown**：机械臂当前无反馈话题报 `unknown`；音箱已发布 `/body/audio_status`，`online=false` 报 `degraded`，不伪造 `ok`；
 4. **HTTP 线程安全**：节点按 1 Hz 预计算 JSON 快照，HTTP 线程只读快照，不调用 rclpy；
 5. **失败降级**：HTTP 端口占用只记录 `http.bound=false`，ROS 话题/服务仍工作；单次快照异常
    不退出节点；
@@ -698,7 +698,8 @@ edge/Pi sensors → bridge_node → /center/synced_data
 | `/center/health` | `custom_msgs/HealthStatus` | 发布 | 系统/设备健康（1 Hz，TRANSIENT_LOCAL） |
 | `/base/status` | `std_msgs/String` | 发布/订阅 | STM32 遥测 JSON（底盘/健康） |
 | `/arm/joint_states` | `sensor_msgs/JointState` | 订阅 | 机械臂回读（待接入） |
-| `/body/audio_status` | `std_msgs/String` | 订阅 | 音箱状态 JSON（待接入） |
+| `/body/say` | `std_msgs/String` | 订阅 | 文本 -> TTS -> 蓝牙音箱 |
+| `/body/audio_status` | `std_msgs/String` | 发布 | 音箱状态 JSON（1 Hz） |
 | `/cmd_vel` | `geometry_msgs/Twist` | 发布 | 最终速度 |
 | `/cmd_vel_raw` | `geometry_msgs/Twist` | 发布 | VLA 原始 |
 | `/nav/cmd_vel` | `geometry_msgs/Twist` | 发布 | 导航速度 |
@@ -925,7 +926,7 @@ python3 tests/slam_nav_check.py          # 6/6
 ```bash
 cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 94 passed
+# 107 passed
 ```
 
 健康检查专项：
@@ -985,8 +986,8 @@ python3 tests/slam_nav_check.py
 8. **目标检测模型**：颜色检测只适合演示；YOLO 需模型/算力；可接 Orin Nano。
 9. **地图保存回退**：slam_toolbox 不可用时 PGM/YAML 精度取决于当前 `/map`。
 10. **未做硬件在环**：`fake_slam_robot` 验证了软件链路，真实串口/IMU/激光需实车联调。
-11. **健康反馈缺口**：音箱 `/body/audio_status`、机械臂 `/arm/joint_states` 尚未发布，
-    健康接口报 `unknown`；接入后无需改 `health_monitor_node`，只改配置。
+11. **健康反馈缺口**：机械臂 `/arm/joint_states` 尚未发布，健康接口报 `unknown`；
+    音箱已发布 `/body/audio_status`，接入新设备仍无需改 `health_monitor_node`。
 12. **健康 HTTP 无 TLS/限流**：默认仅回环；跨机需 `api_key` + 防火墙/反向代理。
 
 后续优先级：
@@ -1003,6 +1004,6 @@ python3 tests/slam_nav_check.py
 
 `edge_server` v2 在 v1 的 VLA 推理、安全、反向操作之上，补齐了 **SLAM 建图、ICM-20948 定位、
 Nav2/直航导航、目标检测/搜索/接近、速度仲裁、底盘串口桥、健康检查**。软件链路已通过
-94 项单元测试（含 29 项健康检查）、7 项 VLA/安全端到端、6 项 SLAM/导航/搜索联调；
+107 项单元测试（含 29 项健康检查）、7 项 VLA/安全端到端、6 项 SLAM/导航/搜索联调；
 实车落地还差 STM32 固件升级、硬件选型（见 `hardware/SLAM_NAV.md`）、现场标定，以及
-音箱/机械臂反馈话题接入。
+机械臂反馈话题接入。

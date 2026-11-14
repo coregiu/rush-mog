@@ -939,6 +939,10 @@ paths:
                 encoder_ok: true
                 ros_status: ok
                 ros_ready: true
+                speaker_connected: true
+                speaker_state: connected
+                speaker_device: newmine
+                audio_playing: false
                 ip: "192.168.4.1"
                 hostname: "rush-mog"
 
@@ -993,6 +997,84 @@ paths:
                         minItems: 4
                         maxItems: 4
                       distance_mm: {type: integer}
+
+  /api/speaker:
+    get:
+      tags: [Edge Server]
+      summary: 蓝牙音箱与语音播报状态
+      description: |
+        返回 newmine 蓝牙音箱的连接状态、A2DP sink、音量、TTS 后端和播放队列。
+        `status=ok` 表示已连接且音频输出就绪；`degraded` 表示已连接但 sink 未就绪；
+        `starting` 表示搜索/连接中；`error` 表示最近一次连接失败（后台会继续重试）。
+      operationId: edgeSpeakerStatus
+      responses:
+        '200':
+          description: 音箱状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgeSpeakerStatus'
+        '503':
+          description: 音箱功能未启用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /api/speaker/{action}:
+    post:
+      tags: [Edge Server]
+      summary: 音箱操作（连接/播报/播放/音量/停止）
+      description: |
+        - `connect`：立即触发一次蓝牙连接检查；
+        - `say`：`{"text":"...","voice":"cmn"}`，走 TTS 后播放；也接受 text/plain；
+        - `play`：`{"file":"prompt.wav"}`，文件必须位于 `edge.speaker.audio_dir`；
+        - `volume`：`{"volume":70}`，0..100；
+        - `stop`：清空队列并停止当前播放。
+      operationId: edgeSpeakerAction
+      parameters:
+        - name: action
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [connect, say, play, volume, stop]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+          text/plain:
+            schema:
+              type: string
+      responses:
+        '200':
+          description: 操作已接受（`speaker` 为最新状态）
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          description: 参数非法（空文本/音量越界/文件越界等）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '404':
+          description: 未知音箱动作
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '503':
+          description: 音箱功能未启用或当前不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
 
   /api/modules/report:
     post:
@@ -2025,6 +2107,66 @@ components:
         hostname:
           type: string
           description: 主机名
+
+    EdgeSpeakerStatus:
+      type: object
+      description: newmine 蓝牙音箱 + TTS 播放状态
+      required: [ok, enabled, state, connected, audio_ready]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        enabled:
+          type: boolean
+        state:
+          type: string
+          enum: [disabled, starting, scanning, connecting, connected, disconnected, error]
+        status:
+          type: string
+          enum: [ok, degraded, starting, error, disabled, unknown]
+        connected:
+          type: boolean
+        audio_ready:
+          type: boolean
+        online:
+          type: boolean
+          description: 已连接且音频输出就绪；health monitor 用该字段判断音箱是否在线
+        device:
+          type: object
+          properties:
+            name: {type: string, example: newmine}
+            mac: {type: string, example: "73:DB:39:F2:15:4B"}
+            paired: {type: boolean}
+            trusted: {type: boolean}
+        sink:
+          type: object
+          properties:
+            name: {type: string, example: "bluez_output.73_DB_39_F2_15_4B.1"}
+            id: {type: integer}
+            ready: {type: boolean}
+            volume: {type: integer, minimum: 0, maximum: 100}
+        tts:
+          type: object
+          properties:
+            backend: {type: string, example: espeak-ng}
+            voice: {type: string, example: cmn}
+            speed: {type: integer}
+        playback:
+          type: object
+          properties:
+            playing: {type: boolean}
+            queue: {type: integer}
+            last_text: {type: string}
+            last_error: {type: string}
+            last_played_ms: {type: integer, format: int64}
+        last_error:
+          type: string
+        last_connected_ms:
+          type: integer
+          format: int64
+        updated_ms:
+          type: integer
+          format: int64
 
     EdgeModuleReport:
       type: object

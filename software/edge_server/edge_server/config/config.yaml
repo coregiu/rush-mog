@@ -278,6 +278,27 @@ edge_server:
       keepalive_ms: 200
       raw_lease_sec: 1.0
       resend_manual: false
+    # 蓝牙音箱/语音播报（仿真默认关闭；实车 robot.yaml/deploy.yaml 打开）
+    speaker:
+      enabled: false
+      device_name: "newmine"
+      device_mac: ""              # 留空则按名称扫描发现；填 MAC 可快速重连
+      auto_connect: true
+      connect_interval_sec: 20
+      scan_timeout_sec: 10
+      connect_timeout_sec: 20
+      sink_wait_sec: 8
+      volume: 70
+      audio_dir: "~/.local/share/rush-mog/audio"
+      say_topic: "/body/say"
+      status_topic: "/body/audio_status"
+      status_rate_hz: 1.0
+      tts:
+        backend: "auto"           # auto/espeak-ng/edge-tts/none
+        voice: "cmn"              # espeak-ng 中文；英文可用 en-us
+        speed: 150
+        pitch: 50
+        max_chars: 200
     ros_health_url: "http://127.0.0.1:8090/ros/health"
     ros_params_url: "http://127.0.0.1:8090/ros/params"
     state_file: "~/.config/rush-mog/edge_params.json"
@@ -347,8 +368,8 @@ edge_server:
         type: speaker
         topic: "/body/audio_status"
         message_type: "std_msgs/msg/String"
-        expected_rate_hz: 0.0
-        timeout_sec: 2.0
+        expected_rate_hz: 1.0
+        timeout_sec: 3.0
         required: false
       arm:
         type: arm

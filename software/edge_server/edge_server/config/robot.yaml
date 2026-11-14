@@ -80,6 +80,27 @@ edge_server:
       keepalive_ms: 200
       raw_lease_sec: 1.0
       resend_manual: false           # true=按住按钮期间持续重发（旧行为，STM32 LED 会连闪）
+    # 蓝牙音箱/语音播报：newmine 自动连接，A2DP 输出走 PipeWire/PulseAudio
+    speaker:
+      enabled: true
+      device_name: "newmine"
+      device_mac: ""                 # 留空=按名称扫描；建议填实际 MAC 以快速重连
+      auto_connect: true
+      connect_interval_sec: 20
+      scan_timeout_sec: 10
+      connect_timeout_sec: 20
+      sink_wait_sec: 8
+      volume: 70
+      audio_dir: "~/.local/share/rush-mog/audio"
+      say_topic: "/body/say"
+      status_topic: "/body/audio_status"
+      status_rate_hz: 1.0
+      tts:
+        backend: "auto"
+        voice: "cmn"
+        speed: 150
+        pitch: 50
+        max_chars: 200
     ros_health_url: "http://127.0.0.1:8090/ros/health"
     ros_params_url: "http://127.0.0.1:8090/ros/params"
     state_file: "~/.config/rush-mog/edge_params.json"
@@ -377,10 +398,10 @@ edge_server:
         type: speaker
         topic: "/body/audio_status"
         message_type: "std_msgs/msg/String"
-        expected_rate_hz: 0.0
-        timeout_sec: 2.0
+        expected_rate_hz: 1.0
+        timeout_sec: 3.0
         required: false
-        description: "speaker feedback not implemented yet"
+        description: "newmine Bluetooth speaker + TTS playback"
       arm:
         type: arm
         topic: "/arm/joint_states"

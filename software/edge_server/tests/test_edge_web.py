@@ -21,6 +21,36 @@ class FakeRuntime:
     def __init__(self):
         self.commands = []
         self.params = {"stream_fps": 10, "motion_keepalive_ms": 200}
+        self.speaker_actions = []
+        self.speaker_payload = {
+            "ok": True,
+            "enabled": True,
+            "state": "connected",
+            "status": "ok",
+            "connected": True,
+            "audio_ready": True,
+            "device": {
+                "name": "newmine",
+                "mac": "73:DB:39:F2:15:4B",
+                "paired": True,
+                "trusted": True,
+            },
+            "sink": {
+                "name": "bluez_output.73_DB_39_F2_15_4B.1",
+                "id": 42,
+                "ready": True,
+                "volume": 70,
+            },
+            "tts": {"backend": "espeak-ng", "voice": "cmn", "speed": 150},
+            "playback": {
+                "playing": False,
+                "queue": 0,
+                "last_text": "",
+                "last_error": "",
+                "last_played_ms": 0,
+            },
+            "last_error": "",
+        }
         self.body_payload = {
             "valid": True,
             "stale": False,
@@ -119,6 +149,35 @@ class FakeRuntime:
         if message.startswith("button:stop") or message == "raw:0":
             return "0"
         return "1"
+
+    def speaker_status(self):
+        return dict(self.speaker_payload)
+
+    def handle_speaker(self, action, fields):
+        self.speaker_actions.append((action, dict(fields)))
+        if action == "say":
+            if not str(fields.get("text", "")).strip():
+                raise ValueError("播报文本为空")
+            return {
+                "ok": True,
+                "message": "语音已加入播放队列",
+                "speaker": self.speaker_payload,
+            }
+        if action == "volume":
+            value = int(str(fields.get("volume", "")))
+            if value < 0 or value > 100:
+                raise ValueError("volume 必须在 0..100")
+            self.speaker_payload["sink"]["volume"] = value
+            return {
+                "ok": True,
+                "message": "音量已更新",
+                "speaker": self.speaker_payload,
+            }
+        return {
+            "ok": True,
+            "message": f"{action} ok",
+            "speaker": self.speaker_payload,
+        }
 
     def local_modules(self):
         return [
@@ -407,6 +466,86 @@ def test_stream_redirect(web_server):
         assert response.getheader("Location") == "http://127.0.0.1:18080/stream"
     finally:
         connection.close()
+
+
+def test_speaker_api(web_server):
+    port, runtime = web_server
+    status, _, body = request(port, "/api/speaker")
+    payload = json.loads(body)
+    assert status == 200
+    assert payload["state"] == "connected"
+    assert payload["device"]["name"] == "newmine"
+    assert payload["sink"]["ready"] is True
+
+    status, _, body = request(
+        port,
+        "/api/speaker/say",
+        method="POST",
+        data=json.dumps({"text": "机器人已启动"}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert status == 200
+    assert json.loads(body)["message"] == "语音已加入播放队列"
+    assert runtime.speaker_actions[-1] == ("say", {"text": "机器人已启动"})
+
+    # 也接受 text/plain，方便 curl
+    status, _, _ = request(
+        port,
+        "/api/speaker/say",
+        method="POST",
+        data="请注意避让",
+        headers={"Content-Type": "text/plain"},
+    )
+    assert status == 200
+    assert runtime.speaker_actions[-1][1]["text"] == "请注意避让"
+
+    status, _, body = request(
+        port,
+        "/api/speaker/volume",
+        method="POST",
+        data=json.dumps({"volume": 55}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert status == 200
+    assert json.loads(body)["speaker"]["sink"]["volume"] == 55
+
+    status, _, body = request(
+        port,
+        "/api/speaker/say",
+        method="POST",
+        data=json.dumps({"text": ""}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert status == 400
+    assert json.loads(body)["error"]["code"] == "invalid_speaker_request"
+
+    status, _, _ = request(port, "/api/speaker/unknown", method="POST")
+    assert status == 404
+
+
+def test_speaker_api_unavailable():
+    runtime = type(
+        "NoSpeakerRuntime",
+        (),
+        {
+            "started_monotonic": time.monotonic(),
+            "ip_address": "127.0.0.1",
+            "status": lambda self: {},
+            "edge_module": lambda self: {},
+            "body": lambda self: {},
+            "local_modules": lambda self: [],
+        },
+    )()
+    app = EdgeHttpApp(runtime, static_root="", stream_port=18080)
+    server = EdgeHttpServer("127.0.0.1", 0, app)
+    assert server.start(), server.info()
+    try:
+        port = server.info()["port"]
+        status, _, body = request(port, "/api/speaker")
+        assert status == 503
+        assert json.loads(body)["error"]["code"] == "speaker_unavailable"
+    finally:
+        server.stop()
 
 
 def test_mjpeg_available_and_unavailable():

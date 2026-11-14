@@ -32,6 +32,14 @@
   - `/boot/firmware/config.txt` 末尾追加 `dtoverlay=uart3`；
   - 重启后生成 `/dev/ttyAMA1`，供 `edge_server_node` 直连 STM32 USART3；
   - `enable_uart=1` 只启用 GPIO14/15 的 UART0，不能代替 `uart3`。
+- 蓝牙音箱/语音播报（2026-11-14）：
+  - 安装 `pipewire`、`pipewire-pulse`、`wireplumber`、
+    `libspa-0.2-bluetooth`、`pulseaudio-utils`、`alsa-utils`、`espeak-ng`；
+  - `loginctl enable-linger ubuntu`，启用用户级 `pipewire`、
+    `pipewire-pulse`、`wireplumber`；
+  - BlueZ 已配对/信任 `newmine`（`73:DB:39:F2:15:4B`）；
+  - 首次配对：`bluetoothctl pair/trust/connect`，之后由 `edge_server_node`
+    按 `edge.speaker.connect_interval_sec` 自动重连。
 
 ### 1.2 代码与构建
 
@@ -56,8 +64,12 @@
       `dtoverlay=uart3` 已写入 `/boot/firmware/config.txt`；
     - 接线：Pi GPIO4(TXD3)→STM32 PB11(RX)，GPIO5(RXD3)→PB10(TX)，必须共地
   - 状态文件：`/var/lib/edge_server/edge_params.json`
-  - 健康检查：只监控当前 5 个设备，`check_nodes=false`、
-    `safety_required=false`，缺设备按 `degraded` 而不是 `error` 上报
+  - 蓝牙音箱：`edge.speaker` 启用，`device_name=newmine`、
+    `device_mac=73:DB:39:F2:15:4B`，音频目录 `/var/lib/edge_server/audio`，
+    A2DP 输出走本机 PipeWire（sink 名 `bluez_output.73_DB_39_F2_15_4B.a2dp-sink`）
+  - 健康检查：监控 camera/lidar/imu/base/odom/speaker 6 个设备，
+    `check_nodes=false`、`safety_required=false`；音箱未连接时
+    `/body/audio_status` 的 `online=false` 会让 speaker 显示 `degraded`
 - `/opt/edge_server/deploy/edge_server.launch.py`：只启动
   `edge_server_node` + `health_monitor_node`，不启动 SLAM/Nav2/感知全栈。
 
@@ -66,6 +78,14 @@
 - 单元文件：`/etc/systemd/system/edge_server.service`
 - 运行用户：`ubuntu`
 - 通过 `AmbientCapabilities=CAP_NET_BIND_SERVICE` 绑定 80 端口
+- `After=network-online.target bluetooth.service user@1000.service`，
+  `Wants=... bluetooth.service`
+- 音频会话环境（让播放器连到用户级 PipeWire/Pulse）：
+  ```ini
+  Environment=XDG_RUNTIME_DIR=/run/user/1000
+  Environment=PULSE_SERVER=unix:/run/user/1000/pulse/native
+  Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+  ```
 - 已执行：
   ```bash
   sudo systemctl daemon-reload
@@ -84,8 +104,12 @@
   - `0.0.0.0:80`
   - `0.0.0.0:8080`
   - `127.0.0.1:8090`
-- 未接 STM32：`serial_connected=false`
+- STM32：`serial_connected=true`（`/dev/ttyAMA1@115200`）
 - 未启动 ROS 相机驱动：`camera=0`，`/stream` 返回 503
+- 蓝牙音箱：`newmine` 已连接，A2DP sink
+  `bluez_output.73_DB_39_F2_15_4B.a2dp-sink`，`online=true`；
+  手动断开后 20s 内自动重连成功，`/api/speaker/say` 实测可播报
+  （中文 `espeak-ng`），health monitor 的 speaker 为 `ok`
 - ROS 健康整体为 `degraded`（缺相机/雷达/IMU/底盘数据），当前属预期
 
 ---
@@ -145,7 +169,7 @@ cd /mnt/f/CODE/rush-mog/software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest -q tests
 ```
 
-当前基线：`94 passed`。
+当前基线：`107 passed`。
 
 ### 3.3 同步源码到 Pi
 
@@ -208,6 +232,8 @@ curl -s http://192.168.3.26/status
 curl -s -o /dev/null -w '%{http_code}\n' http://192.168.3.26/
 curl -s -o /dev/null -w '%{http_code}\n' http://192.168.3.26/dashboard.html
 curl -s -o /dev/null -w '%{http_code}\n' http://192.168.3.26:8080/stream
+curl -s http://192.168.3.26/api/speaker | python3 -m json.tool
+curl -s http://192.168.3.26/api/modules/edge/params | python3 -m json.tool | grep -A2 speaker
 ssh ubuntu@192.168.3.26 'sudo journalctl -u edge_server -n 50 --no-pager'
 ```
 
@@ -279,6 +305,7 @@ ssh ubuntu@192.168.3.26 '
 - 模块：`http://192.168.3.26/api/modules`
 - 图传：`http://192.168.3.26:8080/stream`
 - ROS 健康代理：`http://192.168.3.26/api/modules/ros/health`
+- 音箱状态/播报：`http://192.168.3.26/api/speaker`
 
 ---
 
@@ -292,3 +319,63 @@ ssh ubuntu@192.168.3.26 '
   需要全栈时另行启动对应 launch/节点。
 - 不要直接修改 `/opt/edge_server/install/`，重新构建会覆盖。
 - 本地 Git 提交 ≠ 已发布；每次发布按“同步 → 构建 → 重启 → 验证”执行。
+- 蓝牙/音频栈是系统级配置（apt 包、`loginctl enable-linger`、用户级
+  PipeWire/WirePlumber、systemd 的 `XDG_RUNTIME_DIR`），不在仓库里；
+  重装系统后需按 §1.1/§1.4 重建，再重启 `edge_server`。
+
+---
+
+## 7. 蓝牙音箱 / 语音播报
+
+### 7.1 自动连接
+
+1. 音箱开机，且不要被手机/其他主机占用；
+2. `edge_server_node` 启动后立即尝试连接，之后每 20s 重试；
+3. 连接成功后 PipeWire 创建 `bluez_output.<MAC>.1` sink，节点将其设为默认
+   输出并应用 `edge.speaker.volume`；
+4. 状态：
+   ```bash
+   curl -s http://192.168.3.26/api/speaker | python3 -m json.tool
+   ```
+   - `state=connected, audio_ready=true`：可播报；
+   - `state=error`：看 `last_error`（常见 `br-connection-page-timeout`）；
+   - `state=scanning/connecting`：正在重试。
+
+手动强制重连：
+
+```bash
+curl -X POST http://192.168.3.26/api/speaker/connect
+```
+
+### 7.2 语音播报
+
+```bash
+curl -X POST http://192.168.3.26/api/speaker/say \
+  -H 'Content-Type: application/json' -d '{"text":"机器人已启动"}'
+
+# 也可以直接用 ROS 话题
+ros2 topic pub --once /body/say std_msgs/msg/String "{data: 请注意避让}"
+```
+
+- TTS 使用 `espeak-ng -v cmn`，离线可用；音色/语速在
+  `edge.speaker.tts.voice/speed` 调整；
+- 播放队列串行，最多 20 条；`POST /api/speaker/stop` 清空并停止；
+- 播放本地文件：先放到 `/var/lib/edge_server/audio/`，再
+  `POST /api/speaker/play -d '{"file":"prompt.wav"}'`；只允许该目录
+  （防任意路径读取），支持 wav/mp3/ogg/flac/m4a/aac。
+
+### 7.3 常见问题
+
+- **`br-connection-page-timeout`**：音箱未响应经典蓝牙寻呼。多数是：
+  音箱被手机连着、处于休眠/关机、超出距离，或需要按一下音箱上的配对键。
+  在手机端断开后，节点会在下一个 20s 周期自动连上。
+- **已连接但 `audio_ready=false`**：PipeWire/WirePlumber 没起来。检查：
+  ```bash
+  systemctl --user is-active pipewire pipewire-pulse wireplumber
+  pactl list short sinks | grep bluez_output
+  loginctl show-user ubuntu -p Linger
+  ```
+- **能连但没声音**：确认 `pactl get-default-sink` 是 bluez sink，
+  `wpctl status` 中该 sink 未静音；必要时 `pactl set-sink-mute <name> 0`。
+- **服务里 `pactl` 报连接失败**：systemd 单元缺少 §1.4 的
+  `XDG_RUNTIME_DIR`/`PULSE_SERVER`，`daemon-reload` 后重启。

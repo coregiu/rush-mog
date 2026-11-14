@@ -430,6 +430,9 @@ sudo chsh -s /bin/bash ubuntu
 | `/status` 里 `serial_connected:false` | 串口设备没打开：没启用 `uart3`、设备名不对或被占用 | 查 `ls -l /dev/ttyAMA1`、`grep uart3 /boot/firmware/config.txt`、`journalctl -u edge_server`；确认 `ubuntu` 在 `dialout` 组 |
 | 网页按钮无反应、`/cmd` 返回 `ok` | 命令被接受但串口没写出去，或 STM32 没收到 | 按 CODE_MAP.md §10 从 `/status`→`strace`→LED 逐层查 |
 | 按住按钮时 STM32 LED 连闪 | 服务端在周期性重发（旧行为），每条命令都会翻转 LED | 新版默认已关闭；确认 `edge.motion.resend_manual` 为 `false` 并重启服务 |
+| `/api/speaker` 为 `error` / `br-connection-page-timeout` | 音箱休眠、被手机占用或超出距离 | 音箱开机并断开手机；节点每 20s 自动重连，或 `curl -X POST .../api/speaker/connect` |
+| `/api/speaker` 已连接但 `audio_ready=false` | PipeWire/WirePlumber 用户服务没起，或 sink 未创建 | `systemctl --user status pipewire wireplumber`；`pactl list short sinks | grep bluez_output`；见 DEPLOY.md §7.3 |
+| 语音播报入队但没声音 | 默认 sink 不是蓝牙，或音箱静音/音量 0 | `pactl get-default-sink`、`pactl set-sink-mute <name> 0`、`POST /api/speaker/volume` |
 | 网页 200 但还是旧界面 | 没 build/restart，或浏览器缓存 | 重新 build + restart，浏览器 Ctrl-F5 |
 | 服务反复重启 | 配置 YAML 写错/端口被占 | `journalctl -u edge_server -n 100` |
 | 日志时间比北京时间慢 8 小时 | Pi 时区是 UTC | `sudo timedatectl set-timezone Asia/Shanghai`（可选） |
@@ -450,8 +453,10 @@ sudo chsh -s /bin/bash ubuntu
 | ROS 日志 | `/var/log/edge_server/ros/` |
 | ROS home | `/var/lib/edge_server/ros/` |
 | 状态文件 | `/var/lib/edge_server/edge_params.json` |
+| 音频目录 | `/var/lib/edge_server/audio`（`/api/speaker/play` 只允许此目录） |
 | Web / 手柄 | `http://192.168.3.26/`（:80） |
 | Dashboard | `http://192.168.3.26/dashboard.html` |
+| 音箱状态 | `http://192.168.3.26/api/speaker` |
 | MJPEG | `http://192.168.3.26:8080/stream` |
 | 健康网关 | `http://127.0.0.1:8090/ros/health`（仅本机） |
 | 串口 | `/dev/ttyAMA1`（GPIO4/5，UART3），115200 8N1 |

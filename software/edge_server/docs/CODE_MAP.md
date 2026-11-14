@@ -55,6 +55,7 @@ software/
 │   ├── edge_server/             Python 库（不依赖 ROS 的纯逻辑 + HTTP）
 │   │   ├── edge_control.py      命令映射/MotionState/遥测解析（重点）
 │   │   ├── edge_web.py          HTTP 服务器/路由/静态文件/模块代理
+│   │   ├── core/speaker.py      蓝牙音箱自动连接 + TTS/音频播放队列
 │   │   ├── http_health.py       健康接口数据组装
 │   │   ├── core/                业务核心：body_drive、odometry、velocity_mux、
 │   │   │                        safety_checker、vla_engine、navigation、object_search…
@@ -97,7 +98,7 @@ software/
 
 | 进程 | 入口 | 作用 | 端口 |
 |---|---|---|---|
-| `edge_server_node` | `ros_nodes/edge_server_node.py:main` | 网页/API、串口、`/cmd_vel`→STM32、STM32→`/odom` | 80、8080 |
+| `edge_server_node` | `ros_nodes/edge_server_node.py:main` | 网页/API、串口、`/cmd_vel`→STM32、STM32→`/odom`、蓝牙音箱/语音播报 | 80、8080 |
 | `health_monitor_node` | `ros_nodes/health_monitor_node.py:main` | 话题/设备健康检查 | 127.0.0.1:8090 |
 
 ### 3.2 全栈（可选）
@@ -228,10 +229,12 @@ Twist 量化规则（`core/body_drive.py`）：
 | GET | `/status` | 运行状态（含 `motion` 当前指令） |
 | GET | `/api/body` | 遥测详情 + `motion` 当前指令/来源/持续时长 |
 | GET | `/api/events?limit=N` | 最近 N 条运行事件（命令/串口/急停/超时） |
+| GET | `/api/speaker` | 蓝牙音箱/TTS/播放状态 |
+| POST | `/api/speaker/{connect,say,play,volume,stop}` | 连接/TTS/播放文件/音量/停止 |
 | GET | `/api/modules` | 模块注册表 |
 | GET | `/api/modules/edge` | Edge 模块详情 |
-| GET | `/api/modules/edge/params` | 可调参数 |
-| POST | `/api/modules/edge/params` | 改参数（keepalive/fps） |
+| GET | `/api/modules/edge/params` | 可调参数（含 `speaker_volume`） |
+| POST | `/api/modules/edge/params` | 改参数（keepalive/fps/speaker_volume） |
 | GET | `/api/modules/ros/health` | 代理 8090 健康接口 |
 | GET | `/stream` | 302 跳到 `:8080/stream` |
 | GET | 其他 | `web/` 静态文件 |
@@ -242,7 +245,7 @@ Twist 量化规则（`core/body_drive.py`）：
 |---|---|
 | `web/index.html` | 手柄页；按钮/摇杆事件、`/cmd` 发送、stop beacon |
 | `web/ps2.js` / `ps2.css` | 手柄视觉与交互 |
-| `web/dashboard.html` / `dashboard.js` | 数字孪生：EDGE + ROS 2 合并节点、hardware/README BOM 的 10 个硬件模块矩阵（底盘+电机驱动合并） |
+| `web/dashboard.html` / `dashboard.js` | 数字孪生：EDGE + ROS 2 合并节点、BOM 硬件矩阵、蓝牙音箱/语音播报面板 |
 | `web/audio.js` | 音频控制（与运动链路独立） |
 | `web/yolo.js` | 视觉检测展示 |
 

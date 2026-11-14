@@ -16,6 +16,9 @@
 - **速度仲裁**：VLA/Nav2/反向/安全统一到唯一 `/cmd_vel`；
 - **Pi Edge Server**：80 端口网页/API、8080 MJPEG、树莓派直连 STM32 USART3（115200 ASCII）、
   网页手动控制与 ROS `/cmd_vel` 共用串口出口；旧 ESP32 HTTP 桥仅保留历史兼容；
+- **蓝牙音箱/语音播报**：自动连接 `newmine`（BlueZ + PipeWire A2DP），
+  TTS（espeak-ng 中文）与本地音频排队播放，提供 `/api/speaker/*`、`/body/say`、
+  `/body/audio_status`，dashboard 可直接输入文字播报；
 - **健康检查**：ROS 节点/话题 + 相机/雷达/IMU/麦克风/音箱/机械臂等设备，
   HTTP 供 Pi 上的 Edge Server/dashboard 代理，另有 ROS 话题/服务。
 
@@ -24,7 +27,7 @@
 | 项目 | 结果 |
 |---|---|
 | `colcon build --packages-select custom_msgs edge_server` | 通过 |
-| `pytest tests -q` | 94 passed |
+| `pytest tests -q` | 107 passed |
 | `tests/end_to_end_check.py` | 7/7 passed |
 | `tests/slam_nav_check.py` + `fake_slam_robot.py` | 6/6 passed |
 
@@ -42,6 +45,8 @@
   `python3-numpy`、`python3-opencv`、`python3-yaml`、`python3-serial`
 - 可选：
   - `python3-smbus2`（Pi I2C 直连 ICM-20948）
+  - `pipewire`、`wireplumber`、`libspa-0.2-bluetooth`、`pulseaudio-utils`、
+    `alsa-utils`、`espeak-ng`（蓝牙音箱 + 中文 TTS；见 §5.6）
   - `nav2_bringup`、`nav2_msgs`（Nav2 后端）
   - `slam_toolbox`（建图）
   - `robot_localization`（EKF）
@@ -209,7 +214,7 @@ ros2 run robot_localization ekf_node --ros-args \
 | `navigation_node` | `/center/navigate_to`，Nav2/直航后端 |
 | `target_detector_node` | 颜色/YOLO 检测、激光/bbox 测距、map 投影、跟踪 |
 | `object_search_node` | `/center/explore`、`/center/search_object` |
-| `edge_server_node` | Pi Edge Server：80 网页/API、8080 MJPEG、STM32 串口、`/odom`、`/joint_states`、`/base/status` |
+| `edge_server_node` | Pi Edge Server：80 网页/API、8080 MJPEG、STM32 串口、蓝牙音箱/语音播报、`/odom`、`/joint_states`、`/base/status`、`/body/audio_status` |
 | `base_bridge_node` | 旧版 Pi ↔ STM32 二进制串口桥（legacy） |
 | `imu_node` | Pi I2C 直连 ICM-20948 → `/imu/data` |
 | `health_monitor_node` | 节点/设备健康、`/center/health`、`/center/healthcheck`、HTTP `:8090` |
@@ -229,7 +234,8 @@ ros2 run robot_localization ekf_node --ros-args \
 | `/imu/data` | `sensor_msgs/Imu` | 订阅 |
 | `/joint_states` | `sensor_msgs/JointState` | 订阅 |
 | `/arm/joint_states` | `sensor_msgs/JointState` | 订阅（健康检查，待接入） |
-| `/body/audio_status` | `std_msgs/String` | 订阅（健康检查，待接入） |
+| `/body/say` | `std_msgs/String` | 订阅（文本 -> TTS -> 蓝牙音箱） |
+| `/body/audio_status` | `std_msgs/String` | 发布（音箱状态 JSON，1 Hz；健康检查 speaker） |
 | `/battery_state` | `sensor_msgs/BatteryState` | 订阅 |
 | `/base/status` | `std_msgs/String` | 发布/订阅（STM32 遥测 JSON） |
 | `/map` | `nav_msgs/OccupancyGrid` | 订阅/发布 |
@@ -340,8 +346,8 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
 - 代码默认监听 `127.0.0.1:8090`；`robot.yaml` 也保持回环，由同机 Edge Server 代理；跨机监控再改 `0.0.0.0` 并设置 `health.http.api_key`。
 - 设备参数（频率/超时/必需）与 health monitor 参数可在 dashboard 的 ROS 参数抽屉直接修改。
 - 设备清单在 `health.devices` 配置：camera/lidar/imu/microphone/speaker/arm/base/battery/odom。
-- 音箱 `/body/audio_status`、机械臂 `/arm/joint_states` 当前无反馈时显示 `unknown`，不伪造 `ok`；
-  接入后无需改代码。
+- 音箱由 `edge_server_node` 发布 `/body/audio_status`，`online=false` 时显示 `degraded`；
+  机械臂 `/arm/joint_states` 无反馈时显示 `unknown`，不伪造 `ok`；接入后无需改代码。
 - 整体状态：`ok` / `starting` / `degraded` / `error` / `disabled`；
   `ready=true` 表示可接新任务（`ok`/`degraded` 且未急停）。
 
@@ -357,6 +363,8 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
 | `GET /status` | Pi 运行状态、串口/ROS/相机/运动状态（含当前指令 `motion`） |
 | `GET /api/body` | STM32 编码器遥测快照 + 当前指令/来源/持续时长 |
 | `GET /api/events?limit=N` | 最近 N 条运行事件（命令、串口连接、急停、租约超时） |
+| `GET /api/speaker` | 蓝牙音箱连接/A2DP sink/TTS/播放队列状态 |
+| `POST /api/speaker/{connect,say,play,volume,stop}` | 连接音箱、TTS 播报、播放 `audio_dir` 文件、音量、停止 |
 | `GET /api/modules` | Edge + 同机 ROS 子系统 + 外部模块（CENTER） |
 | `GET/POST /api/modules/edge/params` | Edge 参数（运动保活、图传帧率） |
 | `GET /api/modules/{id}/health|params` | 代理 ROS（同机）/CENTER（外部） |
@@ -366,6 +374,61 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
 完整 OpenAPI 定义见 [`software/api.yaml`](../api.yaml)；实现见
 `edge_server/edge_web.py`、`edge_server/edge_control.py` 和
 `ros_nodes/edge_server_node.py`。
+
+### 5.6 蓝牙音箱与语音播报（`newmine`）
+
+`edge_server_node` 内置 `SpeakerManager`，启动后自动搜索/配对/信任/连接
+`edge.speaker.device_name`（默认 `newmine`），连接成功后等待 PipeWire 创建
+A2DP sink 并设为默认输出；断线后每 `connect_interval_sec` 秒重试。
+
+主机依赖（Ubuntu 22.04 / Pi 4B）：
+
+```bash
+sudo apt-get install -y pipewire pipewire-pulse wireplumber \
+  libspa-0.2-bluetooth pulseaudio-utils alsa-utils espeak-ng
+sudo loginctl enable-linger ubuntu
+sudo -u ubuntu XDG_RUNTIME_DIR=/run/user/1000 \
+  systemctl --user enable --now pipewire pipewire-pulse wireplumber
+```
+
+`edge_server.service` 需要把用户会话环境传给播放器（部署机已配置）：
+
+```ini
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=PULSE_SERVER=unix:/run/user/1000/pulse/native
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+```
+
+配置（`edge.speaker`）：
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `enabled` | `false`（`robot.yaml` 为 `true`） | 总开关 |
+| `device_name` | `newmine` | 按名称发现音箱 |
+| `device_mac` | 空 | 填 MAC 可跳过扫描、快速重连 |
+| `auto_connect` | `true` | 后台自动重连 |
+| `connect_interval_sec` | `20` | 巡检/重试周期 |
+| `volume` | `70` | 首次连接音量 0..100 |
+| `audio_dir` | `~/.local/share/rush-mog/audio` | `POST /api/speaker/play` 允许的目录 |
+| `say_topic` / `status_topic` | `/body/say` / `/body/audio_status` | ROS 话题 |
+| `tts.backend` | `auto` | `espeak-ng` / `edge-tts` / `none` |
+| `tts.voice` | `cmn` | espeak-ng 中文音色；英文用 `en-us` |
+
+接口示例：
+
+```bash
+curl -s http://192.168.3.26/api/speaker | python3 -m json.tool
+curl -X POST http://192.168.3.26/api/speaker/connect
+curl -X POST http://192.168.3.26/api/speaker/say \
+  -H 'Content-Type: application/json' -d '{"text":"机器人已启动"}'
+curl -X POST http://192.168.3.26/api/speaker/volume \
+  -H 'Content-Type: application/json' -d '{"volume":60}'
+ros2 topic pub --once /body/say std_msgs/msg/String "{data: 已到达目标点}"
+```
+
+dashboard 的「蓝牙音箱与语音播报」面板提供连接、停止、音量、文字播报和快捷短语；
+状态同时发布到 `/body/audio_status`，health monitor 用 `online` 字段判断音箱
+`ok`/`degraded`。
 
 ---
 
@@ -395,6 +458,8 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
 - `health.http.host` / `port` / `api_key`
 - `base.transport` / `port` / `baud` / `body_command.*`
 - `edge.web.port` / `stream_port` / `edge.camera.fps` / `edge.motion.keepalive_ms`
+- `edge.speaker.*`：`enabled` / `device_name` / `device_mac` / `auto_connect` /
+  `volume` / `audio_dir` / `tts.*`（见 §5.6）
 - `health.devices.<id>` 的 `topic` / `message_type` / `expected_rate_hz` / `timeout_sec` / `required`
 
 ---
@@ -417,7 +482,7 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
 ```bash
 cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 94 passed
+# 107 passed
 ```
 
 单独跑健康检查（不依赖 ROS 图）：
@@ -528,8 +593,8 @@ ros2 service call /center/emergency_stop custom_msgs/srv/EmergencyStop "{trigger
 6. **单地图/单楼层**：未实现多地图切换/电梯/多层。
 7. **动态目标**：搜索假设目标基本静止；移动目标需预测/重规划。
 8. **颜色检测仅演示**：真实场景建议 YOLO/深度相机/Orin Nano。
-9. **健康反馈缺口**：音箱 `/body/audio_status`、机械臂 `/arm/joint_states` 尚未发布，
-   健康接口显示 `unknown`；接入后自动变为 `ok`/`degraded`/`error`。
+9. **健康反馈缺口**：机械臂 `/arm/joint_states` 尚未发布，健康接口显示 `unknown`；
+   音箱已接入 `/body/audio_status`，蓝牙未连接时显示 `degraded`，连接后恢复 `ok`。
 
 ---
 
@@ -542,6 +607,7 @@ software/edge_server/          # ROS 包根目录
 │   ├── core/                  # 纯算法，可单测（含 health_monitor.py）
 │   ├── drivers/               # ICM-20948
 │   ├── edge_control.py        # 按钮/摇杆/运动保活/STM32 遥测纯逻辑
+│   ├── core/speaker.py        # 蓝牙音箱自动连接 + TTS/音频排队播放
 │   ├── edge_web.py            # Edge 网页/API/MJPEG（stdlib）
 │   ├── http_health.py         # 健康检查 HTTP 网关（stdlib）
 │   └── utils/

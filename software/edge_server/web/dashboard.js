@@ -14,6 +14,8 @@ const API = {
   edgeHealth: '/api/modules/edge/health',
   edgeParams: '/api/modules/edge/params',
   body: '/api/body',
+  speaker: '/api/speaker',
+  speakerAction: (action) => `/api/speaker/${encodeURIComponent(action)}`,
   module: (id) => `/api/modules/${encodeURIComponent(id)}`,
   health: (id) => `/api/modules/${encodeURIComponent(id)}/health`,
   params: (id) => `/api/modules/${encodeURIComponent(id)}/params`,
@@ -115,6 +117,11 @@ const state = {
   eventTotal: 0,
   eventsPolling: false,
   eventsTimer: null,
+  speaker: null,
+  speakerPolling: false,
+  speakerTimer: null,
+  speakerVolumeEditing: false,
+  speakerError: '',
   body: {
     lastOdom: null,
     sessionDistance: 0,
@@ -1722,6 +1729,211 @@ async function pollEvents() {
   }
 }
 
+function speakerPanelStatus(speaker) {
+  if (!speaker || speaker.enabled === false) return 'disabled';
+  const raw = String(speaker.status || '');
+  if (raw === 'ok') return 'ok';
+  if (raw === 'degraded') return 'degraded';
+  if (raw === 'error') return 'error';
+  if (raw === 'starting') return 'starting';
+  if (raw === 'disabled') return 'disabled';
+  if (speaker.connected) return speaker.audio_ready ? 'ok' : 'degraded';
+  if (speaker.state === 'error') return 'error';
+  if (speaker.state === 'scanning' || speaker.state === 'connecting') return 'starting';
+  return 'unknown';
+}
+
+function speakerStateLabel(speaker, status) {
+  if (!speaker) return '未知';
+  if (speaker.enabled === false) return '禁用';
+  if (speaker.connected && speaker.audio_ready) return '已连接';
+  if (speaker.connected) return '已连接 · 音频未就绪';
+  switch (speaker.state) {
+    case 'scanning': return '搜索中';
+    case 'connecting': return '连接中';
+    case 'disconnected': return '已断开';
+    case 'error': return '连接失败';
+    case 'starting': return '启动中';
+    default: return STATUS_LABEL[status] || '未知';
+  }
+}
+
+function renderSpeaker() {
+  const panel = $('#speaker-panel');
+  if (!panel) return;
+  const speaker = state.speaker;
+  const status = speakerPanelStatus(speaker);
+  panel.dataset.status = status;
+
+  const stateChip = $('#speaker-state');
+  if (stateChip) {
+    stateChip.textContent = speakerStateLabel(speaker, status);
+    stateChip.className = `status-chip status-${status}`;
+  }
+  const led = $('#speaker-led');
+  if (led) led.className = `led status-${status}`;
+
+  const device = (speaker && speaker.device) || {};
+  const sink = (speaker && speaker.sink) || {};
+  const playback = (speaker && speaker.playback) || {};
+  const tts = (speaker && speaker.tts) || {};
+
+  const setText = (selector, value) => {
+    const el = $(selector);
+    if (el) el.textContent = value == null || value === '' ? '--' : String(value);
+  };
+  setText('#speaker-device', device.name || '蓝牙音箱');
+  setText('#speaker-name', device.name || '--');
+  setText('#speaker-mac', device.mac || '--');
+  setText('#speaker-sink', sink.ready ? (sink.name || 'ready') : (sink.name || '未就绪'));
+  setText(
+    '#speaker-playing',
+    playback.playing ? '播放中' : (playback.last_text ? `空闲 · ${playback.last_text}` : '空闲')
+  );
+
+  const connectBtn = $('#speaker-connect');
+  if (connectBtn) {
+    connectBtn.disabled = !speaker || speaker.enabled === false;
+    connectBtn.textContent = speaker && speaker.connected ? '重新连接' : '连接音箱';
+  }
+  const stopBtn = $('#speaker-stop');
+  if (stopBtn) stopBtn.disabled = !speaker || speaker.enabled === false;
+
+  const volume = $('#speaker-volume');
+  if (volume && !state.speakerVolumeEditing) {
+    const value = numberOrNull(sink.volume);
+    if (value != null) volume.value = String(clamp(Math.round(value), 0, 100));
+  }
+  const volumeLabel = $('#speaker-volume-label');
+  if (volumeLabel && volume) volumeLabel.textContent = `${volume.value}%`;
+
+  const hint = $('#speaker-hint');
+  if (hint) {
+    if (!speaker) {
+      hint.textContent = state.speakerError
+        ? `音箱接口不可用：${state.speakerError}`
+        : '等待音箱状态…';
+    } else if (speaker.enabled === false) {
+      hint.textContent = '音箱功能未启用（edge.speaker.enabled=false）';
+    } else {
+      const bits = [];
+      if (speaker.last_error) bits.push(speaker.last_error);
+      if (playback.last_error) bits.push(`播放：${playback.last_error}`);
+      if (tts.backend) bits.push(`TTS ${tts.backend} / ${tts.voice || '--'}`);
+      if (playback.queue) bits.push(`队列 ${playback.queue}`);
+      hint.textContent = bits.join(' · ') || '音箱已就绪，可输入文字播报。';
+    }
+  }
+}
+
+async function pollSpeaker() {
+  if (state.speakerPolling) return;
+  state.speakerPolling = true;
+  try {
+    state.speaker = await fetchJson(API.speaker, {}, 3000);
+    state.speakerError = '';
+  } catch (error) {
+    state.speaker = null;
+    state.speakerError = error && error.message ? error.message : String(error);
+  } finally {
+    state.speakerPolling = false;
+    renderSpeaker();
+  }
+}
+
+async function speakerAction(action, payload = {}) {
+  const data = await fetchJson(
+    API.speakerAction(action),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+    8000
+  );
+  if (data && data.speaker) {
+    state.speaker = data.speaker;
+    state.speakerError = '';
+    renderSpeaker();
+  }
+  toast((data && data.message) || '操作成功', 'ok');
+  return data;
+}
+
+async function speakText(text) {
+  const value = String(text || '').trim();
+  if (!value) {
+    toast('请输入播报内容', 'error');
+    return;
+  }
+  try {
+    await speakerAction('say', { text: value });
+  } catch (error) {
+    toast(`语音播报失败：${error.message}`, 'error');
+  }
+}
+
+function bindSpeakerEvents() {
+  const form = $('#speaker-form');
+  if (form) {
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const input = $('#speaker-text');
+      speakText(input ? input.value : '');
+    });
+  }
+
+  const quick = $('#speaker-quick');
+  if (quick) {
+    quick.addEventListener('click', (event) => {
+      const button = event.target.closest('button[data-text]');
+      if (!button) return;
+      const input = $('#speaker-text');
+      if (input) input.value = button.dataset.text || '';
+      speakText(button.dataset.text || '');
+    });
+  }
+
+  const connect = $('#speaker-connect');
+  if (connect) {
+    connect.addEventListener('click', async () => {
+      try {
+        await speakerAction('connect');
+      } catch (error) {
+        toast(`连接音箱失败：${error.message}`, 'error');
+      }
+    });
+  }
+
+  const stop = $('#speaker-stop');
+  if (stop) {
+    stop.addEventListener('click', async () => {
+      try {
+        await speakerAction('stop');
+      } catch (error) {
+        toast(`停止播放失败：${error.message}`, 'error');
+      }
+    });
+  }
+
+  const volume = $('#speaker-volume');
+  if (volume) {
+    volume.addEventListener('input', () => {
+      state.speakerVolumeEditing = true;
+      const label = $('#speaker-volume-label');
+      if (label) label.textContent = `${volume.value}%`;
+    });
+    volume.addEventListener('change', async () => {
+      state.speakerVolumeEditing = false;
+      try {
+        await speakerAction('volume', { volume: Number(volume.value) });
+      } catch (error) {
+        toast(`设置音量失败：${error.message}`, 'error');
+      }
+    });
+  }
+}
+
 function startPolling() {
   stopPolling();
   state.bodyFailures = 0;
@@ -1734,8 +1946,12 @@ function startPolling() {
   state.eventsTimer = setInterval(() => {
     if (!document.hidden) pollEvents();
   }, 3000);
+  state.speakerTimer = setInterval(() => {
+    if (!document.hidden) pollSpeaker();
+  }, 3000);
   pollBody();
   pollEvents();
+  pollSpeaker();
   poll();
 }
 
@@ -1746,11 +1962,14 @@ function stopPolling() {
   state.bodyPollTimer = null;
   if (state.eventsTimer) clearInterval(state.eventsTimer);
   state.eventsTimer = null;
+  if (state.speakerTimer) clearInterval(state.speakerTimer);
+  state.speakerTimer = null;
 }
 
 function bindEvents() {
   const refresh = $('#refresh-btn');
-  if (refresh) refresh.addEventListener('click', () => { pollBody(); pollEvents(); poll(); });
+  if (refresh) refresh.addEventListener('click', () => { pollBody(); pollEvents(); pollSpeaker(); poll(); });
+  bindSpeakerEvents();
 
   const auto = $('#auto-refresh');
   if (auto) {
@@ -1788,10 +2007,10 @@ function bindEvents() {
   });
 
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) { pollBody(); pollEvents(); poll(); }
+    if (!document.hidden) { pollBody(); pollEvents(); pollSpeaker(); poll(); }
   });
 
-  window.addEventListener('online', () => { pollBody(); pollEvents(); poll(); });
+  window.addEventListener('online', () => { pollBody(); pollEvents(); pollSpeaker(); poll(); });
 }
 
 function init() {

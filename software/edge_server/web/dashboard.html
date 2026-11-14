@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#050914">
   <title>RUSH-MOG · 数字孪生</title>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
-  <link rel="stylesheet" href="dashboard.css?v=20261114g">
+  <link rel="stylesheet" href="dashboard.css?v=20261114h">
 </head>
 <body>
   <div class="ambient ambient-a"></div>
@@ -15,7 +15,7 @@
 
   <header class="topbar">
     <div class="brand">
-      <div class="brand-mark"><img src="favicon.ico?v=20261114g" alt="RUSH-MOG"></div>
+      <div class="brand-mark"><img src="favicon.ico?v=20261114h" alt="RUSH-MOG"></div>
       <div class="brand-copy">
         <h1>RUSH-MOG <span> || DIGITAL TWIN</span></h1>
         <p>上位机监控与配置 · EDGE + ROS 2 / CENTER</p>
@@ -629,6 +629,56 @@
       </div>
     </section>
 
+    <section class="panel speaker-panel" id="speaker-panel" data-status="unknown">
+      <div class="panel-head">
+        <div>
+          <span class="eyebrow">AUDIO · BLUETOOTH SPEAKER</span>
+          <h2>蓝牙音箱与语音播报</h2>
+        </div>
+        <div class="panel-meta">
+          <span class="status-chip status-unknown" id="speaker-state">未知</span>
+          <span class="led status-unknown" id="speaker-led"></span>
+          <span id="speaker-device">--</span>
+        </div>
+      </div>
+
+      <div class="speaker-grid">
+        <div class="speaker-facts">
+          <div class="speaker-fact"><span>设备</span><strong id="speaker-name">--</strong></div>
+          <div class="speaker-fact"><span>MAC</span><strong id="speaker-mac">--</strong></div>
+          <div class="speaker-fact"><span>音频输出</span><strong id="speaker-sink">--</strong></div>
+          <div class="speaker-fact"><span>播放状态</span><strong id="speaker-playing">--</strong></div>
+        </div>
+
+        <div class="speaker-controls">
+          <div class="speaker-actions">
+            <button id="speaker-connect" class="btn btn-ghost" type="button">连接音箱</button>
+            <button id="speaker-stop" class="btn btn-ghost" type="button">停止播放</button>
+            <label class="speaker-volume" for="speaker-volume">
+              <span>音量</span>
+              <input id="speaker-volume" type="range" min="0" max="100" step="5" value="70">
+              <strong id="speaker-volume-label">70%</strong>
+            </label>
+          </div>
+
+          <form id="speaker-form" class="speaker-say" autocomplete="off">
+            <input id="speaker-text" type="text" maxlength="120"
+                   placeholder="输入要播报的文字，例如：机器人已到达目标点">
+            <button class="btn btn-primary" type="submit">语音播报</button>
+          </form>
+
+          <div class="speaker-quick" id="speaker-quick">
+            <button type="button" class="speaker-chip" data-text="机器人已启动">机器人已启动</button>
+            <button type="button" class="speaker-chip" data-text="已到达目标点">已到达目标点</button>
+            <button type="button" class="speaker-chip" data-text="请注意避让">请注意避让</button>
+            <button type="button" class="speaker-chip" data-text="任务完成">任务完成</button>
+          </div>
+
+          <p class="speaker-hint" id="speaker-hint">等待音箱状态…</p>
+        </div>
+      </div>
+    </section>
+
     <aside class="panel modules-panel">
       <div class="panel-head">
         <div>
@@ -655,7 +705,7 @@
   <footer class="footer">
     <span>RUSH-MOG · EDGE DIGITAL TWIN CONSOLE</span>
     <span id="footer-status">DISCONNECTED</span>
-    <span>API: /api/modules · /api/body · /ros/health · /v1/health</span>
+    <span>API: /api/modules · /api/body · /api/speaker · /ros/health</span>
   </footer>
 
   <div id="scrim" class="scrim" hidden></div>
@@ -683,6 +733,6 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="dashboard.js?v=20261114g"></script>
+  <script src="dashboard.js?v=20261114h"></script>
 </body>
 </html>

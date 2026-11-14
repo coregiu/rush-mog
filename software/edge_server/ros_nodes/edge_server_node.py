@@ -41,6 +41,7 @@ from tf2_ros import TransformBroadcaster
 
 from edge_server.core.body_drive import BodyDriveConfig, twist_to_body_command
 from edge_server.core.odometry import MecanumGeometry, WheelOdometry, wheel_names
+from edge_server.core.speaker import SpeakerError, SpeakerManager
 from edge_server.edge_control import (
     BodyTelemetry,
     MotionState,
@@ -212,6 +213,7 @@ class EdgeServerNode(Node):
         web_cfg = dict(edge_cfg.get("web") or {})
         camera_cfg = dict(edge_cfg.get("camera") or {})
         motion_cfg = dict(edge_cfg.get("motion") or {})
+        speaker_cfg = dict(edge_cfg.get("speaker") or {})
 
         self.started_monotonic = time.monotonic()
         self.hostname = socket.gethostname()
@@ -254,6 +256,8 @@ class EdgeServerNode(Node):
                 ),
             ),
         )
+        if "speaker_volume" in saved:
+            speaker_cfg["volume"] = saved.get("speaker_volume")
         keepalive_ms = _int_or(
             saved.get("motion_keepalive_ms"),
             _int_or(motion_cfg.get("keepalive_ms"), 200),
@@ -270,6 +274,27 @@ class EdgeServerNode(Node):
         self._event_last_at = 0.0
         self._event_last_key = ""
         self._last_ros_event_command = ""
+
+        # 蓝牙音箱：自动连接 + 语音播报；配置缺失/禁用时不影响底盘控制。
+        try:
+            self.speaker = SpeakerManager(
+                speaker_cfg,
+                on_event=self._on_speaker_event,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().error(f"初始化音箱服务失败，已禁用: {exc}")
+            self.speaker = SpeakerManager({"enabled": False})
+        self.create_subscription(
+            String,
+            self.speaker.say_topic,
+            self.on_say,
+            10,
+        )
+        self.pub_audio_status = self.create_publisher(
+            String,
+            self.speaker.status_topic,
+            10,
+        )
 
         self.odom_frame = str(base_cfg.get("odom_frame", "odom"))
         self.base_frame = str(base_cfg.get("base_frame", "base_link"))
@@ -398,6 +423,12 @@ class EdgeServerNode(Node):
             self.on_keepalive_timer,
             clock=self._steady_clock,
         )
+        self._speaker_timer = self.create_timer(
+            1.0 / max(0.1, self.speaker.status_rate_hz),
+            self.on_speaker_timer,
+            clock=self._steady_clock,
+        )
+        self.speaker.start()
 
         self.get_logger().info(
             f"edge_server_node started: web={self.http.info()}, "
@@ -434,6 +465,7 @@ class EdgeServerNode(Node):
         payload = {
             "motion_keepalive_ms": self.motion.keepalive_ms,
             "stream_fps": self.stream_fps,
+            "speaker_volume": self.speaker.volume,
         }
         try:
             directory = os.path.dirname(self._state_file)
@@ -525,6 +557,99 @@ class EdgeServerNode(Node):
             "events": items,
             "server_time_ms": int(time.time() * 1000.0),
         }
+
+    # ------------------------------------------------------------- speaker
+    def _on_speaker_event(self, kind: str, text: str, status: str) -> None:
+        self._record_event(
+            str(kind or "speaker"),
+            str(text),
+            source="speaker",
+            status=str(status or "info"),
+        )
+
+    def on_say(self, msg: String) -> None:
+        """ROS ``/body/say``：文本 -> TTS -> 蓝牙音箱。"""
+        text = str(msg.data or "").strip()
+        if not text:
+            return
+        try:
+            self.speaker.say(text)
+        except (SpeakerError, ValueError) as exc:
+            self.get_logger().warn(f"say failed: {exc}")
+            self._record_event(
+                "speaker", f"语音播报被拒绝: {exc}", source="ros", status="warn"
+            )
+            return
+        self._record_event(
+            "speaker",
+            f"ROS 语音播报: {text[:60]}",
+            source="ros",
+            status="ok",
+        )
+
+    def on_speaker_timer(self) -> None:
+        # 未启用时不必伪造在线状态；health monitor 会报 unknown（可选设备）。
+        if not self.speaker.enabled:
+            return
+        payload = self.speaker.status()
+        self.pub_audio_status.publish(
+            String(data=json.dumps(payload, ensure_ascii=False))
+        )
+
+    def speaker_status(self) -> dict:
+        return self.speaker.status()
+
+    def handle_speaker(self, action: str, fields: Mapping[str, Any]) -> dict:
+        """``/api/speaker/*`` 的动作分发；异常由 HTTP 层转成 4xx/5xx。"""
+        name = str(action or "").strip().lower()
+        if name == "connect":
+            self.speaker.reconnect()
+            self._record_event(
+                "speaker", "手动触发蓝牙音箱连接", source="api", status="info"
+            )
+            return {
+                "ok": True,
+                "message": "已触发音箱连接",
+                "speaker": self.speaker.status(),
+            }
+        if name == "say":
+            text = fields.get("text", fields.get("message", ""))
+            try:
+                status = self.speaker.say(
+                    text, voice=str(fields.get("voice", "") or "")
+                )
+            except SpeakerError:
+                raise
+            except ValueError as exc:
+                raise ValueError(str(exc))
+            self._record_event(
+                "speaker",
+                f"语音播报已排队: {str(text)[:60]}",
+                source="api",
+                status="ok",
+            )
+            return {"ok": True, "message": "语音已加入播放队列", "speaker": status}
+        if name == "play":
+            status = self.speaker.play_file(fields.get("file", ""))
+            self._record_event(
+                "speaker",
+                f"音频播放已排队: {str(fields.get('file', ''))[:60]}",
+                source="api",
+                status="ok",
+            )
+            return {"ok": True, "message": "音频已加入播放队列", "speaker": status}
+        if name == "volume":
+            value = fields.get("volume", fields.get("value", ""))
+            status = self.speaker.set_volume(value)
+            self._save_state()
+            return {"ok": True, "message": "音量已更新", "speaker": status}
+        if name == "stop":
+            status = self.speaker.stop_playback()
+            self._record_event(
+                "speaker", "停止语音播放", source="api", status="info"
+            )
+            return {"ok": True, "message": "已停止播放", "speaker": status}
+        raise ValueError(f"未知音箱动作: {name}")
 
     # ------------------------------------------------------------- serial
     def _on_serial_state(self, connected: bool) -> None:
@@ -791,6 +916,7 @@ class EdgeServerNode(Node):
                 and (now - self._telemetry_mono) <= 2.0
             )
         health = self._ros_health()
+        speaker = self.speaker.status()
         return {
             "uptime_ms": int((now - self.started_monotonic) * 1000.0),
             "free_heap": int(_free_memory_bytes()),
@@ -803,6 +929,11 @@ class EdgeServerNode(Node):
             "encoder_ok": bool(fresh),
             "ros_status": str((health or {}).get("status", "unknown")),
             "ros_ready": bool((health or {}).get("ready", False)),
+            "speaker": speaker,
+            "speaker_connected": bool(speaker["connected"]),
+            "speaker_state": str(speaker["state"]),
+            "speaker_device": str((speaker.get("device") or {}).get("name", "")),
+            "audio_playing": bool((speaker.get("playback") or {}).get("playing", False)),
             "ip": self.ip_address,
             "hostname": self.hostname,
         }
@@ -895,6 +1026,7 @@ class EdgeServerNode(Node):
         now = time.monotonic()
         motion = self.motion.snapshot(now)
         health = self._ros_health() or {}
+        speaker = self.speaker.status()
         return {
             "motion_keepalive_ms": int(motion["keepalive_ms"]),
             "stream_fps": self.stream_fps,
@@ -914,6 +1046,13 @@ class EdgeServerNode(Node):
             "serial_baud": self.serial.baud,
             "ros_status": str(health.get("status", "unknown")),
             "ros_ready": bool(health.get("ready", False)),
+            "speaker_enabled": bool(speaker["enabled"]),
+            "speaker_connected": bool(speaker["connected"]),
+            "speaker_state": str(speaker["state"]),
+            "speaker_device": str((speaker.get("device") or {}).get("name", "")),
+            "speaker_volume": int((speaker.get("sink") or {}).get("volume", 0)),
+            "speaker_sink": str((speaker.get("sink") or {}).get("name", "")),
+            "audio_playing": bool((speaker.get("playback") or {}).get("playing", False)),
             "hostname": self.hostname,
             "ip": self.ip_address,
             "platform": self.platform_name,
@@ -938,7 +1077,8 @@ class EdgeServerNode(Node):
             f"serial={'on' if serial_ok else 'off'}, "
             f"ros={ros_status}, "
             f"camera={'on' if params['camera'] else 'off'}, "
-            f"base={'on' if params['motion_active'] else 'idle'}"
+            f"base={'on' if params['motion_active'] else 'idle'}, "
+            f"speaker={'on' if params['speaker_connected'] else params['speaker_state']}"
         )
         return {
             "id": "edge",
@@ -989,6 +1129,19 @@ class EdgeServerNode(Node):
                    "bool", "运行状态", False, "", "", "", ""),
             _param("motion_active", "运动保活中", _bool_literal(values["motion_active"]),
                    "bool", "运行状态", False, "", "", "", ""),
+            _param("speaker_connected", "蓝牙音箱连接",
+                   _bool_literal(values["speaker_connected"]),
+                   "bool", "音频", False, "", "", "", ""),
+            _param("speaker_state", "音箱状态", json.dumps(values["speaker_state"]),
+                   "string", "音频", False, "", "", "", ""),
+            _param("speaker_device", "音箱设备", json.dumps(values["speaker_device"]),
+                   "string", "音频", False, "", "", "", ""),
+            _param("speaker_sink", "音频输出", json.dumps(values["speaker_sink"]),
+                   "string", "音频", False, "", "", "", ""),
+            _param("speaker_volume", "音箱音量", values["speaker_volume"],
+                   "int", "音频", True, "%", "0", "100", "5"),
+            _param("audio_playing", "语音播放中", _bool_literal(values["audio_playing"]),
+                   "bool", "音频", False, "", "", "", ""),
         ]
         return {
             "ok": True,
@@ -1016,6 +1169,15 @@ class EdgeServerNode(Node):
                     raise ValueError("stream_fps 必须在 5..20")
                 with self._params_lock:
                     self._stream_fps = value
+                changed[name] = value
+            elif name == "speaker_volume":
+                value = _int_or(raw, -1)
+                if value < 0 or value > 100:
+                    raise ValueError("speaker_volume 必须在 0..100")
+                try:
+                    self.speaker.set_volume(value)
+                except SpeakerError as exc:
+                    raise ValueError(str(exc))
                 changed[name] = value
             else:
                 raise ValueError(f"参数不可修改: {name}")
@@ -1045,6 +1207,10 @@ class EdgeServerNode(Node):
     def destroy_node(self) -> None:
         try:
             self._send_command("0", force=True)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self.speaker.stop()
         except Exception:  # noqa: BLE001
             pass
         try:

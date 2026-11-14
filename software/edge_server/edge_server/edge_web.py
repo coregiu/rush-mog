@@ -370,6 +370,19 @@ class EdgeHttpApp:
             return 200, "ignored"
         return 200, "ok"
 
+    # ------------------------------------------------------------- speaker
+    def speaker_payload(self) -> dict:
+        handler = getattr(self.runtime, "speaker_status", None)
+        if handler is None:
+            raise RuntimeError("音箱功能未启用")
+        return handler()
+
+    def speaker_action(self, action: str, fields: Mapping[str, Any]) -> dict:
+        handler = getattr(self.runtime, "handle_speaker", None)
+        if handler is None:
+            raise RuntimeError("音箱功能未启用")
+        return handler(str(action or ""), fields)
+
     # ------------------------------------------------------------- static
     def _safe_path(self, root: str, request_path: str) -> Optional[str]:
         if not root:
@@ -556,6 +569,43 @@ class _EdgeRequestHandler(BaseHTTPRequestHandler):
             self._send_text(200, "stopped")
             return
 
+        if path.startswith("/api/speaker"):
+            action = path[len("/api/speaker") :].strip("/")
+            if action not in {"connect", "say", "play", "volume", "stop"}:
+                self._send_json(
+                    404,
+                    app.error_payload("not_found", "未知音箱操作"),
+                )
+                return
+            body = self._read_body()
+            if body is None:
+                return
+            fields = self._parse_fields(body)
+            if action == "say" and not fields.get("text"):
+                raw_text = body.decode("utf-8", "replace").strip()
+                if raw_text and not raw_text.startswith("{") and "=" not in raw_text:
+                    fields["text"] = raw_text
+            try:
+                payload = app.speaker_action(action, fields)
+            except ValueError as exc:
+                self._send_json(
+                    400, app.error_payload("invalid_speaker_request", str(exc))
+                )
+                return
+            except RuntimeError as exc:
+                self._send_json(
+                    503, app.error_payload("speaker_unavailable", str(exc))
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("speaker action failed")
+                self._send_json(
+                    500, app.error_payload("speaker_failed", f"音箱操作失败: {exc}")
+                )
+                return
+            self._send_json(200, payload)
+            return
+
         if path == "/api/modules/report":
             body = self._read_body()
             if body is None:
@@ -678,6 +728,27 @@ class _EdgeRequestHandler(BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 limit = 40
             self._send_json(200, handler(limit), head_only=head_only)
+            return
+
+        if path == "/api/speaker":
+            try:
+                payload = app.speaker_payload()
+            except RuntimeError as exc:
+                self._send_json(
+                    503,
+                    app.error_payload("speaker_unavailable", str(exc)),
+                    head_only=head_only,
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("speaker status failed")
+                self._send_json(
+                    500,
+                    app.error_payload("speaker_failed", f"音箱状态不可用: {exc}"),
+                    head_only=head_only,
+                )
+                return
+            self._send_json(200, payload, head_only=head_only)
             return
 
         if path == "/api/modules":
