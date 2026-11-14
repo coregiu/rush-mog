@@ -33,11 +33,11 @@
 /* 编码器每输出轴一圈的计数（四倍频后）。JGB37-520 常见 11PPR、1:30。 */
 #define ENCODER_CPR 1320
 
-/* 轮子直径 96mm（半径 48mm，与 ROS 底盘参数一致）。 */
-#define ENCODER_WHEEL_DIAMETER_MM 96
+/* 轮子直径 125mm（半径 62.5mm，与 ROS 底盘参数一致）。 */
+#define ENCODER_WHEEL_DIAMETER_MM 125
 
 /* 每个计数对应的里程，单位 0.1um：pi * 直径 / CPR * 10000。
- * 96mm 轮、1320 CPR 时约为 2285。 */
+ * 125mm 轮、1320 CPR 时约为 2945。 */
 #define ENCODER_UM_X10_PER_COUNT \
     ((ENCODER_WHEEL_DIAMETER_MM * 31416 + ENCODER_CPR / 2) / ENCODER_CPR)
 

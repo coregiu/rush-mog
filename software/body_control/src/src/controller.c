@@ -11,6 +11,7 @@
 #include <controller.h>
 #include "task_manager.h"
 #include "encoder_sensor.h"
+#include "cliff_sensor.h"
 // the map of command to module
 const char command_module_map[COMMANDS_LENGTH][2] = {{COMMAND_STOP,          MODULE_MOTOR_DIRECT},
                                                       {COMMAND_RUN,          MODULE_MOTOR_DIRECT},
@@ -70,6 +71,10 @@ void init_modules()
      * 配成串口复用功能。后初始化的一方生效，否则 PA2 会被 USART2 抢走，
      * 左前编码器 A 相读数全错。 */
     encoder_sensor_init();
+
+    /* 悬崖模块占用 PB3/PB4，初始化时会关闭 JTAG（保留 SWD）。
+     * 放在最后初始化，确保没有其他模块再把这两个脚配成别的功能。 */
+    cliff_sensor_init();
 }
 
 /**
@@ -92,6 +97,16 @@ void execute_command(struct command_context *command_context)
     }
     
     command_context->module = command_module_map[cmd_seq][1];
+
+    /* 悬崖保护：左前/右前任一传感器触发时，只放行停车（'0'）和后退（'2'）。
+     * 串口、语音和测试序列产生的运动命令最终都会经过这里；电机执行层
+     * 还有一道 motor_direct_executor_set_inhibit() 兜底。 */
+    if (command_context->module == MODULE_MOTOR_DIRECT &&
+        !cliff_sensor_command_allowed(exe_cmd))
+    {
+        command_context->commands[0] = COMMAND_STOP;
+        exe_cmd = COMMAND_STOP;
+    }
 
     switch (command_context->module)
     {
