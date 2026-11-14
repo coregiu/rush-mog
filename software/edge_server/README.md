@@ -1,171 +1,523 @@
-# 远程控制中心说明
-远程控制中心是基于ESP32-S3实现的网页版手柄控制，ESP32-S3通过 UART1（GPIO19=TX、GPIO20=RX）连接主控 STM32 的 USART3，将操作指令下发到主控，进而控制小车。
-使用手机或其他移动设备连接ESP32-S3的WIFI，使用网页进行操作。
+# edge_server（ROS2：Pi Edge Server + VLA + SLAM + 导航 + 目标搜索 + 健康检查）
 
-## 功能特性
-- **实时视频流**: 通过摄像头实时传输视频画面
-- **YOLO物体识别**: 支持实时物体检测，自动框选并标注物体名称和置信度
-- **语音控制**: 支持语音识别，通过语音命令控制小车
-- **手柄控制**: 完整的PS2风格虚拟手柄控制
+设计文档：[`docs/DESIGN.md`](docs/DESIGN.md)。
+代码结构与调用链：[`docs/CODE_MAP.md`](docs/CODE_MAP.md)。
+健康检查接口契约：[`docs/HEALTHCHECK.md`](docs/HEALTHCHECK.md)。
+部署与发布说明：[`docs/DEPLOY.md`](docs/DEPLOY.md)。
+**实机启停/日志/排障：[`docs/OPERATIONS.md`](docs/OPERATIONS.md)。**
+硬件方案与缺口分析：[`hardware/SLAM_NAV.md`](../../hardware/SLAM_NAV.md)。
 
-## 端口说明
-- `80`：网页、静态文件、`/sdcard/*`、`/cmd`（控制）、`/stop`、`/status`
-- `8080`：独立 MJPEG 视频流（与 HTTP 80 分离，避免推流阻塞控制）
+本包在 v1 的 VLA 推理/安全/反向操作之上，补齐：
 
-`/status` 返回 JSON，包含运行时间、剩余堆/PSRAM、摄像头/SD 状态和当前是否有持续运动（`motion_active`）。
+- **SLAM 建图**：slam_toolbox 消费、地图保存/加载、前沿提取；
+- **定位**：ICM-20948 + 轮式里程计 EKF、AMCL/TF、定位健康度与初始位姿；
+- **自主导航**：Nav2 或内置直航，目标校验、停滞检测、超时/急停；
+- **目标搜索**：颜色/YOLO 检测、激光测距、map 投影、前沿探索、确认、接近；
+- **速度仲裁**：VLA/Nav2/反向/安全统一到唯一 `/cmd_vel`；
+- **Pi Edge Server**：80 端口网页/API、8080 MJPEG、树莓派直连 STM32 USART3（115200 ASCII）、
+  网页手动控制与 ROS `/cmd_vel` 共用串口出口；旧 ESP32 HTTP 桥仅保留历史兼容；
+- **健康检查**：ROS 节点/话题 + 相机/雷达/IMU/麦克风/音箱/机械臂等设备，
+  HTTP 供 Pi 上的 Edge Server/dashboard 代理，另有 ROS 话题/服务。
 
-控制通道直接复用网页的 80 端口，用 `POST /cmd` 发送纯文本命令（`button:up:down`、`stick:left-analog:up:5`），不再占用 81 端口。浏览器只在按下/松开（摇杆为按下/拖动/松开）时发命令，按住期间不再发心跳；ESP32 每 200ms 把当前运动命令重发给 STM32，用来喂 STM32 的 800ms 看门狗，直到收到松开/停止命令。
+验证状态（ROS2 Humble，本仓库）：
 
-调试时可以直接用 curl 发命令（按住类命令会一直保持，直到发送停止命令）：
+| 项目 | 结果 |
+|---|---|
+| `colcon build --packages-select custom_msgs edge_server` | 通过 |
+| `pytest tests -q` | 94 passed |
+| `tests/end_to_end_check.py` | 7/7 passed |
+| `tests/slam_nav_check.py` + `fake_slam_robot.py` | 6/6 passed |
+
+> VLA 仍是规则桩（无模型权重）；当前 STM32 ASCII 固件已由 `edge_server_node` 直连，若需二进制闭环再按 `DESIGN.md §6.13` 的 legacy 小节升级；
+> Nav2/建图参数是起步值，需实车标定。
+
+---
+
+## 1. 环境
+
+- Ubuntu 22.04 + ROS2 Humble
+- Python 3.10
+- 必需：`rclpy`、`sensor_msgs`、`nav_msgs`、`geometry_msgs`、`trajectory_msgs`、
+  `std_msgs`、`action_msgs`、`cv_bridge`、`message_filters`、`tf2_ros`、
+  `python3-numpy`、`python3-opencv`、`python3-yaml`、`python3-serial`
+- 可选：
+  - `python3-smbus2`（Pi I2C 直连 ICM-20948）
+  - `nav2_bringup`、`nav2_msgs`（Nav2 后端）
+  - `slam_toolbox`（建图）
+  - `robot_localization`（EKF）
+  - `ultralytics`（YOLO 检测）
+- 消息包：`software/custom_msgs`（ament_cmake）
+
+> 原 v1 依赖 `audio_common_msgs`、`torch`、`librosa`、`pydantic`、`loguru`，这些不在
+> Humble 基础安装中。现已改为自定义 `AudioData`、numpy 特征、rclpy/stdlib logging。
+
+---
+
+## 2. 构建
 
 ```bash
-curl -X POST --data 'button:up:down' http://192.168.4.1/cmd
-curl -X POST --data 'button:stop:down' http://192.168.4.1/cmd
+cd /path/to/rush-mog
+mkdir -p ~/rush_mog_ws/src
+ln -sfn "$(pwd)/software/edge_server" ~/rush_mog_ws/src/edge_server
+ln -sfn "$(pwd)/software/custom_msgs" ~/rush_mog_ws/src/custom_msgs
+
+cd ~/rush_mog_ws
+source /opt/ros/humble/setup.bash
+colcon build --packages-select custom_msgs edge_server --symlink-install
+source install/setup.bash
 ```
 
-松手、页面隐藏或关闭时页面会发停止命令。如果手机与 ESP32 断网且页面没有机会发停止，ESP32 会保持最后一条运动命令；重新打开页面（加载时会自动置停）或 `POST /stop` 即可停车。
+修改源码后重新 `colcon build --packages-select custom_msgs edge_server`。
 
+---
 
-# 控制按键说明
-左侧8方向按钮，提供8个方向指令。同时在上方提供左转、右转、快速调头按钮。按钮按下触发，松开停止。
-右侧4方向按钮，上下方向为加减速，点击生效，实现速度加减一档。 左右按钮为调方向按钮，通过PWM进行方向微调，按钮按下触发，松开恢复相同PWM。
-中间部分提供速度展示框。
+## 3. 启动
 
-![ps2](ps2.png)
+### 3.1 仿真/桌面联调（默认 config.yaml）
 
-# 语音控制使用说明
-## 功能介绍
-系统支持通过语音识别来控制小车，使用浏览器的Web Speech API实现语音转文字，然后将识别结果转换为控制指令。支持中英文语音命令。
-
-浏览器中设置麦克风权限：
-chrome://settings/content/microphone
-
-edge://settings/privacy/sitePermissions/allPermissions/microphone
-
-## 使用方法
-1. **启用语音控制**: 点击底部🎙️按钮（蓝色）开启语音识别
-2. **说出命令**: 清晰地说出控制命令
-3. **查看状态**: 状态栏会显示识别结果和执行的动作
-
-## 支持的语音命令
-
-### Edge浏览器配置
-因为麦克风需要https才能使用，因此需要特殊配置权限才可以用。
-打开edge浏览器输入： edge://flags/#unsafely-treat-insecure-origin-as-secure
-在 Insecure origins treated as secure 项的可用栏中输入 http://192.168.4.1，并设置已可用。
-打开edge浏览器输入：http://192.168.4.1   点击地址左侧不安全项，选择 此网站权限/麦克风 —> 已允许。
-
-### 方向控制
-| 中文命令 | 英文命令 | 功能 |
-|---------|---------|------|
-| 前进 | forward / go | 向前移动 |
-| 后退 | backward / back | 向后移动 |
-| 向左 | left | 向左移动 |
-| 向右 | right | 向右移动 |
-| 停止 / 停 | stop | 停止所有动作 |
-
-### 动作按钮
-| 中文命令 | 英文命令 | 功能 |
-|---------|---------|------|
-| 三角 | triangle | 按下三角键 |
-| 方块 | square | 按下方块键 |
-| 圆形 | circle | 按下圆形键 |
-| 叉 / X | cross / x | 按下叉键 |
-
-### 肩键和功能键
-| 命令 | 功能 |
-|------|------|
-| L1 / R1 / L2 / R2 | 按下对应肩键 |
-| 开始 / start | 按下开始键 |
-| 选择 / select | 按下选择键 |
-
-## 注意事项
-- 语音识别需要麦克风权限，请允许浏览器访问麦克风
-- 建议在安静环境下使用，以提高识别准确率
-- 支持Chrome、Edge、Firefox等现代浏览器
-- 语音控制开启后会自动持续监听，再次点击按钮可关闭
-
-# YOLO物体识别使用说明
-## 功能介绍
-系统集成了基于TensorFlow.js的COCO-SSD物体检测模型，可在浏览器端实时识别视频流中的物体。支持识别80种常见物体类别，包括：
-- 人物(person)、车辆(car, truck, bus)、动物(cat, dog, bird)等
-- 日常物品(cell phone, cup, chair, table)等
-
-## 使用方法
-1. **开启摄像头**: 点击顶部"RUSH-MOG"Logo启动视频流
-2. **启用YOLO**: 点击底部右侧的🎯按钮（绿色）开启物体识别
-3. **查看检测结果**: 
-   - 识别到的物体会被彩色方框标记
-   - 方框上方显示物体类别和置信度（如"person 85%"）
-   - 左下角状态栏显示当前检测到的物体信息
-
-## ⚠️ 离线使用重要说明
-由于ESP32的LittleFS存储空间有限（16MB），无法存储完整的AI模型文件（约5-10MB）。COCO-SSD模型需要从外部服务器下载权重文件。
-
-### 解决方案：
-
-#### 方案一：预先缓存模型（推荐）
-1. 首次使用时，将设备连接到互联网
-2. 打开网页，点击YOLO按钮加载模型
-3. 模型会被浏览器缓存，之后可以在离线环境使用
-4. 浏览器缓存位置：
-   - Chrome: `chrome://settings/siteData`
-   - 缓存通常在IndexedDB中
-
-#### 方案二：部署模型到本地服务器
-1. 下载COCO-SSD模型文件到本地服务器：
-   ```
-   模型地址: https://storage.googleapis.com/tfjs-models/savedmodel/ssd_lite_mobilenet_v2/
-   需要下载的文件:
-   - model.json
-   - group1-shard1of1.bin (权重文件)
-   ```
-2. 修改`data/index.html`中的模型加载代码：
-   ```javascript
-   // 将模型URL改为您的本地服务器地址
-   yoloModel = await cocoSsd.load({ 
-       modelUrl: 'https://your-local-server.com/models/ssd_lite_mobilenet_v2' 
-   });
-   ```
-
-#### 方案三：使用手机热点
-1. 用手机开启热点并连接ESP32
-2. 手机同时保持移动数据/WiFi连接互联网
-3. 首次加载模型后，浏览器会缓存模型文件
-
-### 注意事项
-- 首次开启YOLO时需要下载模型文件（约5MB），请耐心等待"Loading model..."完成
-- 物体识别在浏览器端运行，会消耗一定的设备性能
-- 如果模型加载失败，会弹出详细的错误信息和解决方案
-- 关闭视频流时，YOLO会自动停止检测
-- 建议使用Chrome浏览器，其对TensorFlow.js支持最好
-# 开发环境搭建说明
-
+```bash
+ros2 launch edge_server edge_server.launch.py
+# 或指定配置：
+ros2 launch edge_server edge_server.launch.py config_file:=/path/to/config.yaml
 ```
-步骤 1：安装必要的工具
-安装VS Code
-安装Python 3.7+（确保勾选 "Add Python to PATH"）
-安装 Git（Windows / Mac）
 
-步骤 2：安装 PlatformIO 插件
-打开 VS Code
-进入扩展面板（左侧菜单或 Ctrl+Shift+X）
-搜索 "PlatformIO" 并安装
+启动核心节点（可选节点按 launch 参数裁剪）：
 
-步骤 3：开发编译：
-点击vscode最下侧 √ 按钮进行编译。（或用 ctrl + alt + B 快捷键）
+```bash
+# 只跑核心 VLA 链路
+ros2 launch edge_server edge_server.launch.py \
+  start_perception:=false start_navigation:=false start_object_search:=false \
+  start_map_manager:=false start_localization:=false
+```
 
-步骤 4：上传index.html文件
-打开左侧在插件安装下方的PlatformIO头像图标，在di_mini/platform中选择 "Upload Filesystem Image"进行执行，上传文件。
+### 3.2 实车（robot.yaml + Pi Edge Server 直连 STM32）
 
-步骤 5: 烧录程序
-将ESP8266板子使用USB线连接到电脑。
-点击vscode最下侧 -> 按钮进行编译。
+```bash
+ros2 launch edge_server robot_bringup.launch.py
+# IMU 直连 Pi I2C 时：
+ros2 launch edge_server robot_bringup.launch.py start_imu:=true
+# 指定配置：
+ros2 launch edge_server robot_bringup.launch.py config_file:=/path/to/robot.yaml
+```
 
-步骤 6：监控串口
-点击vscode最下侧 插头图标的 Serial Monitor 按钮进行编译。
+`robot_bringup.launch.py` 默认启动 `edge_server_node`（`base_transport:=edge_serial`）：
+- 80 端口提供手柄页、dashboard、`/cmd`、`/status`、`/api/*`；8080 提供 MJPEG；
+- 树莓派 UART 直连 STM32 USART3，115200 8N1，发送 ASCII 方向+PWM 命令，
+  解析 `$B,...` 四轮编码器遥测；
+- 发布 `/odom`、`/joint_states`、`/base/status`；订阅 `/cmd_vel` 并量化成
+  `方向+PWM` 命令；
+- 网页按钮/摇杆按下时下发一次、松开/停止时再下发一次，默认不周期性重发
+  （`edge.motion.resend_manual=true` 可恢复旧行为）；ROS `raw:` 命令保留
+  PWM 第二字节，按 `keepalive_ms` 刷新并带 1s 租约；网页手动控制优先于 ROS 导航，
+  直到网页松开/停止；
+- `/cmd_vel` 超时、急停或 STM32 遥测超时都会自动停车。
 
-步骤 7：手机连接wifi进行页面访问
-在手机WIFI中找到RUSH-MOG，连接后，打开浏览器，输入192.168.4.1，即可访问到页面。
+串口 udev 规则（示例 `/etc/udev/rules.d/99-rush-mog.rules`）：
+```
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="rush_base"
+```
+`robot.yaml` 的 `base.port` 可改为 `/dev/rush_base`；并确认 `python3-serial` 已安装。
 
+80 端口绑定权限二选一：
+```bash
+# 使用 systemd 时由 root 启动，或：
+sudo setcap cap_net_bind_service=+ep /usr/bin/python3
+```
+
+网络：树莓派用 `hostapd` + `dnsmasq` 提供 `RUSH-MOG` AP（`192.168.4.1`），
+或接入现有局域网；手机/PC 打开 `http://<pi-ip>/`，视频流为
+`http://<pi-ip>:8080/stream`。
+
+其他启动前确认：
+- 激光驱动已发布 `/scan`；
+- 相机驱动已发布 `/camera/image_raw`（Edge Server 订阅并转成 MJPEG）；
+- 12V/5V/6V 共地，急停释放。
+
+旧模式仍可用（不推荐）：
+```bash
+# 旧二进制串口桥（需把 robot.yaml 的 base.baud 改回 921600）
+ros2 launch edge_server robot_bringup.launch.py base_transport:=serial_binary
+# 旧 ESP32 HTTP 桥（需有 ESP32 固件/网络）
+ros2 launch edge_server robot_bringup.launch.py base_transport:=esp32_http
+```
+
+### 3.3 外部 SLAM/Nav2 栈（可选）
+
+```bash
+# 建图
+ros2 launch edge_server slam_stack.launch.py
+
+# 定位/导航（注意：Nav2 最终速度被重映射到 /nav/cmd_vel）
+ros2 launch edge_server nav2_stack.launch.py map:=$HOME/rush_mog/maps/rush_mog.yaml
+
+# EKF（单独启动）
+ros2 run robot_localization ekf_node --ros-args \
+  --params-file <install>/share/edge_server/config/ekf.yaml
+```
+
+若未安装 Nav2，`navigation.backend: auto` 会自动回退到内置直航，只需 `/scan`、`/center/pose`。
+
+---
+
+## 4. 节点
+
+| 节点 | 职责 |
+|---|---|
+| `center_bridge_node` | image/laser/odom 软同步；audio/joint/imu 最近值缓存 |
+| `vla_inference_node` | 多模态预处理 + VLA 规则桩，发布意图/结果 |
+| `action_generator_node` | 单步意图 → `/cmd_vel_raw`，发布前安全校验 |
+| `reverse_operation_node` | 急停/回退/机械臂复位/任务撤销/手动接管 → `/reverse/cmd_vel` |
+| `safety_manager_node` | 障碍/数据/电量/定位/急停 → `/center/safety_state`、`/safety/cmd_vel_override` |
+| `task_manager_node` | 状态机、`/center/execute_task`、`/center/execute_mission`、`/center/set_mode` |
+| `velocity_mux_node` | 多源速度仲裁 → `/cmd_vel` |
+| `localization_node` | 位姿选择、定位健康度、`/center/set_initial_pose` |
+| `map_manager_node` | `/map` 消费、前沿、`/center/map_control`、PGM/YAML 存图 |
+| `navigation_node` | `/center/navigate_to`，Nav2/直航后端 |
+| `target_detector_node` | 颜色/YOLO 检测、激光/bbox 测距、map 投影、跟踪 |
+| `object_search_node` | `/center/explore`、`/center/search_object` |
+| `edge_server_node` | Pi Edge Server：80 网页/API、8080 MJPEG、STM32 串口、`/odom`、`/joint_states`、`/base/status` |
+| `base_bridge_node` | 旧版 Pi ↔ STM32 二进制串口桥（legacy） |
+| `imu_node` | Pi I2C 直连 ICM-20948 → `/imu/data` |
+| `health_monitor_node` | 节点/设备健康、`/center/health`、`/center/healthcheck`、HTTP `:8090` |
+
+---
+
+## 5. 接口
+
+### 5.1 话题（主要）
+
+| 话题 | 类型 | 方向 |
+|---|---|---|
+| `/scan`、`/edge/radar` | `sensor_msgs/LaserScan` | 订阅 |
+| `/camera/image_raw`、`/edge/video` | `sensor_msgs/Image` | 订阅 |
+| `/edge/audio` | `custom_msgs/AudioData` | 订阅 |
+| `/odom`、`/robot/odometry` | `nav_msgs/Odometry` | 订阅 |
+| `/imu/data` | `sensor_msgs/Imu` | 订阅 |
+| `/joint_states` | `sensor_msgs/JointState` | 订阅 |
+| `/arm/joint_states` | `sensor_msgs/JointState` | 订阅（健康检查，待接入） |
+| `/body/audio_status` | `std_msgs/String` | 订阅（健康检查，待接入） |
+| `/battery_state` | `sensor_msgs/BatteryState` | 订阅 |
+| `/base/status` | `std_msgs/String` | 发布/订阅（STM32 遥测 JSON） |
+| `/map` | `nav_msgs/OccupancyGrid` | 订阅/发布 |
+| `/amcl_pose` | `geometry_msgs/PoseWithCovarianceStamped` | 订阅 |
+| `/center/synced_data` | `custom_msgs/SyncedSensorData` | 发布 |
+| `/center/robot_state` | `custom_msgs/RobotState` | 发布 |
+| `/center/action_intent` | `custom_msgs/ActionIntent` | 发布 |
+| `/center/inference_result` | `custom_msgs/InferenceResult` | 发布 |
+| `/center/status` | `custom_msgs/SystemStatus` | 发布 |
+| `/center/mission_status` | `custom_msgs/MissionStatus` | 发布 |
+| `/center/safety_state` | `custom_msgs/SafetyState` | 发布 |
+| `/center/map_info` | `custom_msgs/MapInfo` | 发布 |
+| `/center/frontiers` | `custom_msgs/FrontierList` | 发布 |
+| `/center/pose` | `geometry_msgs/PoseWithCovarianceStamped` | 发布 |
+| `/center/localization_status` | `custom_msgs/LocalizationStatus` | 发布 |
+| `/center/nav_status` | `custom_msgs/NavStatus` | 发布 |
+| `/center/target_detections` | `custom_msgs/TargetList` | 发布 |
+| `/center/search_status` | `custom_msgs/SearchStatus` | 发布 |
+| `/center/velocity_status` | `custom_msgs/VelocityMuxStatus` | 发布 |
+| `/center/health` | `custom_msgs/HealthStatus` | 发布（1 Hz，TRANSIENT_LOCAL） |
+| `/cmd_vel` | `geometry_msgs/Twist` | 发布（唯一最终出口） |
+| `/cmd_vel_raw` | `geometry_msgs/Twist` | 发布（VLA） |
+| `/nav/cmd_vel` | `geometry_msgs/Twist` | 发布（导航） |
+| `/reverse/cmd_vel` | `geometry_msgs/Twist` | 发布（反向） |
+| `/safety/cmd_vel_override` | `geometry_msgs/Twist` | 发布（安全） |
+| `/arm/trajectory` | `trajectory_msgs/JointTrajectory` | 发布 |
+| `/task/request` | `custom_msgs/TaskRequest` | 发布/订阅 |
+| `/center/mission_request` | `custom_msgs/TaskRequest` | 订阅 |
+
+### 5.2 服务
+
+| 服务 | 类型 | 说明 |
+|---|---|---|
+| `/center/set_mode` | `custom_msgs/SetMode` | `auto` / `manual` / `reverse` |
+| `/center/emergency_stop` | `custom_msgs/EmergencyStop` | 急停/解除 |
+| `/center/map_control` | `custom_msgs/MapControl` | `start`/`stop`/`save`/`load`/`reset` |
+| `/center/set_initial_pose` | `custom_msgs/SetInitialPose` | 设置 AMCL 初始位姿 |
+| `/center/healthcheck` | `custom_msgs/HealthCheck` | 全部/指定设备健康快照 |
+
+### 5.3 Action
+
+| Action | 说明 |
+|---|---|
+| `/center/execute_task` | VLA 单步；指令命中任务关键词时自动转长任务 |
+| `/center/execute_mission` | `map`/`explore`/`search`/`navigate`/`return_home` |
+| `/center/navigate_to` | 到点导航（Nav2/直航） |
+| `/center/explore` | 前沿探索到覆盖率 |
+| `/center/search_object` | 搜索目标并接近 |
+
+示例：
+
+```bash
+# 前进（VLA）
+ros2 action send_goal /center/execute_task custom_msgs/action/ExecuteTask \
+  "{task_id: demo1, instruction: 前进}" --feedback
+
+# 找杯子（自动转 search 长任务）
+ros2 action send_goal /center/execute_task custom_msgs/action/ExecuteTask \
+  "{task_id: find_cup, instruction: 找杯子}" --feedback
+
+# 建图并保存
+ros2 action send_goal /center/execute_mission custom_msgs/action/ExecuteMission \
+  "{mission_id: map1, mission_type: map, target_coverage: 0.9, save_map: true}" --feedback
+
+# 到点导航
+ros2 action send_goal /center/navigate_to custom_msgs/action/NavigateTo \
+  "{target_pose: {header: {frame_id: map}, pose: {position: {x: 1.0, y: 0.0}, orientation: {w: 1.0}}}, goal_id: g1, timeout_sec: 60.0}" --feedback
+
+# 搜索杯子
+ros2 action send_goal /center/search_object custom_msgs/action/SearchObject \
+  "{task_id: s1, target_label: cup, max_duration: 120.0}" --feedback
+```
+
+### 5.4 健康检查（供 Edge Server / dashboard）
+
+详细契约、字段语义和接入示例见 [`HEALTHCHECK.md`](HEALTHCHECK.md)。主接口：
+
+```bash
+# 详细健康（HTTP 200 只代表数据可读；机器健康看 body.status/healthy/ready）
+curl -s http://127.0.0.1:8090/ros/health | python3 -m json.tool
+
+# 存活/就绪探针
+curl -s http://127.0.0.1:8090/ros/healthz
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8090/ros/readyz
+
+# 单设备 / 不返回 metrics
+curl -s http://127.0.0.1:8090/ros/health/devices/lidar | python3 -m json.tool
+curl -s 'http://127.0.0.1:8090/ros/health?include_metrics=false' | python3 -m json.tool
+```
+
+参数查看/修改（运行时生效，重启回 YAML）：
+
+```bash
+curl -s http://127.0.0.1:8090/ros/params | python3 -m json.tool
+curl -X POST http://127.0.0.1:8090/ros/params \
+  -H 'Content-Type: application/json' \
+  -d '{"updates":{"publish_rate":2.0,"device.lidar.timeout_sec":2.0}}'
+```
+
+ROS 原生接口：
+
+```bash
+ros2 topic echo /center/health --once
+ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
+  "{device_ids: [camera, lidar], include_metrics: false}"
+```
+
+- 代码默认监听 `127.0.0.1:8090`；`robot.yaml` 也保持回环，由同机 Edge Server 代理；跨机监控再改 `0.0.0.0` 并设置 `health.http.api_key`。
+- 设备参数（频率/超时/必需）与 health monitor 参数可在 dashboard 的 ROS 参数抽屉直接修改。
+- 设备清单在 `health.devices` 配置：camera/lidar/imu/microphone/speaker/arm/base/battery/odom。
+- 音箱 `/body/audio_status`、机械臂 `/arm/joint_states` 当前无反馈时显示 `unknown`，不伪造 `ok`；
+  接入后无需改代码。
+- 整体状态：`ok` / `starting` / `degraded` / `error` / `disabled`；
+  `ready=true` 表示可接新任务（`ok`/`degraded` 且未急停）。
+
+### 5.5 Edge Server HTTP API（80/8080）
+
+手柄页、dashboard 和移动端只访问 Pi Edge Server：
+
+| 路径 | 说明 |
+|---|---|
+| `GET /`、`GET /dashboard.html` | 手柄页 / 数字孪生页面及静态资源 |
+| `POST /cmd` | 统一控制入口：`button:` / `stick:` / `raw:` |
+| `GET/POST /cmd-button`、`/cmd-stick`、`/stop` | 旧页面兼容接口 |
+| `GET /status` | Pi 运行状态、串口/ROS/相机/运动状态（含当前指令 `motion`） |
+| `GET /api/body` | STM32 编码器遥测快照 + 当前指令/来源/持续时长 |
+| `GET /api/events?limit=N` | 最近 N 条运行事件（命令、串口连接、急停、租约超时） |
+| `GET /api/modules` | Edge + 同机 ROS 子系统 + 外部模块（CENTER） |
+| `GET/POST /api/modules/edge/params` | Edge 参数（运动保活、图传帧率） |
+| `GET /api/modules/{id}/health|params` | 代理 ROS（同机）/CENTER（外部） |
+| `POST /api/modules/report` | CENTER 等外部模块上报（`edge`/`ros` 保留） |
+| `GET /stream`（8080） | ROS 相机的 MJPEG；80 端口返回 302 |
+
+完整 OpenAPI 定义见 [`software/api.yaml`](../api.yaml)；实现见
+`edge_server/edge_web.py`、`edge_server/edge_control.py` 和
+`ros_nodes/edge_server_node.py`。
+
+---
+
+## 6. 配置
+
+默认配置安装到 `share/edge_server/config/`：
+
+| 文件 | 用途 |
+|---|---|
+| `config.yaml` | 仿真/桌面默认；`/edge/*` 话题；`base.enabled=false`；Edge Web 使用 8081/8082 |
+| `robot.yaml` | 实车；`/scan`、`/camera/image_raw`；`base.transport=edge_serial`；Edge Web 80/8080 |
+| `ekf.yaml` | `robot_localization` |
+| `slam_toolbox.yaml` | `slam_toolbox` |
+| `nav2_params.yaml` | Nav2 Humble 起步配置 |
+
+关键参数：
+
+- `vla_engine.inference_rate` / `confidence_threshold`
+- `safety.obstacle_stop_distance` / `data_timeout_sec` / `battery_low_percent`
+- `localization.min_quality`
+- `map_manager.frontier_min_size` / `map_dir`
+- `navigation.backend`（auto/nav2/direct） / `stuck_timeout_sec`
+- `search.standoff_distance` / `confirm_hits` / `explore_coverage`
+- `velocity_mux.priorities`
+- `task_manager.execution_hold_sec`
+- `health.publish_rate` / `startup_grace_sec` / `strict_unknown`
+- `health.http.host` / `port` / `api_key`
+- `base.transport` / `port` / `baud` / `body_command.*`
+- `edge.web.port` / `stream_port` / `edge.camera.fps` / `edge.motion.keepalive_ms`
+- `health.devices.<id>` 的 `topic` / `message_type` / `expected_rate_hz` / `timeout_sec` / `required`
+
+---
+
+## 7. 本地联调与测试
+
+> **DDS 提示（WSL/容器/沙箱常见）**：如果节点/动作发现不稳定、`wait_for_server` 超时，
+> 可强制本机 UDP 发现：
+>
+> ```bash
+> export ROS_DOMAIN_ID=77
+> export ROS_LOCALHOST_ONLY=1
+> export FASTDDS_BUILTIN_TRANSPORTS=UDPv4
+> ```
+>
+> `RTPS_TRANSPORT_SHM ... Permission denied` 在沙箱中是已知噪声，不一定会阻断通信。
+
+### 7.1 单元测试
+
+```bash
+cd software/edge_server
+PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
+# 94 passed
+```
+
+单独跑健康检查（不依赖 ROS 图）：
+
+```bash
+PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests/test_health_monitor.py tests/test_health_http.py -q
+# 29 passed
+```
+
+### 7.2 VLA/安全端到端
+
+终端 A：
+
+```bash
+source ~/rush_mog_ws/install/setup.bash
+ros2 launch edge_server edge_server.launch.py
+```
+
+终端 B：
+
+```bash
+python3 tests/fake_edge_publisher.py
+```
+
+终端 C：
+
+```bash
+python3 tests/end_to_end_check.py
+# RESULT: 7/7 passed
+```
+
+### 7.3 SLAM/导航/搜索联调
+
+本联调不需要真实硬件，`fake_slam_robot.py` 会模拟地图/激光/位姿/定位/目标。
+
+终端 A：
+
+```bash
+export ROS_HOME=/tmp/roshome ROS_LOG_DIR=/tmp/roslog
+ros2 launch edge_server edge_server.launch.py \
+  config_file:=$(pwd)/tests/config_test.yaml \
+  start_perception:=false start_localization:=false
+```
+
+> 必须关闭 `localization_node`，因为 `fake_slam_robot` 自己发布
+> `/center/localization_status`；两个源会互相覆盖质量值。
+
+终端 B：
+
+```bash
+python3 tests/fake_slam_robot.py
+```
+
+终端 C：
+
+```bash
+python3 tests/slam_nav_check.py
+# RESULT: 6/6 passed
+```
+
+覆盖：直航到点、探索覆盖率、搜索 cup、地图保存/加载、`ExecuteTask "找杯子"`、
+`ExecuteMission map`。
+
+### 7.4 常用调试命令
+
+```bash
+ros2 topic echo /center/map_info --once
+ros2 topic echo /center/frontiers --once
+ros2 topic echo /center/localization_status
+ros2 topic echo /center/nav_status
+ros2 topic echo /center/target_detections
+ros2 topic echo /center/health --once
+ros2 topic echo /cmd_vel
+curl -s http://127.0.0.1:8090/ros/health | python3 -m json.tool
+curl -s http://127.0.0.1:8090/ros/health/devices/camera | python3 -m json.tool
+ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck "{}"
+ros2 service call /center/map_control custom_msgs/srv/MapControl "{command: save, map_name: test}"
+ros2 service call /center/emergency_stop custom_msgs/srv/EmergencyStop "{trigger: true}"
+```
+
+---
+
+## 8. 实车落地步骤
+
+1. **计算平台**：Pi 4B/5 或 Orin Nano 装 Ubuntu 22.04 + ROS2 Humble。
+2. **激光**：LD19/LD06 接 USB，驱动发布 `/scan`。
+3. **编码器 + 主控**：升级 STM32F103RCT6/F411，4 路编码器 + 4 路 PWM + 轮速 PID。
+4. **ICM-20948**：Pi I2C（`imu.enabled=true`）或 STM32 转发（旧 `base_bridge_node`）。
+5. **EKF**：`robot_localization` 融合 `/odom` + `/imu/data`，确认 TF。
+6. **SLAM**：`slam_stack.launch.py` + `ExecuteMission map`，保存地图。
+7. **定位**：AMCL/map_server，设置初始位姿。
+8. **导航/搜索**：Nav2 或直航；目标检测/搜索。
+9. **安全**：硬件急停、INA226、悬崖/碰撞、看门狗。
+10. **健康检查**：`robot_bringup.launch.py` 已启动 `health_monitor_node`；确认
+    `curl http://127.0.0.1:8090/ros/health` 返回 `status=ok`，dashboard 经 Edge Server 读取。
+
+硬件选型、接线、引脚冲突、标定与验收见 [`hardware/SLAM_NAV.md`](../../hardware/SLAM_NAV.md)。
+
+---
+
+## 9. 当前限制
+
+1. **VLA 为规则桩**：未包含模型权重/GPU 推理；替换 `VLAEngine._load_model/predict` 即可。
+2. **STM32 固件仍为 ASCII**：Pi Edge Server 已直连 ASCII 协议；`DESIGN.md §6.13` 的二进制协议尚未在固件实现。
+3. **Nav2 参数起步值**：需实车调 `robot_radius`、速度、膨胀半径、DWB critics。
+4. **无深度相机**：目标距离靠激光/bbox 高度；遮挡/高度变化精度有限。
+5. **磁力计需校准**：ICM-20948 受电机干扰时只慢速校正，不硬切航向。
+6. **单地图/单楼层**：未实现多地图切换/电梯/多层。
+7. **动态目标**：搜索假设目标基本静止；移动目标需预测/重规划。
+8. **颜色检测仅演示**：真实场景建议 YOLO/深度相机/Orin Nano。
+9. **健康反馈缺口**：音箱 `/body/audio_status`、机械臂 `/arm/joint_states` 尚未发布，
+   健康接口显示 `unknown`；接入后自动变为 `ok`/`degraded`/`error`。
+
+---
+
+## 10. 目录
+
+```text
+software/edge_server/          # ROS 包根目录
+├── edge_server/               # Python 包
+│   ├── config/                # config.yaml / robot.yaml / ekf.yaml / slam_toolbox.yaml / nav2_params.yaml
+│   ├── core/                  # 纯算法，可单测（含 health_monitor.py）
+│   ├── drivers/               # ICM-20948
+│   ├── edge_control.py        # 按钮/摇杆/运动保活/STM32 遥测纯逻辑
+│   ├── edge_web.py            # Edge 网页/API/MJPEG（stdlib）
+│   ├── http_health.py         # 健康检查 HTTP 网关（stdlib）
+│   └── utils/
+├── ros_nodes/                 # 16 个 ROS2 节点（含 edge_server_node / health_monitor_node）
+├── web/                       # 手柄页、dashboard、静态资源
+├── launch/                    # edge_server / robot_bringup / slam_stack / nav2_stack
+├── tests/                     # 单元 + 仿真 + 联调（含 test_edge_*.py / test_health_*.py）
+├── DESIGN.md
+├── HEALTHCHECK.md             # 健康检查接口契约（HTTP + ROS）
+├── README.md
+├── package.xml
+└── setup.py
 ```

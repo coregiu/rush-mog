@@ -10,6 +10,8 @@
 
 #include <controller.h>
 #include "task_manager.h"
+#include "encoder_sensor.h"
+#include "cliff_sensor.h"
 // the map of command to module
 const char command_module_map[COMMANDS_LENGTH][2] = {{COMMAND_STOP,          MODULE_MOTOR_DIRECT},
                                                       {COMMAND_RUN,          MODULE_MOTOR_DIRECT},
@@ -39,9 +41,6 @@ const char command_module_map[COMMANDS_LENGTH][2] = {{COMMAND_STOP,          MOD
                                                       {COMMAND_AUDIO_PLAY,   MODULE_AUDIO},
                                                       {COMMAND_UNKNOWN,      MODULE_UNKNOWN}};
 
-static BaseType_t priority = 2;
-static BaseType_t *const pxHigherPriorityTaskWoken = &priority;
-
 void init_protocols()
 {
     init_command_led_module();
@@ -62,7 +61,20 @@ void init_modules()
 
     motor_pwm_executor.init();
     arm_roboot_executor.init();
-    audio_executor.init();
+
+    /* 音频播放已关闭（JQ6500 不初始化、不开机播放）。
+     * audio_executor.c 的代码全部保留，需要恢复时把下面一行取消注释即可。 */
+    // audio_executor.init();
+
+    /* 必须放在 audio_receiver.init() 之后：
+     * 编码器占用 PA2/PA3(USART2 TX/RX)，而 audio_receiver 会把这两个脚重新
+     * 配成串口复用功能。后初始化的一方生效，否则 PA2 会被 USART2 抢走，
+     * 左前编码器 A 相读数全错。 */
+    encoder_sensor_init();
+
+    /* 悬崖模块占用 PB3/PB4，初始化时会关闭 JTAG（保留 SWD）。
+     * 放在最后初始化，确保没有其他模块再把这两个脚配成别的功能。 */
+    cliff_sensor_init();
 }
 
 /**
@@ -73,7 +85,7 @@ void init_modules()
  */
 void execute_command(struct command_context *command_context)
 {
-    LED = ~LED;
+    LED = !LED; // PC13 位带操作：写 0 亮、写 1 灭
     uchar exe_cmd = command_context->commands[0];
     uart_log_string_data("receive command: ");
     uart_log_data(exe_cmd);
@@ -85,6 +97,16 @@ void execute_command(struct command_context *command_context)
     }
     
     command_context->module = command_module_map[cmd_seq][1];
+
+    /* 悬崖保护：左前/右前任一传感器触发时，只放行停车（'0'）和后退（'2'）。
+     * 串口、语音和测试序列产生的运动命令最终都会经过这里；电机执行层
+     * 还有一道 motor_direct_executor_set_inhibit() 兜底。 */
+    if (command_context->module == MODULE_MOTOR_DIRECT &&
+        !cliff_sensor_command_allowed(exe_cmd))
+    {
+        command_context->commands[0] = COMMAND_STOP;
+        exe_cmd = COMMAND_STOP;
+    }
 
     switch (command_context->module)
     {
@@ -99,10 +121,12 @@ void execute_command(struct command_context *command_context)
         }
         motor_direct_executor.update_state(command_context);
 
+        /* 音频播放已关闭（代码保留，恢复时取消注释即可）：
         struct command_context audio_command_context = {0};
         audio_command_context.commands[0] = COMMAND_AUDIO_PLAY;
         audio_command_context.commands[1] = V8_START;
         audio_executor.update_state(&audio_command_context);
+        */
 
         break;
     case MODULE_MOTOR_PWM:
@@ -112,14 +136,15 @@ void execute_command(struct command_context *command_context)
         arm_roboot_executor.update_state(command_context);
         break;
     case MODULE_AUDIO:
-        audio_executor.update_state(command_context);
+        /* 音频播放已关闭（代码保留）：
+         * audio_executor.update_state(command_context); */
         break;
     case MODULE_RESET:
         reset_command_queue();
         motor_pwm_executor.reset();
         motor_direct_executor.reset();
         arm_roboot_executor.reset();
-        audio_executor.reset();
+        /* 音频播放已关闭（代码保留）：audio_executor.reset(); */
         break;
 
     default:
@@ -145,18 +170,19 @@ void reset_command_queue()
 
 void send_to_queue_isr(struct command_context *command)
 {
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
     if (command_queue == NULL)
     {
         uart_log_string_data("command queue is null");
         return;
     }
-    // BaseType_t xStatus = xQueueSend(command_queue, command, pdMS_TO_TICKS(100));
-    // BaseType_t xStatus = xQueueSendFromISR(command_queue, &(command->command), xTicksToWait);
-    BaseType_t xStatus = xQueueSendFromISR(command_queue, command, pxHigherPriorityTaskWoken);
-    if (xStatus != pdPASS)
-    {
-        uart_log_start_info("failed to send data"); //如果发送数据失败在这里进行错误处理
-    }
+
+    /* 中断上下文不要打印日志：uart_log 一旦恢复输出就是阻塞发送。 */
+    (void)xQueueSendFromISR(command_queue, command, &xHigherPriorityTaskWoken);
+
+    /* 让被唤醒的命令任务立即运行，不必等到下一个 SysTick。 */
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
 void send_to_queue(struct command_context *command)
@@ -177,17 +203,16 @@ void send_to_queue(struct command_context *command)
 
 void send_to_queue_front_isr(struct command_context *command)
 {
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
     if (command_queue == NULL)
     {
         uart_log_string_data("command queue is null");
         return;
     }
 
-    BaseType_t xStatus = xQueueSendToFrontFromISR(command_queue, command, pxHigherPriorityTaskWoken);
-    if (xStatus != pdPASS)
-    {
-        uart_log_start_info("failed to send data"); //如果发送数据失败在这里进行错误处理
-    }
+    (void)xQueueSendToFrontFromISR(command_queue, command, &xHigherPriorityTaskWoken);
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
 

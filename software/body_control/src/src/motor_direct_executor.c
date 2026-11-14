@@ -41,38 +41,40 @@ const char VEHICLE_STATE_LIST[13][8] = {
 
 enum vehicle_state current_car_status = STOP;
 
+/* 悬崖等安全保护：置位时禁止除 STOP/BACK 外的运动状态。 */
+static volatile uint8_t s_motion_inhibit = 0;
+
+void motor_direct_executor_set_inhibit(uint8_t inhibit)
+{
+    s_motion_inhibit = inhibit;
+}
+
 void exec_vehicle_state_update(enum vehicle_state run_state)
 {
-    if (current_car_status == run_state)
+    /* 与悬崖任务的急停互斥：这里保证“检查保护标志 + 写 8 路 IN”是原子的，
+     * 避免命令任务和悬崖任务并发时，后写的运动状态覆盖刚写入的 STOP。 */
+    taskENTER_CRITICAL();
+
+    if (s_motion_inhibit && run_state != STOP && run_state != BACK)
     {
-        return;
+        run_state = STOP;
     }
-    // uart_log_enter_char();
-    // uart_log_data(VEHICLE_STATE_LIST[run_state][LEFT_FRONT_1_POSITION] + 48);
-    IN1 = VEHICLE_STATE_LIST[run_state][LEFT_FRONT_1_POSITION];
 
-    // uart_log_data(VEHICLE_STATE_LIST[run_state][LEFT_FRONT_2_POSITION] + 48);
-    IN2 = VEHICLE_STATE_LIST[run_state][LEFT_FRONT_2_POSITION];
+    if (current_car_status != run_state)
+    {
+        IN1 = VEHICLE_STATE_LIST[run_state][LEFT_FRONT_1_POSITION];
+        IN2 = VEHICLE_STATE_LIST[run_state][LEFT_FRONT_2_POSITION];
+        IN3 = VEHICLE_STATE_LIST[run_state][LEFT_BACK_1_POSITION];
+        IN4 = VEHICLE_STATE_LIST[run_state][LEFT_BACK_2_POSITION];
+        IN5 = VEHICLE_STATE_LIST[run_state][RIGHT_FRONT_1_POSITION];
+        IN6 = VEHICLE_STATE_LIST[run_state][RIGHT_FRONT_2_POSITION];
+        IN7 = VEHICLE_STATE_LIST[run_state][RIGHT_BACK_1_POSITION];
+        IN8 = VEHICLE_STATE_LIST[run_state][RIGHT_BACK_2_POSITION];
 
-    // uart_log_data(VEHICLE_STATE_LIST[run_state][LEFT_BACK_1_POSITION] + 48);
-    IN3 = VEHICLE_STATE_LIST[run_state][LEFT_BACK_1_POSITION];
+        current_car_status = run_state;
+    }
 
-    // uart_log_data(VEHICLE_STATE_LIST[run_state][LEFT_BACK_2_POSITION] + 48);
-    IN4 = VEHICLE_STATE_LIST[run_state][LEFT_BACK_2_POSITION];
-
-    // uart_log_data(VEHICLE_STATE_LIST[run_state][RIGHT_FRONT_1_POSITION] + 48);
-    IN5 = VEHICLE_STATE_LIST[run_state][RIGHT_FRONT_1_POSITION];
-
-    // uart_log_data(VEHICLE_STATE_LIST[run_state][RIGHT_FRONT_2_POSITION] + 48);
-    IN6 = VEHICLE_STATE_LIST[run_state][RIGHT_FRONT_2_POSITION];
-
-    // uart_log_data(VEHICLE_STATE_LIST[run_state][RIGHT_BACK_1_POSITION] + 48);
-    IN7 = VEHICLE_STATE_LIST[run_state][RIGHT_BACK_1_POSITION];
-
-    // uart_log_data(VEHICLE_STATE_LIST[run_state][RIGHT_BACK_2_POSITION] + 48);
-    IN8 = VEHICLE_STATE_LIST[run_state][RIGHT_BACK_2_POSITION];
-
-    current_car_status = run_state;
+    taskEXIT_CRITICAL();
 }
 
 void goback()

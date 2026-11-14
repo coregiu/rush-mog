@@ -1,0 +1,66 @@
+# Rush-MOG Center Server 默认配置
+# 用法：python -m center_server --config config.yaml
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  # 非空时，/v1/infer、/v1/reset、/v1/warmup 需要：
+  #   Authorization: Bearer <api_key>  或  X-API-Key: <api_key>
+  api_key: ""
+  max_body_bytes: 16777216        # 16 MiB，含 base64 图像
+  max_image_bytes: 6291456        # 单张图像解码前上限 6 MiB
+  cors_allow_origin: "*"
+  request_timeout_sec: 30.0
+
+model:
+  backend: "smolvla"              # smolvla | stub（stub 仅联调）
+  path: "lerobot/smolvla_base"    # HF 仓库名或本地 checkpoint 目录
+  device: "auto"                  # auto | cpu | cuda | cuda:0 | mps
+  dtype: "auto"                   # auto=保持 checkpoint dtype；也可 float32/float16/bfloat16
+  local_files_only: false
+  trust_remote_code: false
+  require_processors: true        # SmolVLA 需要 LeRobot 预处理器做图像/语言/归一化
+  apply_postprocessor: true       # 若动作被重复反归一化，可关闭以排查
+  preload: false                  # true：启动即加载模型（占显存，但首请求更快）
+  reload_interval_sec: 10.0       # 加载失败后的重试间隔
+
+  # 模型 checkpoint 的相机键。加载后会被 checkpoint config 覆盖。
+  image_keys: ["camera1", "camera2", "camera3"]
+  # 请求相机名 -> 模型相机名；单目部署时 front 会复制到缺失的相机
+  image_aliases:
+    front: "camera1"
+    wrist: "camera2"
+  missing_image_policy: "copy_first"   # copy_first | zeros | error
+  require_images: true
+  require_state: false
+  state_dim: 6                         # 加载后会被 checkpoint config 覆盖
+  pad_state: true
+  chunk_size: 50                       # 加载后会被 checkpoint config 覆盖
+  n_action_steps: 1
+  stub_action: [0.1, 0.0, 0.0]
+
+action:
+  # raw：只返回模型动作；base_twist：前 3 维映射为 [vx, vy, wz]；
+  # hybrid：前 3 维速度 + 其余机械臂；joint：全部按机械臂关节。
+  # 注意：base_twist/hybrid 需要在本车上微调过的动作空间；lerobot/smolvla_base
+  #       是通用权重，动作空间取决于训练机器人，不能直接当底盘速度策略使用。
+  mode: "base_twist"
+  base_indices: [0, 1, 2]
+  normalized: true                # true：模型输出 [-1,1]，按 max_* 缩放
+  max_linear_x: 0.5               # m/s
+  max_linear_y: 0.4               # m/s
+  max_angular_z: 1.0              # rad/s
+  deadband: 0.0
+  invert: [false, false, false]   # 电机/坐标方向不一致时逐轴取反
+  arm_start: 3
+  joint_names: ["j1", "j2", "j3", "j4", "j5"]
+  joint_limits:
+    j1: [-3.14, 3.14]
+    j2: [-1.57, 2.09]
+    j3: [-1.57, 2.09]
+    j4: [-3.14, 3.14]
+    j5: [-3.14, 3.14]
+  round_digits: 6
+
+logging:
+  level: "INFO"

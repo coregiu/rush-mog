@@ -22,7 +22,7 @@ int main(void)
     uart_log_start_info();
     delay_ms(500);
 
-    LED = ~LED;
+    LED = !LED; // PC13 位带操作：写 0 亮、写 1 灭
     vTaskStartScheduler();
     while (1)
     {

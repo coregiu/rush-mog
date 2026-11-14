@@ -1,0 +1,26 @@
+# 联调用配置：不加载真实模型，返回固定动作，便于验证 HTTP/ROS 链路。
+# 用法：python -m center_server --config config.stub.yaml
+
+server:
+  host: "127.0.0.1"
+  port: 8000
+  api_key: ""
+
+model:
+  backend: "stub"
+  stub_action: [0.2, 0.0, 0.0]   # 归一化 vx=0.2 -> 0.1 m/s
+  image_keys: ["camera1"]
+  image_aliases:
+    front: "camera1"
+  require_images: false
+  state_dim: 6
+
+action:
+  mode: "base_twist"
+  normalized: true
+  max_linear_x: 0.5
+  max_linear_y: 0.4
+  max_angular_z: 1.0
+
+logging:
+  level: "DEBUG"

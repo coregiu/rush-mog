@@ -1,0 +1,13 @@
+# SmolVLA 真实推理依赖（Linux + NVIDIA GPU 推荐）
+# 先按 PyTorch 官网选择 CUDA 版本安装 torch，再安装本文件：
+#   pip install -r requirements-vla.txt
+-r requirements.txt
+
+torch>=2.2
+torchvision>=0.17
+# LeRobot 的 SmolVLA policy、processor pipeline 与模型加载
+lerobot[smolvla]>=0.4.0
+# Hugging Face 模型下载/缓存
+huggingface_hub>=0.24
+safetensors>=0.4
+accelerate>=0.30

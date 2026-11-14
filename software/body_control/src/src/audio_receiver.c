@@ -11,6 +11,10 @@
 #include <audio_receiver.h>
 #include "controller.h"
 
+/** @brief  初始化音频状态 暂不使用
+  * @param  无
+  * @retval 无
+  */
 void init_audio_state()
 {
     /* GPIO端口设置 */

@@ -1,0 +1,15 @@
+[Unit]
+Description=RUSH-MOG CENTER reporter -> Pi Edge Server (192.168.4.1)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/rush-mog/edge-link.env
+ExecStart=/usr/bin/python3 /opt/rush-mog/software/tools/edge_link.py --config /etc/rush-mog/center-link.yaml
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target

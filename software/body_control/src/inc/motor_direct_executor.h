@@ -51,5 +51,11 @@ enum vehicle_state
     TURN_OVER_R = 12
 };
 
+/**
+ * 运动安全封锁：置位后 exec_vehicle_state_update() 只允许 STOP/BACK，
+ * 其余运动状态强制改成 STOP。悬崖传感器触发时使用。
+ */
+void motor_direct_executor_set_inhibit(uint8_t inhibit);
+
 extern const struct module_command_executor motor_direct_executor;
 #endif

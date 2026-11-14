@@ -32,6 +32,11 @@
 
 #define DEFAULT_BOUND_RATE 9600
 
+/* 底盘链路（USART3 ↔ 树莓派 Edge Server）波特率。
+ * 必须与 edge_server/config/robot.yaml -> base.baud 保持一致；
+ * 音频 USART2(JQ6500) 仍使用 DEFAULT_BOUND_RATE=9600。 */
+#define BODY_UART_BAUD_RATE 115200
+
 #define MAX_COMMAND_QUEUE_SIZE 1000
 
 

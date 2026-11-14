@@ -1,0 +1,53 @@
+# robot_localization EKF：轮式里程计 + ICM-20948
+# 用法：
+#   ros2 run robot_localization ekf_node --ros-args \
+#     --params-file <install>/share/edge_server/config/ekf.yaml
+#
+# 坐标树：
+#   map --(AMCL)--> odom --(EKF)--> base_link
+# EKF 只发布 odom->base_link；map->odom 由 AMCL 发布。
+ekf_filter_node:
+  ros__parameters:
+    use_sim_time: false
+    frequency: 30.0
+    sensor_timeout: 0.1
+    two_d_mode: true
+    transform_time_offset: 0.0
+    transform_timeout: 0.0
+    print_diagnostics: true
+    publish_tf: true
+
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_link
+    world_frame: odom
+
+    # 轮式里程计：x, y, yaw, vx, vy, vyaw
+    # 顺序：x y z roll pitch yaw vx vy vz vroll vpitch vyaw ax ay az
+    odom0: /odom
+    odom0_config: [true, true, false,
+                   false, false, true,
+                   true, true, false,
+                   false, false, true,
+                   false, false, false]
+    odom0_queue_size: 10
+    odom0_differential: false
+    odom0_relative: false
+
+    # ICM-20948：yaw + yaw rate（磁力计受电机干扰时不建议融合 mag）
+    imu0: /imu/data
+    imu0_config: [false, false, false,
+                  false, false, true,
+                  false, false, false,
+                  false, false, true,
+                  false, false, false]
+    imu0_queue_size: 20
+    imu0_differential: false
+    imu0_relative: true
+    imu0_remove_gravitational_acceleration: true
+
+    # 噪声参数按实测调整；过大/过小都会导致 EKF 过度信任单一传感器
+    imu0_gyro_noise_density: 1.0e-4
+    imu0_gyro_random_walk: 1.0e-5
+    imu0_accel_noise_density: 1.0e-2
+    imu0_accel_random_walk: 1.0e-3

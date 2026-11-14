@@ -1,0 +1,88 @@
+# 仅用于 tests/slam_nav_check.py + fake_slam_robot.py 的联调配置。
+# 用法：
+#   ros2 launch edge_server edge_server.launch.py \
+#     config_file:=<repo>/software/edge_server/tests/config_test.yaml \
+#     start_perception:=false start_localization:=false
+edge_server:
+  map_manager:
+    map_frame: "map"
+    map_dir: "/tmp/rush_mog_maps"
+    default_map_name: "smoke_map"
+    map_id: "smoke"
+    publish_rate: 2.0
+    frontier_min_size: 3
+    frontier_max_count: 30
+    prefer_slam_toolbox: false
+  navigation:
+    backend: "direct"
+    default_timeout_sec: 30.0
+    tolerance_xy: 0.20
+    tolerance_yaw: 0.30
+    min_localization_quality: 0.30
+    require_scan: true
+    stuck_timeout_sec: 8.0
+    progress_min_m: 0.03
+    blocked_timeout_sec: 5.0
+    status_rate: 2.0
+    cmd_topic: "/nav/cmd_vel"
+    direct:
+      max_linear_speed: 0.35
+      max_angular_speed: 1.0
+      k_linear: 1.2
+      k_angular: 1.8
+      slow_radius: 0.6
+      min_linear: 0.04
+      holonomic: true
+      turn_in_place_rad: 0.8
+      obstacle_stop_distance: 0.35
+      obstacle_slow_distance: 0.8
+  search:
+    rate_hz: 5.0
+    confirm_hits: 2
+    confirm_time_sec: 0.2
+    standoff_distance: 0.6
+    approach_tolerance: 0.30
+    map_wait_timeout_sec: 10.0
+    target_lost_timeout_sec: 3.0
+    frontier_min_size: 3
+    max_frontier_distance: 15.0
+    blacklist_radius: 0.8
+    blacklist_sec: 30.0
+    replan_delay_sec: 0.3
+    min_confidence: 0.5
+    max_approach_failures: 3
+    default_max_duration_sec: 60.0
+    default_target_coverage: 0.30
+    feedback_interval_sec: 0.5
+    track_memory_sec: 2.0
+  perception:
+    enabled: false
+  base:
+    enabled: false
+  imu:
+    enabled: false
+  velocity_mux:
+    publish_rate: 20
+    priorities: {safety: 0, reverse: 1, teleop: 2, nav: 3, vla: 4}
+  safety:
+    obstacle_stop_distance: 0.35
+    obstacle_clear_distance: 0.55
+    data_timeout_sec: 2.0
+    scan_timeout_sec: 1.0
+  # SLAM/导航联调只启动 fake_slam_robot（发布 /scan + /center/safety_state），
+  # 因此这里只监控雷达，并关闭节点发现/HTTP，避免测试环境误报。
+  health:
+    enabled: true
+    startup_grace_sec: 3.0
+    safety_required: false
+    check_nodes: false
+    http:
+      enabled: false
+    devices:
+      lidar:
+        type: lidar
+        topic: "/scan"
+        message_type: "sensor_msgs/msg/LaserScan"
+        expected_rate_hz: 10.0
+        timeout_sec: 2.0
+        required: true
