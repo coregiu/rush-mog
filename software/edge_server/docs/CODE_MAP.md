@@ -239,7 +239,7 @@ Twist 量化规则（`core/body_drive.py`）：
 |---|---|
 | `web/index.html` | 手柄页；按钮/摇杆事件、`/cmd` 发送、stop beacon |
 | `web/ps2.js` / `ps2.css` | 手柄视觉与交互 |
-| `web/dashboard.html` / `dashboard.js` | 数字孪生/状态面板 |
+| `web/dashboard.html` / `dashboard.js` | 数字孪生：EDGE + ROS 2 合并节点、hardware/README BOM 的 11 个硬件模块矩阵 |
 | `web/audio.js` | 音频控制（与运动链路独立） |
 | `web/yolo.js` | 视觉检测展示 |
 

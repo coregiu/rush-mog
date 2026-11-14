@@ -20,24 +20,25 @@ const API = {
 };
 
 const MODULE_META = {
-  edge: { name: 'EDGE SERVER', subtitle: 'Raspberry Pi · 网页 / 底盘 / ROS 网关', glyph: 'E', order: 0 },
+  edge: { name: 'EDGE + ROS 2', subtitle: 'Raspberry Pi 4B · 网页/底盘 + 感知/导航/健康', glyph: 'E', order: 0 },
   ros: { name: 'ROS 2', subtitle: 'Edge 内 · 感知 / 导航 / 健康', glyph: 'R', order: 1 },
   center: { name: 'CENTER SERVER', subtitle: 'SmolVLA · 推理中心', glyph: 'C', order: 2 },
 };
 
-const DEVICE_META = {
-  camera: { name: '摄像头', glyph: 'CAM' },
-  lidar: { name: '雷达', glyph: 'LID' },
-  imu: { name: 'IMU', glyph: 'IMU' },
-  microphone: { name: '麦克风', glyph: 'MIC' },
-  speaker: { name: '音箱', glyph: 'SPK' },
-  arm: { name: '机械臂', glyph: 'ARM' },
-  base: { name: '底盘 / STM32', glyph: 'BASE' },
-  battery: { name: '电池', glyph: 'BAT' },
-  odom: { name: '里程计', glyph: 'ODOM' },
-};
-
-const DEFAULT_DEVICES = ['camera', 'lidar', 'imu', 'microphone', 'speaker', 'arm', 'base', 'battery', 'odom'];
+// hardware/README.md 的 BOM 清单（11 项）
+const HARDWARE_MODULES = [
+  { id: 'pi', name: '机载计算机', model: 'Raspberry Pi 4B', glyph: 'PI' },
+  { id: 'stm32', name: '控制单板', model: 'STM32F103C8T6', glyph: 'MCU' },
+  { id: 'lidar', name: '2D 激光雷达', model: 'D6 / LD19', glyph: 'LID' },
+  { id: 'camera', name: '深度相机', model: 'Astra Pro', glyph: 'CAM' },
+  { id: 'imu', name: '9 轴 IMU', model: 'ICM-20948', glyph: 'IMU' },
+  { id: 'cliff', name: '悬崖传感器', model: 'TCRT5000 ×2', glyph: 'CLF' },
+  { id: 'chassis', name: '麦轮底盘', model: 'JGB37-520 ×4', glyph: 'CHS' },
+  { id: 'motor', name: '电机驱动', model: 'L298N 四驱', glyph: 'DRV' },
+  { id: 'power', name: '电源转换', model: '12V → 5V / 3.3V', glyph: 'PWR' },
+  { id: 'mic', name: '全向麦克风', model: 'USB', glyph: 'MIC' },
+  { id: 'speaker', name: '蓝牙音箱', model: 'Bluetooth', glyph: 'SPK' },
+];
 
 const BODY_MOTORS = [
   { id: 'fl', name: '左前 FL' },
@@ -103,6 +104,7 @@ function escapeHtml(value) {
 }
 
 function numberOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
@@ -213,7 +215,40 @@ function moduleRegistry(id) {
   return state.modules[id] || null;
 }
 
+// EDGE 与 ROS 2 同机：合并成一张卡/一个节点显示，状态取两者中最差的。
+function edgeCombinedInfo() {
+  const edge = state.edge;
+  const ros = state.health.ros;
+  if (!edge && !ros) return null;
+  const status = worstStatus([
+    edge ? (edge.status || 'unknown') : 'unknown',
+    ros ? (ros.status || 'unknown') : 'unknown',
+  ]);
+  const rosSummary = (ros && ros.summary) || {};
+  const bits = [];
+  if (edge && edge.summary) bits.push(edge.summary);
+  if (ros) bits.push(`ROS 设备 ${rosSummary.ok || 0}/${rosSummary.total || 0}`);
+  return {
+    id: 'edge',
+    status,
+    rawStatus: status,
+    stale: false,
+    name: MODULE_META.edge.name,
+    version: (edge && edge.version) || (ros && ros.version) || '',
+    ip: (edge && edge.ip) || '',
+    summary: bits.join(' · ') || '等待 EDGE / ROS 数据',
+    uptimeSec: edge && edge.params && edge.params.uptime_ms
+      ? edge.params.uptime_ms / 1000
+      : (ros ? ros.uptime_sec : null),
+    health: ros,
+    registry: edge,
+    edge,
+    ros,
+  };
+}
+
 function moduleInfo(id) {
+  if (id === 'edge') return edgeCombinedInfo();
   const health = moduleHealth(id);
   const registry = moduleRegistry(id);
   if (!health && !registry) return null;
@@ -234,7 +269,7 @@ function moduleInfo(id) {
   };
 }
 
-function moduleIds() { return ['edge', 'ros', 'center']; }
+function moduleIds() { return ['edge', 'center']; }
 
 function overallStatus() {
   const statuses = moduleIds().map((id) => {
@@ -775,7 +810,7 @@ function renderAll() {
   renderModules();
   renderBody();
   renderTwin();
-  renderDevices();
+  renderHardware();
   renderTelemetry();
   renderSyncTime();
 }
@@ -831,11 +866,13 @@ function moduleMetrics(id, info) {
   const chips = [];
   if (id === 'edge') {
     const p = (state.edge && state.edge.params) || {};
-    chips.push(`MEM ${fmtBytes(p.free_heap)}`);
+    const health = info.health || state.health.ros;
+    const summary = (health && health.summary) || {};
     chips.push(`SERIAL ${p.serial_connected ? 'OK' : 'DOWN'}`);
     chips.push(`ROS ${p.ros_ready ? 'READY' : String(p.ros_status || '--').toUpperCase()}`);
+    chips.push(`DEV ${summary.ok || 0}/${summary.total || 0}`);
+    chips.push(`MEM ${fmtBytes(p.free_heap)}`);
     chips.push(`CAM ${p.camera ? 'ON' : 'OFF'}`);
-    chips.push(`MOTION ${p.motion_active ? 'ON' : 'IDLE'}`);
   } else if (id === 'ros') {
     const health = info.health;
     const summary = (health && health.summary) || {};
@@ -864,6 +901,9 @@ function renderModules() {
     const meta = MODULE_META[id];
     const info = moduleInfo(id);
     if (!info) {
+      const emptyHint = id === 'center'
+        ? 'CENTER 为可选推理节点；未上报时不影响 Edge / 底盘 / 网页。'
+        : '等待模块连接 RUSH-MOG Wi-Fi 并向 Edge Server 上报。';
       return `
         <article class="module-card" data-module="${id}" data-status="unknown">
           <div class="module-top">
@@ -874,7 +914,7 @@ function renderModules() {
             </div>
             <span class="status-chip status-unknown">${statusLabel('unknown')}</span>
           </div>
-          <p class="module-summary">等待模块连接 RUSH-MOG Wi-Fi 并向 Edge Server 上报。</p>
+          <p class="module-summary">${escapeHtml(emptyHint)}</p>
           <div class="module-actions">
             <button class="btn btn-ghost" type="button" data-action="params" data-module="${id}" disabled>参数</button>
             <button class="btn btn-ghost" type="button" data-action="raw" data-module="${id}" disabled>详情</button>
@@ -886,6 +926,11 @@ function renderModules() {
     const stale = info.stale ? '<span class="module-stale">缓存</span>' : '';
     const version = info.version ? `v${escapeHtml(info.version)}` : '';
     const ip = info.ip ? escapeHtml(info.ip) : '';
+    const actions = id === 'edge'
+      ? `<button class="btn" type="button" data-action="params" data-module="edge">Edge 参数</button>
+         <button class="btn btn-ghost" type="button" data-action="raw" data-module="ros">ROS 健康</button>`
+      : `<button class="btn" type="button" data-action="params" data-module="${id}">参数</button>
+         <button class="btn btn-ghost" type="button" data-action="raw" data-module="${id}">详情</button>`;
     return `
       <article class="module-card" data-module="${id}" data-status="${escapeHtml(info.status)}">
         <div class="module-top">
@@ -898,27 +943,184 @@ function renderModules() {
         </div>
         <p class="module-summary">${escapeHtml(info.summary || '无摘要')}</p>
         <div class="module-metrics">${chips}</div>
-        <div class="module-actions">
-          <button class="btn" type="button" data-action="params" data-module="${id}">参数</button>
-          <button class="btn btn-ghost" type="button" data-action="raw" data-module="${id}">详情</button>
-        </div>
+        <div class="module-actions">${actions}</div>
       </article>`;
   }).join('');
 
   list.innerHTML = cards || '<div class="empty-state">暂无模块上报</div>';
   const countEl = $('#module-count');
-  if (countEl) countEl.textContent = `${count} / 3`;
+  if (countEl) countEl.textContent = `${count} / ${moduleIds().length}`;
 }
 
-function deviceStatusMap() {
-  const map = {};
-  for (const id of DEFAULT_DEVICES) map[id] = 'unknown';
+function rosDevice(id) {
   const health = state.health.ros;
-  for (const device of (health && health.devices) || []) {
-    if (device && device.id) map[device.id] = device.status || 'unknown';
+  const devices = (health && health.devices) || [];
+  return devices.find((device) => device && device.id === id) || null;
+}
+
+function deviceMetricChips(device) {
+  const chips = [];
+  if (!device) return chips;
+  if (device.rate_hz != null && device.rate_hz >= 0) chips.push(`${fmtNumber(device.rate_hz)}Hz`);
+  const metrics = device.metrics || {};
+  if (metrics.width && metrics.height) chips.push(`${metrics.width}x${metrics.height}`);
+  if (metrics.percentage != null && metrics.percentage >= 0) chips.push(`${fmtNumber(metrics.percentage)}%`);
+  if (metrics.ranges != null) chips.push(`${metrics.ranges} rays`);
+  if (metrics.sample_rate) chips.push(`${metrics.sample_rate}Hz`);
+  if (device.age_sec != null && device.age_sec >= 0) chips.push(`AGE ${fmtNumber(device.age_sec)}s`);
+  return chips;
+}
+
+function deviceDetail(device, fallback) {
+  if (!device) return fallback;
+  const detail = String(device.detail || '').trim();
+  if (!detail) return fallback;
+  if (detail.includes('optional device not present')) return '未接入（可选设备）';
+  const stale = detail.match(/stale\s+([\d.]+)s/);
+  if (stale) return `数据超时 ${fmtNumber(stale[1])}s`;
+  return detail;
+}
+
+// hardware/README.md 的 11 个 BOM 模块 -> 状态 / 描述 / 指标
+function hardwareState(id) {
+  const p = (state.edge && state.edge.params) || {};
+  const body = state.body.latest || {};
+  const ros = state.health.ros || {};
+  const summary = ros.summary || {};
+
+  switch (id) {
+    case 'pi': {
+      const combined = edgeCombinedInfo();
+      const edgeStatus = state.edge ? (state.edge.status || 'unknown') : 'unknown';
+      return {
+        // 硬件层面只要 Edge API/进程在跑就算正常；ROS 设备缺失在 EDGE+ROS 卡和明细里体现
+        status: edgeStatus === 'error' ? 'error' : (state.edge ? 'ok' : 'unknown'),
+        detail: 'Web :80 · MJPEG :8080 · ROS :8090',
+        chips: [
+          `MEM ${fmtBytes(p.free_heap)}`,
+          `DEV ${summary.ok || 0}/${summary.total || 0}`,
+          `ROS ${statusLabel(combined ? combined.status : 'unknown')}`,
+        ],
+      };
+    }
+    case 'stm32': {
+      const serial = Boolean(p.serial_connected);
+      const live = Boolean(body.bodyLive);
+      return {
+        status: serial ? (live ? 'ok' : 'degraded') : 'error',
+        detail: serial
+          ? `${p.serial_port || '--'} @ ${p.serial_baud || '--'} · USART3`
+          : 'USART3 未连接',
+        chips: [
+          `UART3 ${p.serial_baud || '--'}`,
+          `BODY ${live ? 'LIVE' : '--'}`,
+          `ENC ${live ? 'LIVE' : '--'}`,
+        ],
+      };
+    }
+    case 'lidar': {
+      const device = rosDevice('lidar');
+      return {
+        status: device ? device.status : 'unknown',
+        detail: deviceDetail(device, '未接入 · 等待 /scan'),
+        chips: deviceMetricChips(device),
+      };
+    }
+    case 'camera': {
+      const device = rosDevice('camera');
+      const streaming = Boolean(p.camera);
+      const chips = deviceMetricChips(device);
+      if (!device && streaming) chips.unshift('MJPEG OK');
+      return {
+        status: device ? device.status : (streaming ? 'ok' : 'unknown'),
+        detail: deviceDetail(device, streaming ? 'MJPEG 可用' : '未接入 · 等待 /camera/image_raw'),
+        chips,
+      };
+    }
+    case 'imu': {
+      const device = rosDevice('imu');
+      return {
+        status: device ? device.status : 'unknown',
+        detail: deviceDetail(device, '未接入 · 等待 /imu/data'),
+        chips: deviceMetricChips(device),
+      };
+    }
+    case 'cliff':
+      return {
+        status: 'unknown',
+        detail: 'TCRT5000 ×2 · PB3/PB4 · 固件已启用，无独立回传',
+        chips: ['2 路', 'STOP/BACK', '无遥测'],
+      };
+    case 'chassis': {
+      const live = Boolean(body.bodyLive);
+      const wheels = Array.isArray(body.wheelSpeeds)
+        ? body.wheelSpeeds.map((value) => fmtNumber(value, 2)).join(' / ')
+        : '--';
+      return {
+        status: live ? 'ok' : (body.encoderOk ? 'degraded' : 'unknown'),
+        detail: 'JGB37-520 ×4 · 麦克纳姆轮 · 编码器 PA0~PA7',
+        chips: [
+          `ENC ${body.encoderOk ? 'OK' : (live ? 'LIVE' : '--')}`,
+          `WHEEL ${wheels}`,
+          `DIST ${fmtNumber(body.distance)} m`,
+        ],
+      };
+    }
+    case 'motor': {
+      const serial = Boolean(p.serial_connected);
+      return {
+        status: serial ? (body.bodyLive ? 'ok' : 'degraded') : 'error',
+        detail: 'L298N 四驱 · 8 路 IN · TIM3 PWM',
+        chips: ['L298N', '8 IN', '1 kHz'],
+      };
+    }
+    case 'power': {
+      const percent = numberOrNull(body.percent);
+      const voltage = numberOrNull(body.voltage);
+      const device = rosDevice('battery');
+      return {
+        status: percent != null
+          ? (percent < 20 ? 'degraded' : 'ok')
+          : (device ? device.status : 'unknown'),
+        detail: '12V → 5V / 3.3V · 电压未上报',
+        chips: [
+          voltage != null ? `VOLT ${fmtNumber(voltage, 2)}V` : 'VOLT --',
+          percent != null ? `BAT ${fmtNumber(percent)}%` : 'BAT --',
+          '12V',
+        ],
+      };
+    }
+    case 'mic': {
+      const device = rosDevice('microphone');
+      return {
+        status: device ? device.status : 'unknown',
+        detail: deviceDetail(device, '未接入 · USB 全向麦克风'),
+        chips: deviceMetricChips(device),
+      };
+    }
+    case 'speaker': {
+      const device = rosDevice('speaker');
+      return {
+        status: device ? device.status : 'unknown',
+        detail: deviceDetail(device, '未接入 · 蓝牙音箱'),
+        chips: deviceMetricChips(device),
+      };
+    }
+    default:
+      return { status: 'unknown', detail: '--', chips: [] };
   }
-  if (state.edge && map.camera === 'unknown') {
-    map.camera = state.edge.params && state.edge.params.camera ? 'ok' : 'degraded';
+}
+
+function hardwareInfo(id) {
+  const meta = HARDWARE_MODULES.find((item) => item.id === id)
+    || { id, name: id, model: '', glyph: '?' };
+  return { ...meta, ...hardwareState(id) };
+}
+
+function hardwareStatusMap() {
+  const map = {};
+  for (const module of HARDWARE_MODULES) {
+    map[module.id] = hardwareInfo(module.id).status;
   }
   return map;
 }
@@ -937,19 +1139,13 @@ function renderTwin() {
     link.dataset.status = statuses[link.dataset.link] || 'unknown';
   }
 
-  const devices = deviceStatusMap();
-  const health = state.health.ros;
-  const byId = {};
-  for (const device of (health && health.devices) || []) byId[device.id] = device;
-
+  const devices = hardwareStatusMap();
   for (const hotspot of $$('.hotspot')) {
     const id = hotspot.dataset.device;
-    const status = devices[id] || 'unknown';
-    hotspot.dataset.status = status;
-    const device = byId[id];
-    const detail = device ? `${device.detail || ''}${device.rate_hz >= 0 ? ` · ${fmtNumber(device.rate_hz)}Hz` : ''}` : statusLabel(status);
+    const info = hardwareInfo(id);
+    hotspot.dataset.status = devices[id] || 'unknown';
     const title = hotspot.querySelector('title');
-    if (title) title.textContent = `${id} · ${statusLabel(status)} · ${detail}`;
+    if (title) title.textContent = `${info.name} · ${statusLabel(info.status)} · ${info.detail}`;
   }
 
   const vehicle = $('.twin-vehicle');
@@ -967,45 +1163,33 @@ function renderTwin() {
   if (time) time.textContent = state.lastSync ? fmtTime(new Date(state.lastSync)) : '--:--:--';
 }
 
-function renderDevices() {
+function renderHardware() {
   const grid = $('#device-grid');
   if (!grid) return;
-  const health = state.health.ros;
-  const byId = {};
-  for (const device of (health && health.devices) || []) byId[device.id] = device;
-  const cards = DEFAULT_DEVICES.map((id) => {
-    const meta = DEVICE_META[id];
-    const device = byId[id];
-    const status = device ? device.status : (id === 'camera' && state.edge && state.edge.params ? (state.edge.params.camera ? 'ok' : 'degraded') : 'unknown');
-    const detail = device ? device.detail : '等待 ROS 上报';
-    const chips = [];
-    if (device) {
-      if (device.rate_hz != null && device.rate_hz >= 0) chips.push(`${fmtNumber(device.rate_hz)}Hz`);
-      if (device.age_sec != null && device.age_sec >= 0) chips.push(`AGE ${fmtNumber(device.age_sec)}s`);
-      const metrics = device.metrics || {};
-      if (metrics.width && metrics.height) chips.push(`${metrics.width}x${metrics.height}`);
-      if (metrics.percentage != null && metrics.percentage >= 0) chips.push(`${fmtNumber(metrics.percentage)}%`);
-      if (metrics.joint_count != null) chips.push(`${metrics.joint_count} joints`);
-      if (metrics.ranges != null) chips.push(`${metrics.ranges} rays`);
-      if (metrics.sample_rate) chips.push(`${metrics.sample_rate}Hz`);
-    }
+  let okCount = 0;
+  const cards = HARDWARE_MODULES.map((module) => {
+    const info = hardwareInfo(module.id);
+    if (info.status === 'ok') okCount += 1;
+    const chips = (info.chips || []).slice(0, 3)
+      .map((chip) => `<span class="metric-chip">${escapeHtml(chip)}</span>`)
+      .join('');
     return `
-      <article class="device-card" data-status="${escapeHtml(status)}" data-device-id="${id}">
+      <article class="device-card" data-status="${escapeHtml(info.status)}" data-hardware-id="${module.id}">
         <div class="device-head">
-          <div class="device-glyph">${escapeHtml(meta.glyph)}</div>
+          <div class="device-glyph">${escapeHtml(module.glyph)}</div>
           <div class="device-name">
-            <strong>${escapeHtml(meta.name)}</strong>
-            <span>${escapeHtml(device ? (device.type || id) : id)}</span>
+            <strong>${escapeHtml(module.name)}</strong>
+            <span>${escapeHtml(module.model)}</span>
           </div>
-          <span class="status-chip status-${escapeHtml(status)}">${escapeHtml(statusLabel(status))}</span>
+          <span class="status-chip status-${escapeHtml(info.status)}">${escapeHtml(statusLabel(info.status))}</span>
         </div>
-        <p class="device-detail">${escapeHtml(detail || statusLabel(status))}</p>
-        <div class="device-metrics">${chips.map((chip) => `<span class="metric-chip">${escapeHtml(chip)}</span>`).join('')}</div>
+        <p class="device-detail">${escapeHtml(info.detail || statusLabel(info.status))}</p>
+        <div class="device-metrics">${chips}</div>
       </article>`;
   }).join('');
   grid.innerHTML = cards;
   const count = $('#device-count');
-  if (count) count.textContent = `${Object.keys(byId).length} 个设备`;
+  if (count) count.textContent = `${okCount} / ${HARDWARE_MODULES.length} 正常`;
 }
 
 function telemetryCard(label, value, sub) {
@@ -1026,9 +1210,12 @@ function renderTelemetry() {
   const rosRuntime = ros.ros || {};
   const center = state.health.center || {};
   const model = center.model || {};
+  const hardwareOk = HARDWARE_MODULES.filter((module) => hardwareInfo(module.id).status === 'ok').length;
   const cards = [
-    telemetryCard('EDGE UPTIME', fmtDuration((edgeParams.uptime_ms || 0) / 1000), `mem ${fmtBytes(edgeParams.free_heap)}`),
-    telemetryCard('ROS DEVICES', `${rosSummary.ok || 0}/${rosSummary.total || 0}`, rosRuntime.missing_nodes && rosRuntime.missing_nodes.length ? `missing ${rosRuntime.missing_nodes.length} nodes` : 'all expected nodes'),
+    telemetryCard('EDGE + ROS 2', `DEV ${rosSummary.ok || 0}/${rosSummary.total || 0}`,
+      `serial ${edgeParams.serial_connected ? 'on' : 'off'} · mem ${fmtBytes(edgeParams.free_heap)}`),
+    telemetryCard('HARDWARE BOM', `${hardwareOk}/${HARDWARE_MODULES.length}`,
+      rosRuntime.missing_nodes && rosRuntime.missing_nodes.length ? `missing ${rosRuntime.missing_nodes.length} nodes` : 'hardware/README.md'),
     telemetryCard('SAFETY', ros.emergency_stop ? 'E-STOP' : (ros.status ? 'ARMED' : '--'), ros.safety && ros.safety.reason ? ros.safety.reason : 'no safety state'),
     telemetryCard('CENTER MODEL', model.loaded ? 'LOADED' : (center.status ? 'IDLE' : '--'), `${model.backend || '--'} · ${model.device || '--'}`),
     telemetryCard('STM32 SERIAL', edgeParams.serial_connected ? 'ONLINE' : 'OFFLINE', `${edgeParams.serial_port || '--'} @ ${edgeParams.serial_baud || '--'} bps`),

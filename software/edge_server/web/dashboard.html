@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#050914">
   <title>RUSH-MOG · 数字孪生监控</title>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
-  <link rel="stylesheet" href="dashboard.css">
+  <link rel="stylesheet" href="dashboard.css?v=20261114">
 </head>
 <body>
   <div class="ambient ambient-a"></div>
@@ -18,7 +18,7 @@
       <div class="brand-mark">R</div>
       <div class="brand-copy">
         <h1>RUSH-MOG <span>// DIGITAL TWIN</span></h1>
-        <p>上位机监控与配置 · EDGE (PI) / ROS 2 / CENTER</p>
+        <p>上位机监控与配置 · EDGE + ROS 2 / CENTER</p>
       </div>
     </div>
 
@@ -129,30 +129,22 @@
           <ellipse cx="380" cy="372" rx="236" ry="142" fill="url(#floorGlow)"/>
 
           <!-- connection links -->
-          <path class="data-link" data-link="edge" d="M 192 104 C 236 132, 256 174, 282 218"/>
-          <path class="data-link" data-link="ros" d="M 568 104 C 542 132, 526 176, 512 226"/>
-          <path class="data-link" data-link="center" d="M 568 462 C 532 444, 502 414, 474 384"/>
+          <path class="data-link" data-link="edge" d="M 250 132 C 286 158, 306 180, 330 206"/>
+          <path class="data-link" data-link="center" d="M 568 120 C 548 146, 528 182, 512 226"/>
 
-          <!-- module nodes -->
-          <g class="module-node" data-module="edge" transform="translate(40,44)">
-            <rect class="node-shell" width="152" height="76" rx="16"/>
-            <circle class="node-dot" cx="24" cy="24" r="6"/>
-            <text class="node-kicker" x="40" y="29">EDGE</text>
-            <text class="node-name" x="18" y="52">Raspberry Pi</text>
-            <text class="node-sub" x="18" y="66">网页 / 底盘 / ROS</text>
-            <circle class="node-wave" cx="24" cy="24" r="12"/>
-            <circle class="node-wave wave-2" cx="24" cy="24" r="22"/>
+          <!-- module nodes: EDGE + ROS 2 share one Raspberry Pi node -->
+          <g class="module-node" data-module="edge" transform="translate(40,36)">
+            <rect class="node-shell" width="300" height="96" rx="16"/>
+            <circle class="node-dot" cx="24" cy="26" r="6"/>
+            <text class="node-kicker" x="40" y="31">EDGE + ROS 2</text>
+            <text class="node-name" x="18" y="55">Raspberry Pi 4B</text>
+            <text class="node-sub" x="18" y="71">Web :80 · MJPEG :8080 · UART3 115200</text>
+            <text class="node-sub" x="18" y="84">ROS 2：感知 / 导航 / 健康 :8090</text>
+            <circle class="node-wave" cx="24" cy="26" r="12"/>
+            <circle class="node-wave wave-2" cx="24" cy="26" r="22"/>
           </g>
 
-          <g class="module-node" data-module="ros" transform="translate(560,44)">
-            <rect class="node-shell" width="160" height="76" rx="16"/>
-            <circle class="node-dot" cx="24" cy="24" r="6"/>
-            <text class="node-kicker" x="40" y="29">ROS 2</text>
-            <text class="node-name" x="18" y="52">Raspberry Pi</text>
-            <text class="node-sub" x="18" y="66">感知 / 导航 / 健康</text>
-          </g>
-
-          <g class="module-node" data-module="center" transform="translate(560,432)">
+          <g class="module-node" data-module="center" transform="translate(560,44)">
             <rect class="node-shell" width="160" height="76" rx="16"/>
             <circle class="node-dot" cx="24" cy="24" r="6"/>
             <text class="node-kicker" x="40" y="29">CENTER</text>
@@ -242,6 +234,7 @@
               <circle class="lidar-base" cx="380" cy="188" r="17"/>
               <circle class="lidar-core" cx="380" cy="188" r="7"/>
             </g>
+            <text class="hw-tag" x="380" y="150" text-anchor="middle">D6 LiDAR</text>
 
             <!-- arm -->
             <g class="component arm">
@@ -280,23 +273,33 @@
               <circle class="camera-lens" cx="572" cy="267" r="5.5"/>
               <path class="camera-mount" d="M 555 276 L 551 286"/>
             </g>
+            <text class="hw-tag" x="565" y="247" text-anchor="middle">ASTRA PRO</text>
 
-            <!-- electronics / battery -->
+            <!-- electronics / battery / motor driver -->
             <g class="component base">
               <rect class="chip chip-small" x="350" y="344" width="34" height="22" rx="4"/>
-              <text class="chip-label" x="367" y="358">PI</text>
+              <text class="chip-label" x="367" y="358">PI4</text>
               <rect class="chip chip-small" x="390" y="344" width="34" height="22" rx="4"/>
               <text class="chip-label" x="407" y="358">STM32</text>
+              <rect class="chip chip-small" x="390" y="368" width="40" height="12" rx="3"/>
+              <text class="chip-label" x="410" y="376">L298N</text>
             </g>
             <g class="component imu">
               <rect class="chip chip-small" x="436" y="322" width="20" height="16" rx="3"/>
               <text class="chip-label" x="446" y="333">IMU</text>
             </g>
+            <text class="hw-tag" x="446" y="315" text-anchor="middle">ICM-20948</text>
             <g class="component battery">
               <rect class="battery-body" x="432" y="346" width="80" height="16" rx="4"/>
               <rect class="battery-fill" x="437" y="350" width="54" height="8" rx="2"/>
               <rect class="battery-tip" x="512" y="351" width="4" height="6" rx="1.2"/>
             </g>
+            <text class="hw-tag" x="472" y="372" text-anchor="middle">12V</text>
+            <g class="component cliff">
+              <rect x="588" y="362" width="9" height="7" rx="2"/>
+              <rect x="588" y="372" width="9" height="7" rx="2"/>
+            </g>
+            <text class="hw-tag" x="592" y="392" text-anchor="middle">CLIFF</text>
             <text class="vehicle-label" x="378" y="336">RUSH-MOG</text>
 
             <!-- fender flares -->
@@ -327,49 +330,57 @@
               <circle class="hub" cx="506" cy="386" r="7"/>
             </g>
 
-            <!-- hotspots -->
+            <!-- hotspots: hardware BOM modules -->
             <g class="hotspot" data-device="lidar" transform="translate(380,188)" tabindex="0">
               <circle class="hotspot-halo" r="22"/><circle class="hotspot-dot" r="3.5"/>
-              <title>雷达 /scan</title>
+              <title>2D 激光雷达 · D6 /scan</title>
             </g>
             <g class="hotspot" data-device="camera" transform="translate(572,267)" tabindex="0">
               <circle class="hotspot-halo" r="14"/><circle class="hotspot-dot" r="3"/>
-              <title>摄像头 /camera/image_raw</title>
+              <title>深度相机 · Astra Pro /camera/image_raw</title>
             </g>
-            <g class="hotspot" data-device="microphone" transform="translate(306,322)" tabindex="0">
+            <g class="hotspot" data-device="mic" transform="translate(306,322)" tabindex="0">
               <circle class="hotspot-halo" r="13"/><circle class="hotspot-dot" r="3"/>
-              <title>麦克风 /audio/raw</title>
+              <title>全向麦克风 · USB /audio/raw</title>
             </g>
             <g class="hotspot" data-device="imu" transform="translate(446,330)" tabindex="0">
               <circle class="hotspot-halo" r="15"/><circle class="hotspot-dot" r="3"/>
-              <title>IMU /imu/data</title>
+              <title>9 轴 IMU · ICM-20948 /imu/data</title>
             </g>
             <g class="hotspot" data-device="speaker" transform="translate(226,330)" tabindex="0">
               <circle class="hotspot-halo" r="18"/><circle class="hotspot-dot" r="3"/>
-              <title>音箱 /body/audio_status</title>
+              <title>蓝牙音箱 · /body/audio_status</title>
             </g>
-            <g class="hotspot" data-device="arm" transform="translate(236,206)" tabindex="0">
-              <circle class="hotspot-halo" r="16"/><circle class="hotspot-dot" r="3"/>
-              <title>机械臂 /arm/joint_states</title>
+            <g class="hotspot" data-device="pi" transform="translate(367,355)" tabindex="0">
+              <circle class="hotspot-halo" r="14"/><circle class="hotspot-dot" r="3"/>
+              <title>机载计算机 · Raspberry Pi 4B（EDGE + ROS 2）</title>
             </g>
-            <g class="hotspot" data-device="base" transform="translate(367,355)" tabindex="0">
-              <circle class="hotspot-halo" r="18"/><circle class="hotspot-dot" r="3"/>
-              <title>底盘 / 电机 / STM32</title>
+            <g class="hotspot" data-device="stm32" transform="translate(407,355)" tabindex="0">
+              <circle class="hotspot-halo" r="14"/><circle class="hotspot-dot" r="3"/>
+              <title>控制单板 · STM32F103C8T6（USART3）</title>
             </g>
-            <g class="hotspot" data-device="battery" transform="translate(472,354)" tabindex="0">
-              <circle class="hotspot-halo" r="16"/><circle class="hotspot-dot" r="3"/>
-              <title>电池</title>
+            <g class="hotspot" data-device="motor" transform="translate(410,374)" tabindex="0">
+              <circle class="hotspot-halo" r="9"/><circle class="hotspot-dot" r="2.5"/>
+              <title>电机驱动 · L298N 四驱</title>
             </g>
-            <g class="hotspot" data-device="odom" transform="translate(272,386)" tabindex="0">
+            <g class="hotspot" data-device="cliff" transform="translate(592,370)" tabindex="0">
+              <circle class="hotspot-halo" r="10"/><circle class="hotspot-dot" r="2.5"/>
+              <title>悬崖传感器 · TCRT5000 ×2（PB3/PB4）</title>
+            </g>
+            <g class="hotspot" data-device="power" transform="translate(472,354)" tabindex="0">
+              <circle class="hotspot-halo" r="14"/><circle class="hotspot-dot" r="3"/>
+              <title>电源转换 · 12V → 5V / 3.3V</title>
+            </g>
+            <g class="hotspot" data-device="chassis" transform="translate(272,386)" tabindex="0">
               <circle class="hotspot-halo" r="20"/><circle class="hotspot-dot" r="3"/>
-              <title>里程计 /odom</title>
+              <title>麦轮底盘 · JGB37-520 ×4 / 编码器 PA0~PA7</title>
             </g>
           </g>
 
           <!-- module mini labels under twin -->
           <g class="twin-caption">
-            <text x="380" y="500" text-anchor="middle">RUSH-MOG · EDGE (RASPBERRY PI) · CENTERED MONITORING</text>
-            <text x="380" y="518" text-anchor="middle">EDGE (PI) → ROS 2 / CENTER → DIGITAL TWIN</text>
+            <text x="380" y="500" text-anchor="middle">RUSH-MOG · PI 4B (EDGE + ROS 2) · STM32 · D6 LIDAR · ASTRA PRO · ICM-20948</text>
+            <text x="380" y="518" text-anchor="middle">EDGE + ROS 2 → STM32 / SENSORS → DIGITAL TWIN</text>
           </g>
         </svg>
 
@@ -390,14 +401,14 @@
           <span class="eyebrow">MODULE REGISTRY</span>
           <h2>模块状态</h2>
         </div>
-        <span class="muted" id="module-count">0 / 3</span>
+        <span class="muted" id="module-count">0 / 2</span>
       </div>
       <div id="module-list" class="module-list"></div>
 
       <div class="topology-note">
-        <div class="topology-line"><span class="topo-node">PHONE</span><span class="topo-arrow">→</span><span class="topo-node">EDGE SERVER</span></div>
-        <div class="topology-line"><span class="topo-node">ROS 2 / CENTER</span><span class="topo-arrow">→</span><span class="topo-node">EDGE API</span></div>
-        <p>ROS 2 运行在同一台树莓派 Edge Server 内；CENTER 通过局域网/回环上报。页面只访问 Edge Server。</p>
+        <div class="topology-line"><span class="topo-node">PHONE</span><span class="topo-arrow">→</span><span class="topo-node">EDGE + ROS 2</span></div>
+        <div class="topology-line"><span class="topo-node">ROS 2</span><span class="topo-arrow">→</span><span class="topo-node">EDGE API</span></div>
+        <p>ROS 2 与 Edge Server 同机合并显示；CENTER 为可选推理节点。页面只访问 Edge Server。</p>
       </div>
     </aside>
 
@@ -495,10 +506,10 @@
     <section class="panel devices-panel">
       <div class="panel-head">
         <div>
-          <span class="eyebrow">EDGE / ROS DEVICE MATRIX</span>
-          <h2>设备健康矩阵</h2>
+          <span class="eyebrow">HARDWARE BOM MATRIX · hardware/README.md</span>
+          <h2>硬件模块状态</h2>
         </div>
-        <span class="muted" id="device-count">0 个设备</span>
+        <span class="muted" id="device-count">0 / 11 正常</span>
       </div>
       <div id="device-grid" class="device-grid"></div>
     </section>
@@ -535,6 +546,6 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="dashboard.js"></script>
+  <script src="dashboard.js?v=20261114"></script>
 </body>
 </html>
