@@ -1182,6 +1182,22 @@ function renderTwin() {
     if (title) title.textContent = `${info.name} · ${statusLabel(info.status)} · ${info.detail}`;
   }
 
+  for (const node of $$('.hw-node')) {
+    const id = node.dataset.hw;
+    const info = hardwareInfo(id);
+    node.dataset.status = info.status;
+    const state = node.querySelector('.hw-state');
+    if (state) state.textContent = statusLabel(info.status);
+    const name = node.querySelector('.hw-name');
+    const title = node.querySelector('title');
+    if (title) {
+      title.textContent = `${name ? name.textContent : info.name} · ${statusLabel(info.status)} · ${info.detail}`;
+    }
+    for (const link of $$(`.hw-link[data-hw="${id}"]`)) {
+      link.dataset.status = info.status;
+    }
+  }
+
   const vehicle = $('.twin-vehicle');
   if (vehicle) {
     const body = state.body.latest;

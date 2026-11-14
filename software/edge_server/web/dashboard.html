@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#050914">
   <title>RUSH-MOG · 数字孪生监控</title>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
-  <link rel="stylesheet" href="dashboard.css?v=20261114c">
+  <link rel="stylesheet" href="dashboard.css?v=20261114e">
 </head>
 <body>
   <div class="ambient ambient-a"></div>
@@ -56,7 +56,7 @@
       </div>
 
       <div class="twin-stage" id="twin-stage">
-        <svg id="twin-svg" viewBox="0 0 760 560" role="img" aria-label="RUSH-MOG 数字孪生车辆与模块状态">
+        <svg id="twin-svg" viewBox="-110 0 980 560" role="img" aria-label="RUSH-MOG 数字孪生车辆与模块状态">
           <defs>
             <linearGradient id="bodyGrad" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0" stop-color="#1e3a4c"/>
@@ -125,7 +125,7 @@
             </pattern>
           </defs>
 
-          <rect width="760" height="560" fill="url(#gridPattern)"/>
+          <rect x="-110" width="980" height="560" fill="url(#gridPattern)"/>
           <ellipse cx="380" cy="372" rx="236" ry="142" fill="url(#floorGlow)"/>
 
           <!-- connection links -->
@@ -150,6 +150,106 @@
             <text class="node-kicker" x="40" y="29">CENTER</text>
             <text class="node-name" x="18" y="52">SmolVLA</text>
             <text class="node-sub" x="18" y="66">推理中心 · :8000</text>
+          </g>
+
+          <!-- hardware module nodes: same visual language as EDGE / CENTER -->
+          <g class="hw-links" aria-hidden="true">
+            <path class="hw-bus" d="M 160 199 V 479"/>
+            <path class="hw-bus" d="M 630 199 V 479"/>
+            <path class="hw-link" data-hw="pi" d="M 60 199 H 160"/>
+            <path class="hw-link" data-hw="stm32" d="M 60 269 H 160"/>
+            <path class="hw-link" data-hw="imu" d="M 60 339 H 160"/>
+            <path class="hw-link" data-hw="cliff" d="M 60 409 H 160"/>
+            <path class="hw-link" data-hw="power" d="M 60 479 H 160"/>
+            <path class="hw-link" data-hw="lidar" d="M 630 199 H 700"/>
+            <path class="hw-link" data-hw="camera" d="M 630 269 H 700"/>
+            <path class="hw-link" data-hw="mic" d="M 630 339 H 700"/>
+            <path class="hw-link" data-hw="speaker" d="M 630 409 H 700"/>
+            <path class="hw-link" data-hw="chassis" d="M 630 479 H 700"/>
+            <path class="hw-link hw-link-main" d="M 160 330 H 184"/>
+            <path class="hw-link hw-link-main" d="M 616 330 H 630"/>
+          </g>
+
+          <g class="hw-node" data-hw="pi" transform="translate(-90,170)">
+            <rect class="hw-shell" width="150" height="58" rx="10"/>
+            <circle class="hw-dot" cx="14" cy="16" r="4"/>
+            <text class="hw-name" x="26" y="20">板载计算机</text>
+            <text class="hw-sub" x="14" y="37">Raspberry Pi 4B</text>
+            <text class="hw-state" x="14" y="51">未知</text>
+            <title>板载计算机 · Raspberry Pi 4B</title>
+          </g>
+          <g class="hw-node" data-hw="stm32" transform="translate(-90,240)">
+            <rect class="hw-shell" width="150" height="58" rx="10"/>
+            <circle class="hw-dot" cx="14" cy="16" r="4"/>
+            <text class="hw-name" x="26" y="20">STM 控制板</text>
+            <text class="hw-sub" x="14" y="37">STM32F103C8T6</text>
+            <text class="hw-state" x="14" y="51">未知</text>
+            <title>STM 控制板 · STM32F103C8T6</title>
+          </g>
+          <g class="hw-node" data-hw="imu" transform="translate(-90,310)">
+            <rect class="hw-shell" width="150" height="58" rx="10"/>
+            <circle class="hw-dot" cx="14" cy="16" r="4"/>
+            <text class="hw-name" x="26" y="20">陀螺仪</text>
+            <text class="hw-sub" x="14" y="37">ICM-20948</text>
+            <text class="hw-state" x="14" y="51">未知</text>
+            <title>陀螺仪 · ICM-20948</title>
+          </g>
+          <g class="hw-node" data-hw="cliff" transform="translate(-90,380)">
+            <rect class="hw-shell" width="150" height="58" rx="10"/>
+            <circle class="hw-dot" cx="14" cy="16" r="4"/>
+            <text class="hw-name" x="26" y="20">悬崖传感器</text>
+            <text class="hw-sub" x="14" y="37">TCRT5000 ×2</text>
+            <text class="hw-state" x="14" y="51">未知</text>
+            <title>悬崖传感器 · TCRT5000 ×2（PB3/PB4）</title>
+          </g>
+          <g class="hw-node" data-hw="power" transform="translate(-90,450)">
+            <rect class="hw-shell" width="150" height="58" rx="10"/>
+            <circle class="hw-dot" cx="14" cy="16" r="4"/>
+            <text class="hw-name" x="26" y="20">电源及转换板</text>
+            <text class="hw-sub" x="14" y="37">12V → 5V / 3.3V</text>
+            <text class="hw-state" x="14" y="51">未知</text>
+            <title>电源及转换板 · 12V → 5V / 3.3V</title>
+          </g>
+
+          <g class="hw-node" data-hw="lidar" transform="translate(700,170)">
+            <rect class="hw-shell" width="150" height="58" rx="10"/>
+            <circle class="hw-dot" cx="14" cy="16" r="4"/>
+            <text class="hw-name" x="26" y="20">雷达</text>
+            <text class="hw-sub" x="14" y="37">D6 · /scan</text>
+            <text class="hw-state" x="14" y="51">未知</text>
+            <title>2D 激光雷达 · D6 /scan</title>
+          </g>
+          <g class="hw-node" data-hw="camera" transform="translate(700,240)">
+            <rect class="hw-shell" width="150" height="58" rx="10"/>
+            <circle class="hw-dot" cx="14" cy="16" r="4"/>
+            <text class="hw-name" x="26" y="20">相机</text>
+            <text class="hw-sub" x="14" y="37">Astra Pro</text>
+            <text class="hw-state" x="14" y="51">未知</text>
+            <title>深度相机 · Astra Pro /camera/image_raw</title>
+          </g>
+          <g class="hw-node" data-hw="mic" transform="translate(700,310)">
+            <rect class="hw-shell" width="150" height="58" rx="10"/>
+            <circle class="hw-dot" cx="14" cy="16" r="4"/>
+            <text class="hw-name" x="26" y="20">麦克风</text>
+            <text class="hw-sub" x="14" y="37">USB 全向</text>
+            <text class="hw-state" x="14" y="51">未知</text>
+            <title>全向麦克风 · USB /audio/raw</title>
+          </g>
+          <g class="hw-node" data-hw="speaker" transform="translate(700,380)">
+            <rect class="hw-shell" width="150" height="58" rx="10"/>
+            <circle class="hw-dot" cx="14" cy="16" r="4"/>
+            <text class="hw-name" x="26" y="20">音箱</text>
+            <text class="hw-sub" x="14" y="37">Bluetooth</text>
+            <text class="hw-state" x="14" y="51">未知</text>
+            <title>蓝牙音箱 · Bluetooth</title>
+          </g>
+          <g class="hw-node" data-hw="chassis" transform="translate(700,450)">
+            <rect class="hw-shell" width="150" height="58" rx="10"/>
+            <circle class="hw-dot" cx="14" cy="16" r="4"/>
+            <text class="hw-name" x="26" y="20">电机·驱动·编码器</text>
+            <text class="hw-sub" x="14" y="37">L298N · JGB37 ×4</text>
+            <text class="hw-state" x="14" y="51">未知</text>
+            <title>电机 / L298N / JGB37-520 / 编码器 PA0~PA7</title>
           </g>
 
           <!-- ================= vehicle ================= -->
@@ -593,6 +693,6 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="dashboard.js?v=20261114c"></script>
+  <script src="dashboard.js?v=20261114e"></script>
 </body>
 </html>

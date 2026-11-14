@@ -629,6 +629,27 @@ body {
 .module-node[data-status="unknown"] .node-dot { fill: var(--unknown); }
 .module-node[data-status="unknown"] .node-shell { stroke-dasharray: 4 4; }
 
+.hw-links { pointer-events: none; }
+.hw-bus { fill: none; stroke: rgba(125, 211, 252, 0.12); stroke-width: 1; }
+.hw-link { fill: none; stroke: rgba(125, 211, 252, 0.09); stroke-width: 0.8; stroke-dasharray: 2 4; }
+.hw-link-main { stroke: rgba(34, 211, 238, 0.22); stroke-dasharray: none; }
+.hw-link[data-status="ok"] { stroke: rgba(34, 197, 94, 0.24); }
+.hw-link[data-status="degraded"] { stroke: rgba(245, 158, 11, 0.24); }
+.hw-link[data-status="error"] { stroke: rgba(239, 68, 68, 0.3); }
+.hw-node .hw-shell { fill: rgba(8, 19, 33, 0.9); stroke: rgba(125, 211, 252, 0.14); stroke-width: 1; transition: 0.2s; }
+.hw-node .hw-dot { fill: var(--unknown); transition: 0.2s; }
+.hw-node .hw-name { fill: #dceeff; font-family: var(--sans); font-size: 10px; font-weight: 600; letter-spacing: 0.02em; }
+.hw-node .hw-sub { fill: #5f7d94; font-family: var(--mono); font-size: 7px; letter-spacing: 0.02em; }
+.hw-node .hw-state { fill: #6f8ba0; font-family: var(--mono); font-size: 7px; letter-spacing: 0.06em; }
+.hw-node[data-status="ok"] .hw-dot { fill: var(--ok); filter: url(#glow); }
+.hw-node[data-status="ok"] .hw-shell { stroke: rgba(34, 197, 94, 0.25); }
+.hw-node[data-status="degraded"] .hw-dot { fill: var(--warn); filter: url(#glow); }
+.hw-node[data-status="degraded"] .hw-shell { stroke: rgba(245, 158, 11, 0.26); }
+.hw-node[data-status="error"] .hw-dot { fill: var(--err); filter: url(#glow); }
+.hw-node[data-status="error"] .hw-shell { stroke: rgba(239, 68, 68, 0.3); }
+.hw-node[data-status="unknown"] { opacity: 0.84; }
+.hw-node[data-status="unknown"] .hw-shell { stroke-dasharray: 3 4; }
+
 .data-link {
   fill: none;
   stroke: rgba(34, 211, 238, 0.26);
