@@ -320,8 +320,9 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
 | `GET /`、`GET /dashboard.html` | 手柄页 / 数字孪生页面及静态资源 |
 | `POST /cmd` | 统一控制入口：`button:` / `stick:` / `raw:` |
 | `GET/POST /cmd-button`、`/cmd-stick`、`/stop` | 旧页面兼容接口 |
-| `GET /status` | Pi 运行状态、串口/ROS/相机/运动状态 |
-| `GET /api/body` | STM32 编码器遥测快照 |
+| `GET /status` | Pi 运行状态、串口/ROS/相机/运动状态（含当前指令 `motion`） |
+| `GET /api/body` | STM32 编码器遥测快照 + 当前指令/来源/持续时长 |
+| `GET /api/events?limit=N` | 最近 N 条运行事件（命令、串口连接、急停、租约超时） |
 | `GET /api/modules` | Edge + 同机 ROS 子系统 + 外部模块（CENTER） |
 | `GET/POST /api/modules/edge/params` | Edge 参数（运动保活、图传帧率） |
 | `GET /api/modules/{id}/health|params` | 代理 ROS（同机）/CENTER（外部） |

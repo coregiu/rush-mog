@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#050914">
   <title>RUSH-MOG · 数字孪生监控</title>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
-  <link rel="stylesheet" href="dashboard.css?v=20261114">
+  <link rel="stylesheet" href="dashboard.css?v=20261114c">
 </head>
 <body>
   <div class="ambient ambient-a"></div>
@@ -395,22 +395,52 @@
       <div class="telemetry-row" id="telemetry-row"></div>
     </section>
 
-    <aside class="panel modules-panel">
+    <section class="panel ops-panel" id="ops-panel" data-source="idle">
       <div class="panel-head">
         <div>
-          <span class="eyebrow">MODULE REGISTRY</span>
-          <h2>模块状态</h2>
+          <span class="eyebrow">MOTION COMMAND · EVENT LOG</span>
+          <h2>当前指令与运行记录</h2>
         </div>
-        <span class="muted" id="module-count">0 / 2</span>
+        <div class="panel-meta">
+          <span class="status-chip status-unknown" id="ops-source">空闲</span>
+          <span class="led status-unknown" id="ops-led"></span>
+          <span id="ops-time">--:--:--</span>
+        </div>
       </div>
-      <div id="module-list" class="module-list"></div>
 
-      <div class="topology-note">
-        <div class="topology-line"><span class="topo-node">PHONE</span><span class="topo-arrow">→</span><span class="topo-node">EDGE + ROS 2</span></div>
-        <div class="topology-line"><span class="topo-node">ROS 2</span><span class="topo-arrow">→</span><span class="topo-node">EDGE API</span></div>
-        <p>ROS 2 与 Edge Server 同机合并显示；CENTER 为可选推理节点。页面只访问 Edge Server。</p>
+      <div class="ops-grid">
+        <div class="ops-current">
+          <div class="ops-main">
+            <span class="ops-code" id="ops-code">0</span>
+            <div class="ops-copy">
+              <strong id="ops-label">停止</strong>
+              <span id="ops-sub">等待指令</span>
+            </div>
+          </div>
+          <div class="ops-facts">
+            <div><span>来源</span><strong id="ops-fact-source">--</strong></div>
+            <div><span>PWM</span><strong id="ops-fact-pwm">--</strong></div>
+            <div><span>持续</span><strong id="ops-fact-age">--</strong></div>
+            <div><span>串口</span><strong id="ops-fact-serial">--</strong></div>
+          </div>
+          <div class="ops-live">
+            <span>轮速 <b id="ops-wheels">--</b></span>
+            <span>里程 <b id="ops-dist">--</b></span>
+            <span>底盘 <b id="ops-body">--</b></span>
+          </div>
+        </div>
+
+        <div class="ops-log">
+          <div class="ops-log-head">
+            <span>最近运行记录</span>
+            <span class="muted" id="ops-event-count" title="内存环形缓冲，最多 120 条；服务重启后清空">0 条</span>
+          </div>
+          <ol class="ops-events" id="ops-events">
+            <li class="ops-empty">暂无运行记录</li>
+          </ol>
+        </div>
       </div>
-    </aside>
+    </section>
 
     <section class="panel body-panel is-empty" id="body-panel" data-source="unknown">
       <div class="panel-head">
@@ -503,6 +533,23 @@
       </div>
     </section>
 
+    <aside class="panel modules-panel">
+      <div class="panel-head">
+        <div>
+          <span class="eyebrow">MODULE REGISTRY</span>
+          <h2>模块状态</h2>
+        </div>
+        <span class="muted" id="module-count">0 / 2</span>
+      </div>
+      <div id="module-list" class="module-list"></div>
+
+      <div class="topology-note">
+        <div class="topology-line"><span class="topo-node">PHONE</span><span class="topo-arrow">→</span><span class="topo-node">EDGE + ROS 2</span></div>
+        <div class="topology-line"><span class="topo-node">ROS 2</span><span class="topo-arrow">→</span><span class="topo-node">EDGE API</span></div>
+        <p>ROS 2 与 Edge Server 同机合并显示；CENTER 为可选推理节点。页面只访问 Edge Server。</p>
+      </div>
+    </aside>
+
     <section class="panel devices-panel">
       <div class="panel-head">
         <div>
@@ -546,6 +593,6 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="dashboard.js?v=20261114"></script>
+  <script src="dashboard.js?v=20261114c"></script>
 </body>
 </html>

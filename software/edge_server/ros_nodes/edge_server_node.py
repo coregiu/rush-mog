@@ -26,6 +26,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from collections import deque
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import rclpy
@@ -262,6 +263,13 @@ class EdgeServerNode(Node):
             raw_lease_sec=float(motion_cfg.get("raw_lease_sec", 1.0)),
             resend_manual=bool(motion_cfg.get("resend_manual", False)),
         )
+        # 运行事件环形缓冲：最新在前，最多 120 条；服务重启后清空。
+        self._events = deque(maxlen=120)
+        self._events_lock = threading.Lock()
+        self._event_seq = 0
+        self._event_last_at = 0.0
+        self._event_last_key = ""
+        self._last_ros_event_command = ""
 
         self.odom_frame = str(base_cfg.get("odom_frame", "odom"))
         self.base_frame = str(base_cfg.get("base_frame", "base_link"))
@@ -323,6 +331,7 @@ class EdgeServerNode(Node):
             self._on_serial_state,
             reconnect_sec=float((base_cfg.get("edge_serial") or {}).get("reconnect_sec", 2.0)),
         )
+        self._record_event("system", "Edge Server 启动", source="system", status="ok")
         if self.serial_enabled:
             self.serial.start()
 
@@ -442,6 +451,81 @@ class EdgeServerNode(Node):
         with self._params_lock:
             return int(self._stream_fps)
 
+    # ------------------------------------------------------------- events
+    def _record_event(
+        self,
+        kind: str,
+        text: str,
+        *,
+        command: str = "",
+        source: str = "",
+        status: str = "info",
+    ) -> None:
+        """写入运行事件环形缓冲（最新在前）。"""
+        with self._events_lock:
+            self._event_seq += 1
+            self._events.appendleft(
+                {
+                    "id": int(self._event_seq),
+                    "ts_ms": int(time.time() * 1000.0),
+                    "kind": str(kind)[:16],
+                    "text": str(text)[:160],
+                    "command": str(command)[:8],
+                    "source": str(source)[:16],
+                    "status": str(status)[:16],
+                }
+            )
+
+    def _record_command_event(
+        self, command: str, source: str, *, delivered: bool = True
+    ) -> None:
+        text = str(command or "").strip()
+        if not text:
+            return
+        now = time.monotonic()
+        key = f"{source}:{text}:{1 if delivered else 0}"
+        if key == self._event_last_key and (now - self._event_last_at) < 0.8:
+            return
+        # 摇杆/ROS 高频连续指令限流；停车命令始终记录。
+        if text != "0" and (now - self._event_last_at) < 0.2:
+            return
+        self._event_last_key = key
+        self._event_last_at = now
+        self._record_event(
+            "command",
+            "指令已下发" if delivered else "指令已接受，串口未连接",
+            command=text,
+            source=source,
+            status="ok" if delivered else "warn",
+        )
+
+    def motion_snapshot(self) -> dict:
+        snap = self.motion.snapshot()
+        return {
+            "active": bool(snap["active"]),
+            "command": str(snap["command"]),
+            "manual": bool(snap["manual"]),
+            "source": str(snap["source"]),
+            "age_ms": int(snap["age_ms"]),
+            "keepalive_ms": int(snap["keepalive_ms"]),
+        }
+
+    def events(self, limit: int = 40) -> dict:
+        try:
+            count = int(limit)
+        except (TypeError, ValueError):
+            count = 40
+        count = max(1, min(120, count))
+        with self._events_lock:
+            items = list(self._events)[:count]
+            total = len(self._events)
+        return {
+            "ok": True,
+            "count": total,
+            "events": items,
+            "server_time_ms": int(time.time() * 1000.0),
+        }
+
     # ------------------------------------------------------------- serial
     def _on_serial_state(self, connected: bool) -> None:
         self._serial_connected = bool(connected)
@@ -449,9 +533,21 @@ class EdgeServerNode(Node):
             self.get_logger().info(
                 f"STM32 serial connected: {self.serial.port}@{self.serial.baud}"
             )
+            self._record_event(
+                "serial",
+                f"STM32 串口已连接 {self.serial.port}@{self.serial.baud}",
+                source="serial",
+                status="ok",
+            )
             self.serial.write("0")
         else:
             self.get_logger().warn("STM32 serial disconnected")
+            self._record_event(
+                "serial",
+                f"STM32 串口断开 {self.serial.port}",
+                source="serial",
+                status="error",
+            )
 
     def _on_serial_line(self, line: str) -> None:
         telemetry = parse_body_line(line)
@@ -517,16 +613,31 @@ class EdgeServerNode(Node):
         )
         if command == "0" and (now - self._ros_command_at) > self.cmd_watchdog:
             return
-        accepted = self.motion.apply_raw(command, now)
+        accepted = self.motion.apply_raw(command, now, source="ros")
         if not accepted:
             return
         self._ros_command_at = now
         self._last_ros_command = command
         self._send_command(command)
+        if command != self._last_ros_event_command:
+            self._last_ros_event_command = command
+            self._record_command_event(
+                command, "ros", delivered=bool(self._serial_connected)
+            )
 
     def on_safety(self, msg: SafetyState) -> None:
         with self._state_lock:
+            previous = self._estop
             self._estop = bool(msg.emergency_stop)
+        if self._estop != previous:
+            if self._estop:
+                self._record_event(
+                    "safety", "急停触发", source="safety", status="error"
+                )
+            else:
+                self._record_event(
+                    "safety", "急停解除", source="safety", status="ok"
+                )
         if self._estop:
             self.motion.clear()
             self._send_command("0", force=True)
@@ -621,6 +732,14 @@ class EdgeServerNode(Node):
         command = self.motion.tick()
         if command:
             self._send_command(command, force=True)
+            if command == "0":
+                self._record_event(
+                    "safety",
+                    "指令租约超时，自动停车",
+                    command="0",
+                    source="system",
+                    status="warn",
+                )
 
     # ------------------------------------------------------------- camera
     def on_image(self, msg: Image) -> None:
@@ -679,6 +798,7 @@ class EdgeServerNode(Node):
             "camera": 1 if self.camera_available() else 0,
             "sdcard": 1 if (self._sdcard_root and os.path.isdir(self._sdcard_root)) else 0,
             "motion_active": 1 if self.motion.snapshot(now)["active"] else 0,
+            "motion": self.motion_snapshot(),
             "serial_connected": bool(self._serial_connected),
             "encoder_ok": bool(fresh),
             "ros_status": str((health or {}).get("status", "unknown")),
@@ -916,7 +1036,9 @@ class EdgeServerNode(Node):
             return ""
         command = dispatch_control_message(message, self.motion, now)
         if command:
-            self._send_command(command, force=True)
+            delivered = self._send_command(command, force=True)
+            source = "api" if message.startswith("raw:") else "web"
+            self._record_command_event(command, source, delivered=delivered)
         return command
 
     # ------------------------------------------------------------- lifecycle

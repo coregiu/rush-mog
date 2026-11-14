@@ -58,6 +58,34 @@ class FakeRuntime:
     def body(self):
         return self.body_payload
 
+    def motion_snapshot(self):
+        return {
+            "active": False,
+            "command": "",
+            "manual": False,
+            "source": "idle",
+            "age_ms": -1,
+            "keepalive_ms": 200,
+        }
+
+    def events(self, limit=40):
+        return {
+            "ok": True,
+            "count": 1,
+            "events": [
+                {
+                    "id": 1,
+                    "ts_ms": 1700000000000,
+                    "kind": "command",
+                    "text": "指令已下发",
+                    "command": "1",
+                    "source": "web",
+                    "status": "ok",
+                }
+            ],
+            "server_time_ms": 1700000000001,
+        }
+
     def edge_params(self):
         return {
             "ok": True,
@@ -203,7 +231,15 @@ def test_body_and_modules(web_server):
     port, _ = web_server
     status, _, body = request(port, "/api/body")
     assert status == 200
-    assert json.loads(body)["body"]["wheel_mm_s"] == [10, 20, 30, 40]
+    payload = json.loads(body)
+    assert payload["body"]["wheel_mm_s"] == [10, 20, 30, 40]
+    assert payload["motion"]["source"] == "idle"
+
+    status, _, body = request(port, "/api/events?limit=5")
+    assert status == 200
+    events_payload = json.loads(body)
+    assert events_payload["count"] == 1
+    assert events_payload["events"][0]["source"] == "web"
 
     status, _, body = request(port, "/api/modules")
     payload = json.loads(body)

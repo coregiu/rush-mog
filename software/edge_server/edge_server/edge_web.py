@@ -657,11 +657,27 @@ class _EdgeRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/body":
-            self._send_json(
-                200,
-                {"ok": True, "body": app.runtime.body()},
-                head_only=head_only,
-            )
+            payload = {"ok": True, "body": app.runtime.body()}
+            motion = getattr(app.runtime, "motion_snapshot", None)
+            if motion is not None:
+                payload["motion"] = motion()
+            self._send_json(200, payload, head_only=head_only)
+            return
+
+        if path == "/api/events":
+            handler = getattr(app.runtime, "events", None)
+            if handler is None:
+                self._send_json(
+                    404, app.error_payload("not_found", "事件记录不可用"), head_only
+                )
+                return
+            query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+            raw_limit = (query.get("limit") or ["40"])[-1]
+            try:
+                limit = int(raw_limit)
+            except (TypeError, ValueError):
+                limit = 40
+            self._send_json(200, handler(limit), head_only=head_only)
             return
 
         if path == "/api/modules":

@@ -111,6 +111,7 @@ def test_motion_raw_lease_expires():
     assert motion.tick(1.3) == "15"
     assert motion.tick(2.1) == "0"
     assert motion.snapshot(2.2)["active"] is False
+    assert motion.snapshot(2.2)["source"] == "idle"
 
 
 def test_manual_control_has_priority_over_ros():
@@ -123,6 +124,28 @@ def test_manual_control_has_priority_over_ros():
     assert motion.snapshot(1.3)["command"] == "1"
     motion.clear()
     assert motion.apply_raw("2", now=1.4) == "2"
+
+
+def test_motion_snapshot_source_and_age():
+    motion = MotionState()
+    assert motion.apply_manual("1", now=1.0) == "1"
+    snap = motion.snapshot(1.25)
+    assert snap["source"] == "web"
+    assert snap["age_ms"] == 250
+    assert snap["command"] == "1"
+    motion.clear(now=1.5)
+    assert motion.apply_raw("2", now=2.0, source="ros") == "2"
+    snap = motion.snapshot(2.1)
+    assert snap["source"] == "ros"
+    assert snap["age_ms"] == 100
+    # 相同 raw 命令重发不重置“持续”时间
+    assert motion.apply_raw("2", now=2.5, source="ros") == "2"
+    assert 599 <= motion.snapshot(2.6)["age_ms"] <= 601
+    # /cmd 的 raw: 来源标记为 api
+    other = MotionState()
+    assert dispatch_control_message("raw:15", other, now=3.0) == "15"
+    assert other.snapshot(3.05)["source"] == "api"
+    assert 49 <= other.snapshot(3.05)["age_ms"] <= 51
 
 
 def test_dispatch_control_message():

@@ -200,6 +200,8 @@ class MotionState:
         self._raw_updated_at = 0.0
         self._refresh_at = 0.0
         self._manual = False
+        self._source = "idle"
+        self._changed_at = 0.0
 
     @property
     def keepalive_ms(self) -> int:
@@ -211,16 +213,34 @@ class MotionState:
         with self._lock:
             self._keepalive_ms = _clamp_keepalive(value)
 
-    def _set_locked(self, command: str, *, manual: bool, now: float) -> None:
+    def _set_locked(
+        self,
+        command: str,
+        *,
+        manual: bool,
+        now: float,
+        source: str,
+    ) -> None:
+        source = str(source or ("web" if manual else "ros"))
+        changed = (
+            not self._active
+            or self._command != command
+            or self._manual != manual
+            or self._source != source
+        )
         self._command = command
         self._active = True
         self._manual = manual
+        self._source = source
+        if changed:
+            self._changed_at = float(now)
         self._preserve_second_byte = (not manual) and len(command) == 2
         self._raw_updated_at = 0.0 if manual else float(now)
         # 命令已经由调用方立即下发，下一次刷新从 now 开始计时。
         self._refresh_at = float(now)
 
-    def clear(self) -> None:
+    def clear(self, now: Optional[float] = None) -> None:
+        moment = time.monotonic() if now is None else float(now)
         with self._lock:
             self._command = ""
             self._active = False
@@ -228,19 +248,27 @@ class MotionState:
             self._raw_updated_at = 0.0
             self._refresh_at = 0.0
             self._manual = False
+            self._source = "idle"
+            self._changed_at = moment
 
-    def apply_manual(self, command: str, now: Optional[float] = None) -> str:
+    def apply_manual(
+        self,
+        command: str,
+        now: Optional[float] = None,
+        *,
+        source: str = "web",
+    ) -> str:
         """应用网页按钮/摇杆命令，返回需要立即下发的命令。"""
         cmd = str(command or "")
         if not cmd:
             return ""
-        if cmd in {"0", "J", "D"}:
-            self.clear()
-            return cmd
         moment = time.monotonic() if now is None else float(now)
+        if cmd in {"0", "J", "D"}:
+            self.clear(moment)
+            return cmd
         if is_sustained_motion_command(cmd):
             with self._lock:
-                self._set_locked(cmd, manual=True, now=moment)
+                self._set_locked(cmd, manual=True, now=moment, source=source)
         # 变速/微调等瞬时命令不改变持续运动状态，只立即下发。
         return cmd
 
@@ -250,6 +278,7 @@ class MotionState:
         now: Optional[float] = None,
         *,
         respect_manual: bool = True,
+        source: str = "ros",
     ) -> str:
         """应用 ROS/API raw 命令；网页手动控制期间默认不抢占。"""
         cmd = str(command or "").strip()
@@ -266,10 +295,22 @@ class MotionState:
                 self._raw_updated_at = 0.0
                 self._refresh_at = 0.0
                 self._manual = False
+                self._source = "idle"
+                self._changed_at = moment
                 return cmd
+            source = str(source or "ros")
+            changed = (
+                not self._active
+                or self._command != cmd
+                or self._manual
+                or self._source != source
+            )
             self._command = cmd
             self._active = True
             self._manual = False
+            self._source = source
+            if changed:
+                self._changed_at = moment
             self._preserve_second_byte = len(cmd) == 2
             self._raw_updated_at = moment
             self._refresh_at = moment
@@ -291,6 +332,8 @@ class MotionState:
                 self._preserve_second_byte = False
                 self._raw_updated_at = 0.0
                 self._refresh_at = 0.0
+                self._source = "idle"
+                self._changed_at = moment
                 return "0"
             # 网页按钮/摇杆默认只发按下和松开两条，不在按住期间重发。
             if self._manual and not self._resend_manual:
@@ -313,10 +356,17 @@ class MotionState:
                 if self._raw_updated_at > 0.0
                 else -1
             )
+            changed_age_ms = (
+                int(max(0.0, moment - self._changed_at) * 1000.0)
+                if self._changed_at > 0.0
+                else -1
+            )
             return {
                 "active": bool(self._active),
                 "command": self._command,
                 "manual": bool(self._manual),
+                "source": str(self._source),
+                "age_ms": changed_age_ms,
                 "raw_age_ms": age_ms,
                 "keepalive_ms": int(self._keepalive_ms),
             }
@@ -331,18 +381,18 @@ def dispatch_control_message(
     text = str(message or "").strip()
     moment = time.monotonic() if now is None else float(now)
     if text.startswith("raw:"):
-        return motion.apply_raw(text[4:].strip(), moment)
+        return motion.apply_raw(text[4:].strip(), moment, source="api")
     if text.startswith("button:"):
         rest = text[7:]
         key, sep, event_type = rest.partition(":")
         if not sep:
             return ""
         command = button_command(key, event_type)
-        return motion.apply_manual(command, moment) if command else ""
+        return motion.apply_manual(command, moment, source="web") if command else ""
     if text.startswith("stick:"):
         parts = text.split(":", 3)
         if len(parts) != 4:
             return ""
         command = stick_command(parts[1], parts[2], parts[3])
-        return motion.apply_manual(command, moment) if command else ""
+        return motion.apply_manual(command, moment, source="web") if command else ""
     return ""

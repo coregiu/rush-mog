@@ -142,7 +142,9 @@ software/
 - 松开方向键发 `"0"`；`square/circle` 松开发 `"I"`（直行）；页面隐藏用
   `sendBeacon('/cmd', 'button:stop:down')` 兜底；
 - `handle_command()` 只在急停时返回空；**串口没打开也会返回命令**（HTTP 仍回 `ok`），
-  所以“接口 200”不等于“STM32 收到了”。
+  所以“接口 200”不等于“STM32 收到了”；
+- 每条命令、串口连接/断开、急停、租约超时都会写入节点内的 120 条环形缓冲
+  （`_record_event`），dashboard 通过 `/api/events` 展示；服务重启后清空。
 
 ### 4.1 按钮 → 命令字
 
@@ -223,8 +225,9 @@ Twist 量化规则（`core/body_drive.py`）：
 | POST | `/cmd-button` | 表单 `key`/`type`（兼容旧页面） |
 | POST | `/cmd-stick` | 表单 `stickId`/`direct`/`stepValue` |
 | GET/POST | `/stop` | 无条件停车 |
-| GET | `/status` | 运行状态（网页轮询） |
-| GET | `/api/body` | 遥测详情 |
+| GET | `/status` | 运行状态（含 `motion` 当前指令） |
+| GET | `/api/body` | 遥测详情 + `motion` 当前指令/来源/持续时长 |
+| GET | `/api/events?limit=N` | 最近 N 条运行事件（命令/串口/急停/超时） |
 | GET | `/api/modules` | 模块注册表 |
 | GET | `/api/modules/edge` | Edge 模块详情 |
 | GET | `/api/modules/edge/params` | 可调参数 |

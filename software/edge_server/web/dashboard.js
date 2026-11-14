@@ -40,6 +40,33 @@ const HARDWARE_MODULES = [
   { id: 'speaker', name: '蓝牙音箱', model: 'Bluetooth', glyph: 'SPK' },
 ];
 
+const COMMAND_LABELS = {
+  '0': '停止', '1': '前进', '2': '后退', '3': '左移', '4': '右移',
+  '5': '左前', '6': '右前', '7': '左后', '8': '右后',
+  '9': '左转', 'A': '右转', 'B': '左大转', 'C': '右大转',
+  'D': '自检', 'E': '加速', 'F': '减速', 'G': '左微调', 'H': '右微调',
+  'I': '直行', 'J': '复位', 'K': '下一曲', 'L': '上一曲',
+  'M': '音量+', 'N': '音量-', 'O': '停止播放', 'P': '播放',
+};
+
+const SOURCE_LABELS = {
+  web: '网页手柄',
+  ros: 'ROS /cmd_vel',
+  api: 'API raw',
+  system: '系统',
+  safety: '安全',
+  serial: '串口',
+  idle: '空闲',
+};
+
+const EVENT_KIND_LABELS = {
+  command: 'CMD',
+  system: 'SYS',
+  serial: 'LINK',
+  safety: 'SAFE',
+  error: 'ERR',
+};
+
 const BODY_MOTORS = [
   { id: 'fl', name: '左前 FL' },
   { id: 'fr', name: '右前 FR' },
@@ -84,6 +111,11 @@ const state = {
   bodyPollTimer: null,
   bodyFailures: 0,
   bodyTelemetry: null,
+  motion: null,
+  events: [],
+  eventTotal: 0,
+  eventsPolling: false,
+  eventsTimer: null,
   body: {
     lastOdom: null,
     sessionDistance: 0,
@@ -812,6 +844,8 @@ function renderAll() {
   renderTwin();
   renderHardware();
   renderTelemetry();
+  renderOpsCurrent();
+  renderOpsEvents();
   renderSyncTime();
 }
 
@@ -1192,6 +1226,103 @@ function renderHardware() {
   if (count) count.textContent = `${okCount} / ${HARDWARE_MODULES.length} 正常`;
 }
 
+function commandParts(command) {
+  const text = String(command || '');
+  const base = text ? text[0] : '0';
+  const level = text.length > 1 && /\d/.test(text[1]) ? text[1] : '';
+  return {
+    text: text || '0',
+    base,
+    level,
+    label: COMMAND_LABELS[base] || '未知',
+  };
+}
+
+function renderOpsCurrent() {
+  const panel = $('#ops-panel');
+  if (!panel) return;
+  const motion = state.motion || {};
+  const body = state.body.latest || {};
+  const params = (state.edge && state.edge.params) || {};
+  const active = Boolean(motion.active && motion.command);
+  const parts = commandParts(active ? motion.command : '0');
+  const source = active ? (motion.source || (motion.manual ? 'web' : 'ros')) : 'idle';
+  const sourceLabel = SOURCE_LABELS[source] || source;
+
+  panel.dataset.source = source;
+  const code = $('#ops-code');
+  if (code) code.textContent = parts.text;
+  const label = $('#ops-label');
+  if (label) label.textContent = parts.label;
+  const sub = $('#ops-sub');
+  if (sub) {
+    sub.textContent = active
+      ? `${sourceLabel}${parts.level ? ` · PWM ${parts.level}/9` : ' · 保持 PWM'}`
+      : '等待指令';
+  }
+  const sourceChip = $('#ops-source');
+  if (sourceChip) {
+    sourceChip.textContent = active ? sourceLabel : '空闲';
+    sourceChip.className = `status-chip status-${active ? 'ok' : 'unknown'}`;
+  }
+  const led = $('#ops-led');
+  if (led) led.className = `led status-${active ? 'ok' : 'unknown'}`;
+  const time = $('#ops-time');
+  if (time) time.textContent = fmtTime(new Date());
+
+  const factSource = $('#ops-fact-source');
+  if (factSource) factSource.textContent = sourceLabel;
+  const factPwm = $('#ops-fact-pwm');
+  if (factPwm) factPwm.textContent = parts.level ? `${parts.level}/9` : (active ? '默认' : '--');
+  const factAge = $('#ops-fact-age');
+  if (factAge) {
+    factAge.textContent = active && motion.age_ms != null && motion.age_ms >= 0
+      ? fmtAge(motion.age_ms)
+      : '--';
+  }
+  const factSerial = $('#ops-fact-serial');
+  if (factSerial) factSerial.textContent = params.serial_connected ? '在线' : '断开';
+
+  const wheels = $('#ops-wheels');
+  if (wheels) {
+    wheels.textContent = Array.isArray(body.wheelSpeeds)
+      ? `${body.wheelSpeeds.map((value) => fmtNumber(value, 2)).join(' / ')} m/s`
+      : '--';
+  }
+  const distance = $('#ops-dist');
+  if (distance) distance.textContent = body.distance != null ? `${fmtNumber(body.distance, 2)} m` : '--';
+  const bodyState = $('#ops-body');
+  if (bodyState) {
+    bodyState.textContent = body.bodyLive ? '实时' : (body.hasOdom ? '推算' : '等待');
+  }
+}
+
+function renderOpsEvents() {
+  const list = $('#ops-events');
+  const count = $('#ops-event-count');
+  const events = state.events || [];
+  if (count) count.textContent = `${state.eventTotal || events.length} 条`;
+  if (!list) return;
+  if (!events.length) {
+    list.innerHTML = '<li class="ops-empty">暂无运行记录</li>';
+    return;
+  }
+  list.innerHTML = events.map((event) => {
+    const time = event.ts_ms ? fmtTime(new Date(event.ts_ms)) : '--';
+    const kind = EVENT_KIND_LABELS[event.kind]
+      || String(event.kind || 'EVT').toUpperCase().slice(0, 4);
+    const source = SOURCE_LABELS[event.source] || event.source || '';
+    const code = event.command ? commandParts(event.command) : null;
+    const codeText = code ? `${code.label} (${event.command})` : '';
+    return `<li class="ops-event" data-status="${escapeHtml(event.status || 'info')}">
+      <span class="ops-event-time">${escapeHtml(time)}</span>
+      <span class="ops-event-badge">${escapeHtml(kind)}</span>
+      <span class="ops-event-text">${escapeHtml(event.text || '')}${source ? ` · ${escapeHtml(source)}` : ''}</span>
+      <span class="ops-event-code">${escapeHtml(codeText)}</span>
+    </li>`;
+  }).join('');
+}
+
 function telemetryCard(label, value, sub) {
   return `<div class="telemetry">
     <span class="t-label">${escapeHtml(label)}</span>
@@ -1547,6 +1678,8 @@ async function pollBody() {
       renderBody();
       renderTwin();
     }
+    if (data && data.motion) state.motion = data.motion;
+    renderOpsCurrent();
   } catch (error) {
     // 旧固件没有 /api/body 时退化为完整轮询里的 edge.body。
     state.bodyFailures += 1;
@@ -1562,6 +1695,21 @@ async function pollBody() {
   }
 }
 
+async function pollEvents() {
+  if (state.eventsPolling) return;
+  state.eventsPolling = true;
+  try {
+    const data = await fetchJson('/api/events?limit=40', {}, 2500);
+    state.events = (data && Array.isArray(data.events)) ? data.events : [];
+    state.eventTotal = data && data.count != null ? Number(data.count) : state.events.length;
+    renderOpsEvents();
+  } catch (error) {
+    // 旧版服务没有 /api/events：保留已有记录，不影响其他面板。
+  } finally {
+    state.eventsPolling = false;
+  }
+}
+
 function startPolling() {
   stopPolling();
   state.bodyFailures = 0;
@@ -1571,7 +1719,11 @@ function startPolling() {
   state.bodyPollTimer = setInterval(() => {
     if (!document.hidden) pollBody();
   }, 1000);
+  state.eventsTimer = setInterval(() => {
+    if (!document.hidden) pollEvents();
+  }, 3000);
   pollBody();
+  pollEvents();
   poll();
 }
 
@@ -1580,11 +1732,13 @@ function stopPolling() {
   state.pollTimer = null;
   if (state.bodyPollTimer) clearInterval(state.bodyPollTimer);
   state.bodyPollTimer = null;
+  if (state.eventsTimer) clearInterval(state.eventsTimer);
+  state.eventsTimer = null;
 }
 
 function bindEvents() {
   const refresh = $('#refresh-btn');
-  if (refresh) refresh.addEventListener('click', () => { pollBody(); poll(); });
+  if (refresh) refresh.addEventListener('click', () => { pollBody(); pollEvents(); poll(); });
 
   const auto = $('#auto-refresh');
   if (auto) {
@@ -1622,10 +1776,10 @@ function bindEvents() {
   });
 
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) { pollBody(); poll(); }
+    if (!document.hidden) { pollBody(); pollEvents(); poll(); }
   });
 
-  window.addEventListener('online', () => { pollBody(); poll(); });
+  window.addEventListener('online', () => { pollBody(); pollEvents(); poll(); });
 }
 
 function init() {
