@@ -178,23 +178,27 @@ def stick_command(stick_id: str, direct: str, step_value: str) -> str:
 class MotionState:
     """当前持续运动命令与保活状态（线程安全）。
 
-    ``manual`` 来源是网页按钮/摇杆：按下后保持，直到收到松开/停止；
+    ``manual`` 来源是网页按钮/摇杆：按下时下发一次，松开/停止时再下发一次；
+    默认**不再周期性重发**（``resend_manual=True`` 可恢复旧行为）。
     ``raw`` 来源是 ROS ``/cmd_vel`` 或 API ``raw:``：保留 PWM 第二字节，
-    并带 1s 租约，调用方停止续租后自动停车。
+    按 ``keepalive_ms`` 刷新，并带租约，调用方停止续租后自动停车。
     """
 
     def __init__(
         self,
         keepalive_ms: int = MOTION_KEEPALIVE_MS,
         raw_lease_sec: float = RAW_MOTION_LEASE_SEC,
+        resend_manual: bool = False,
     ) -> None:
         self._lock = threading.Lock()
         self._keepalive_ms = _clamp_keepalive(keepalive_ms)
         self._raw_lease_sec = max(0.1, float(raw_lease_sec))
+        self._resend_manual = bool(resend_manual)
         self._command = ""
         self._active = False
         self._preserve_second_byte = False
         self._raw_updated_at = 0.0
+        self._refresh_at = 0.0
         self._manual = False
 
     @property
@@ -213,6 +217,8 @@ class MotionState:
         self._manual = manual
         self._preserve_second_byte = (not manual) and len(command) == 2
         self._raw_updated_at = 0.0 if manual else float(now)
+        # 命令已经由调用方立即下发，下一次刷新从 now 开始计时。
+        self._refresh_at = float(now)
 
     def clear(self) -> None:
         with self._lock:
@@ -220,6 +226,7 @@ class MotionState:
             self._active = False
             self._preserve_second_byte = False
             self._raw_updated_at = 0.0
+            self._refresh_at = 0.0
             self._manual = False
 
     def apply_manual(self, command: str, now: Optional[float] = None) -> str:
@@ -257,6 +264,7 @@ class MotionState:
                 self._active = False
                 self._preserve_second_byte = False
                 self._raw_updated_at = 0.0
+                self._refresh_at = 0.0
                 self._manual = False
                 return cmd
             self._command = cmd
@@ -264,10 +272,11 @@ class MotionState:
             self._manual = False
             self._preserve_second_byte = len(cmd) == 2
             self._raw_updated_at = moment
+            self._refresh_at = moment
         return cmd
 
     def tick(self, now: Optional[float] = None) -> str:
-        """保活线程周期调用；返回要重发的命令或 ``""``。"""
+        """周期调用；按需返回要重发的命令，``""`` 表示不发送。"""
         moment = time.monotonic() if now is None else float(now)
         with self._lock:
             if not self._active or not self._command:
@@ -281,7 +290,15 @@ class MotionState:
                 self._active = False
                 self._preserve_second_byte = False
                 self._raw_updated_at = 0.0
+                self._refresh_at = 0.0
                 return "0"
+            # 网页按钮/摇杆默认只发按下和松开两条，不在按住期间重发。
+            if self._manual and not self._resend_manual:
+                return ""
+            interval = self._keepalive_ms / 1000.0
+            if self._refresh_at > 0.0 and (moment - self._refresh_at) < interval:
+                return ""
+            self._refresh_at = moment
             command = self._command
             if len(command) == 2 and not self._preserve_second_byte:
                 # 网页摇杆保活只重发方向，避免覆盖之后调过的速度/微调。

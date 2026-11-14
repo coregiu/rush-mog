@@ -106,8 +106,10 @@ ros2 launch edge_server robot_bringup.launch.py config_file:=/path/to/robot.yaml
   解析 `$B,...` 四轮编码器遥测；
 - 发布 `/odom`、`/joint_states`、`/base/status`；订阅 `/cmd_vel` 并量化成
   `方向+PWM` 命令；
-- 网页按钮/摇杆按下后由节点每 `motion_keepalive_ms` 重发；ROS `raw:` 命令保留
-  PWM 第二字节并带 1s 租约；网页手动控制优先于 ROS 导航，直到网页松开/停止；
+- 网页按钮/摇杆按下时下发一次、松开/停止时再下发一次，默认不周期性重发
+  （`edge.motion.resend_manual=true` 可恢复旧行为）；ROS `raw:` 命令保留
+  PWM 第二字节，按 `keepalive_ms` 刷新并带 1s 租约；网页手动控制优先于 ROS 导航，
+  直到网页松开/停止；
 - `/cmd_vel` 超时、急停或 STM32 遥测超时都会自动停车。
 
 串口 udev 规则（示例 `/etc/udev/rules.d/99-rush-mog.rules`）：

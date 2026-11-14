@@ -9,8 +9,9 @@
   ``/base/status``。
 
 和原 ESP32 固件保持一致：
-- 网页按钮/摇杆按下后由本节点每 ``motion_keepalive_ms`` 重发，直到松开/停止；
-- ROS/API ``raw:`` 命令保留 PWM 第二字节并带 1s 租约；
+- 网页按钮/摇杆按下时下发一次，松开/停止时再下发一次；默认不周期性重发
+  （``edge.motion.resend_manual=true`` 可恢复旧行为）；
+- ROS/API ``raw:`` 命令保留 PWM 第二字节，按 ``keepalive_ms`` 刷新并带 1s 租约；
 - 网页手动控制优先于 ROS ``/cmd_vel``，避免导航和手柄互相抢方向。
 """
 
@@ -259,6 +260,7 @@ class EdgeServerNode(Node):
         self.motion = MotionState(
             keepalive_ms=keepalive_ms,
             raw_lease_sec=float(motion_cfg.get("raw_lease_sec", 1.0)),
+            resend_manual=bool(motion_cfg.get("resend_manual", False)),
         )
 
         self.odom_frame = str(base_cfg.get("odom_frame", "odom"))

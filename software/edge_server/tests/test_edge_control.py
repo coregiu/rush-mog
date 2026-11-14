@@ -80,21 +80,35 @@ def test_raw_command_validation():
             assert not is_valid_raw_motion_command(command)
 
 
-def test_motion_manual_keepalive_and_release():
+def test_motion_manual_sends_once_and_release():
     motion = MotionState(keepalive_ms=200)
     assert motion.apply_manual("15", now=1.0) == "15"
     assert motion.snapshot(1.1)["active"] is True
-    # 网页摇杆保活只重发方向
-    assert motion.tick(1.2) == "1"
-    assert motion.apply_manual("0", now=1.3) == "0"
-    assert motion.tick(1.4) == ""
-    assert motion.snapshot(1.4)["active"] is False
+    # 按下只发一次，按住期间不再周期性重发（LED 不会连闪）
+    assert motion.tick(1.2) == ""
+    assert motion.tick(1.5) == ""
+    assert motion.apply_manual("0", now=1.6) == "0"
+    assert motion.tick(1.7) == ""
+    assert motion.snapshot(1.7)["active"] is False
+
+
+def test_motion_manual_resend_is_opt_in():
+    motion = MotionState(keepalive_ms=200, resend_manual=True)
+    assert motion.apply_manual("15", now=1.0) == "15"
+    # 未到 keepalive_ms 不重发
+    assert motion.tick(1.1) == ""
+    # 到点后只重发方向，避免覆盖速度/微调档位
+    assert motion.tick(1.3) == "1"
+    assert motion.apply_manual("0", now=1.4) == "0"
+    assert motion.tick(1.5) == ""
 
 
 def test_motion_raw_lease_expires():
-    motion = MotionState(raw_lease_sec=1.0)
+    motion = MotionState(raw_lease_sec=1.0, keepalive_ms=200)
     assert motion.apply_raw("15", now=1.0) == "15"
-    assert motion.tick(1.9) == "15"
+    # raw 也按 keepalive_ms 节流
+    assert motion.tick(1.1) == ""
+    assert motion.tick(1.3) == "15"
     assert motion.tick(2.1) == "0"
     assert motion.snapshot(2.2)["active"] is False
 
@@ -104,7 +118,9 @@ def test_manual_control_has_priority_over_ros():
     assert motion.apply_manual("1", now=1.0) == "1"
     assert motion.apply_raw("2", now=1.1) == ""
     assert motion.apply_raw("0", now=1.2) == ""
-    assert motion.tick(1.3) == "1"
+    # 网页手动控制期间不重发，但状态仍保持，直到松开
+    assert motion.tick(1.3) == ""
+    assert motion.snapshot(1.3)["command"] == "1"
     motion.clear()
     assert motion.apply_raw("2", now=1.4) == "2"
 

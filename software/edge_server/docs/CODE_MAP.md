@@ -16,7 +16,7 @@
 edge_server_node（Pi，:80）
   ├─ edge_web.py         HTTP 路由 / 静态页 / 模块代理
   ├─ edge_server_node.py 节点主体：串口、/cmd_vel、/odom、/status
-  └─ edge_control.py     纯逻辑：按钮映射、保活、遥测解析
+  └─ edge_control.py     纯逻辑：按钮映射、运动状态、遥测解析
         │  write("1\n")
         ▼
 SerialLink（线程）── /dev/ttyAMA1 @115200 ── GPIO4(TXD3)
@@ -127,7 +127,7 @@ software/
 | 4 | `ros_nodes/edge_server_node.py` `handle_command()`（约 909 行） | 急停检查，`dispatch_control_message()` |
 | 5 | `edge_server/edge_control.py` `dispatch_control_message()`（308 行） | 拆 `button:key:event` |
 | 6 | `edge_control.button_command()`（147 行） | `up → "1"`；松开 `up → "0"` |
-| 7 | `MotionState.apply_manual()`（225 行） | 记下持续运动命令，供 200ms 保活重发 |
+| 7 | `MotionState.apply_manual()`（约 229 行） | 记录持续运动状态；松开时清状态并发 `"0"` |
 | 8 | `EdgeServerNode._send_command()`（487 行） | 0.15s 内相同命令去重；`force=True` 时跳过 |
 | 9 | `SerialLink.write()`（136 行） | `serial.write("1\n")`；端口未打开直接返回 False |
 | 10 | STM32 `ps2_receiver.c` `USART3_IRQHandler()`（104 行） | 收字节，遇 `\n`/`\r` 组帧，`send_to_queue_isr()` |
@@ -137,7 +137,8 @@ software/
 关键点：
 
 - 命令是 **ASCII + 换行**，不是二进制帧；`SerialLink.write()` 负责补 `\n`；
-- 网页按住不放时，节点每 `motion.keepalive_ms`（默认 200ms）重发同一条命令；
+- 网页按钮/摇杆**按下时只发一次**，松开/停止时再发一次；STM32 会锁存运动状态，
+  按住期间不需要重发。`edge.motion.resend_manual=true` 可恢复旧的周期性重发；
 - 松开方向键发 `"0"`；`square/circle` 松开发 `"I"`（直行）；页面隐藏用
   `sendBeacon('/cmd', 'button:stop:down')` 兜底；
 - `handle_command()` 只在急停时返回空；**串口没打开也会返回命令**（HTTP 仍回 `ok`），
@@ -301,9 +302,9 @@ vTaskStartScheduler()
 - 上电初始化后 LED 先亮再灭，之后只由命令驱动；
 - **LED 不闪 = 命令没到 `execute_command()`**，问题在 USART3 接收/队列，不在电机。
 
-> 验证技巧：网页“按一下”会发两条命令（按下 `1`、松开 `0`），LED 翻转两次又回到
-> 原状态，看起来像“没反应”。要么**按住方向键**看 5Hz 闪烁（注意把车架空），
-> 要么连续发奇数条停车命令：
+> 验证技巧：网页“按一下”会发两条命令（按下 `1`、松开 `0`），LED 翻转两次。
+> 一条命令对应一次翻转；按住期间不再重发，所以不会连闪（旧版本才会 5Hz 连闪）。
+> 要连续观察就发奇数条停车命令：
 
 ```bash
 for i in $(seq 1 9); do
@@ -346,6 +347,8 @@ ROS 参数 config_file  >  环境变量 EDGE_SERVER_CONFIG  >  install/.../confi
 | 运行配置 | `/opt/edge_server/config/deploy.yaml` | 远程专用，不随 rsync 更新 |
 | 仓库实车配置 | `edge_server/config/robot.yaml` | 版本管理，默认值 |
 | 串口 | `base.port` / `base.baud` | `/dev/ttyAMA1` / `115200` |
+| 手动控制重发 | `edge.motion.resend_manual` | `false`（按下只发一次；`true`=旧行为） |
+| 手动/ raw 刷新周期 | `edge.motion.keepalive_ms` | `200` |
 | Web / MJPEG | `edge.web` | `0.0.0.0:80` / `8080` |
 | 遥测状态文件 | `edge.state_file` | `/var/lib/edge_server/edge_params.json` |
 | 健康网关 | `health.http` | `127.0.0.1:8090` |

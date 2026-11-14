@@ -429,6 +429,7 @@ sudo chsh -s /bin/bash ubuntu
 | `/stream` 一直 503 | 没有 `/camera/image_raw` | `ros2 topic hz /camera/image_raw`；先起相机驱动 |
 | `/status` 里 `serial_connected:false` | 串口设备没打开：没启用 `uart3`、设备名不对或被占用 | 查 `ls -l /dev/ttyAMA1`、`grep uart3 /boot/firmware/config.txt`、`journalctl -u edge_server`；确认 `ubuntu` 在 `dialout` 组 |
 | 网页按钮无反应、`/cmd` 返回 `ok` | 命令被接受但串口没写出去，或 STM32 没收到 | 按 CODE_MAP.md §10 从 `/status`→`strace`→LED 逐层查 |
+| 按住按钮时 STM32 LED 连闪 | 服务端在周期性重发（旧行为），每条命令都会翻转 LED | 新版默认已关闭；确认 `edge.motion.resend_manual` 为 `false` 并重启服务 |
 | 网页 200 但还是旧界面 | 没 build/restart，或浏览器缓存 | 重新 build + restart，浏览器 Ctrl-F5 |
 | 服务反复重启 | 配置 YAML 写错/端口被占 | `journalctl -u edge_server -n 100` |
 | 日志时间比北京时间慢 8 小时 | Pi 时区是 UTC | `sudo timedatectl set-timezone Asia/Shanghai`（可选） |

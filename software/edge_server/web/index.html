@@ -291,7 +291,7 @@
             const btn = document.getElementById(buttonId);
             if (btn) btn.classList.add('button-press');
             updateStatus(buttonId.toUpperCase()+"-down");
-            // 只在按下时发一条；持续运动由 Edge Server 内部对 STM32 重发
+            // 只在按下时发一条；STM32 会保持该运动状态，松开时再发停止
             sendButtonCommand(buttonId, 'down');
         }
 
@@ -403,7 +403,7 @@
             function drag(e) {
                 if (!e || !isDragging || throttle) return;
                 throttle = true;
-                // 只在手指移动时发 20Hz；手指停住后由 Edge Server 继续重发给 STM32
+                // 只在手指移动时发 20Hz；STM32 会保持最后方向，不需要持续重发
                 setTimeout(() => throttle = false, 50);
 
                 const rect = stick.getBoundingClientRect();
@@ -424,7 +424,7 @@
                 const nx = (fx / maxDist).toFixed(2);
                 const ny = (fy / maxDist).toFixed(2);
                 const dir = getDir(nx, ny);
-                // 手指停住不动时不再重复发；Edge Server 会继续把最后方向重发给 STM32
+                // 手指停住不动时不重复发；STM32 会保持最后方向
                 updateStatus(`${stickId.split('-')[0].toUpperCase()}3 (${dir.direct}, ${dir.stepValue})`);
                 sendStickCommand(stickId, dir.direct, dir.stepValue);
             }

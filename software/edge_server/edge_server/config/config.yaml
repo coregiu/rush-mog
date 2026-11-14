@@ -277,6 +277,7 @@ edge_server:
     motion:
       keepalive_ms: 200
       raw_lease_sec: 1.0
+      resend_manual: false
     ros_health_url: "http://127.0.0.1:8090/ros/health"
     ros_params_url: "http://127.0.0.1:8090/ros/params"
     state_file: "~/.config/rush-mog/edge_params.json"

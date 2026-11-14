@@ -81,7 +81,7 @@ function executeVoiceCommand(command) {
             }, 200);
             updateStatus(`🎙️ ${matched.key.toUpperCase()}`);
         } else {
-            // 方向键只在按下时发一条；Edge Server 内部会继续重发给 STM32，
+            // 方向键只在按下时发一条；STM32 会保持该状态，
             // 2 秒后由定时器发停止，期间不再发 HTTP 心跳
             stopVoiceMotion();
             sendButtonCommand(matched.key, matched.type);
