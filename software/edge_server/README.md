@@ -69,6 +69,40 @@ source install/setup.bash
 
 修改源码后重新 `colcon build --packages-select custom_msgs edge_server`。
 
+修改增量构建部署：
+```bash
+cd /mnt/f/CODE/rush-mog
+
+rsync -avz --delete \
+  --exclude='__pycache__' --exclude='.pytest_cache' \
+  software/edge_server/ \
+  ubuntu@192.168.3.26:/opt/edge_server/src/edge_server/
+
+rsync -avz --delete \
+  --exclude='__pycache__' --exclude='.pytest_cache' \
+  software/custom_msgs/ \
+  ubuntu@192.168.3.26:/opt/edge_server/src/custom_msgs/
+
+# 注意：远端登录 shell 是 zsh，必须显式用 bash -lc 包一层
+
+ssh ubuntu@192.168.3.26 'bash -lc "
+  source /opt/ros/humble/setup.bash &&
+  cd /opt/edge_server &&
+  colcon build --packages-select custom_msgs edge_server &&
+  sudo systemctl restart edge_server
+"'
+
+# 只改了 `edge_server` 的 Python/网页、没有改消息时，可以只构建 `edge_server`：
+
+ssh ubuntu@192.168.3.26 'bash -lc "
+  source /opt/ros/humble/setup.bash &&
+  cd /opt/edge_server &&
+  colcon build --packages-select edge_server &&
+  sudo systemctl restart edge_server
+"'
+
+```
+
 ---
 
 ## 3. 启动
