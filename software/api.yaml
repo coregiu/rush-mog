@@ -945,6 +945,8 @@ paths:
                 audio_playing: false
                 mic_available: true
                 mic_recording: false
+                power_status: ok
+                power_ok: true
                 ip: "192.168.4.1"
                 hostname: "rush-mog"
 
@@ -1201,6 +1203,29 @@ paths:
                 $ref: '#/components/schemas/CenterErrorResponse'
         '503':
           description: 麦克风功能未启用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /api/power:
+    get:
+      tags: [Edge Server]
+      summary: 树莓派电源/欠压监控
+      description: |
+        读取 `vcgencmd get_throttled` 与 `rpi_volt/in0_lcrit_alarm`，代表
+        “电源及转换板”硬件模块状态。当前欠压 → `error`；当前降频/温度限制 →
+        `degraded`；仅历史位 → `status=ok, warning=true`（当前已恢复）。
+      operationId: edgePowerStatus
+      responses:
+        '200':
+          description: 电源状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgePowerStatus'
+        '503':
+          description: 电源监控不可用
           content:
             application/json:
               schema:
@@ -2238,6 +2263,39 @@ components:
           type: string
           description: 主机名
 
+    EdgePowerStatus:
+      type: object
+      description: 树莓派电源监控（vcgencmd throttled + rpi_volt）
+      required: [ok, enabled, available, status, healthy]
+      properties:
+        ok: {type: boolean, enum: [true]}
+        enabled: {type: boolean}
+        available: {type: boolean}
+        online: {type: boolean}
+        source: {type: string, example: rpi}
+        model: {type: string, example: "Raspberry Pi 4 Model B Rev 1.4"}
+        status:
+          type: string
+          enum: [ok, degraded, error, disabled, unknown]
+        healthy: {type: boolean}
+        undervoltage: {type: boolean}
+        undervoltage_occurred: {type: boolean}
+        frequency_capped: {type: boolean}
+        throttled: {type: boolean}
+        soft_temp_limit: {type: boolean}
+        throttled_occurred: {type: boolean}
+        throttled_raw: {type: string, example: "0x50000"}
+        warning: {type: boolean}
+        warnings:
+          type: array
+          items: {type: string}
+        core_voltage_v: {type: number, nullable: true, example: 0.85}
+        temperature_c: {type: number, nullable: true, example: 39.4}
+        alarm: {type: integer}
+        error: {type: string}
+        checked_ms: {type: integer, format: int64}
+        age_ms: {type: integer}
+
     EdgeMicrophoneStatus:
       type: object
       description: newmine 蓝牙 HFP 麦克风状态
@@ -2979,7 +3037,7 @@ components:
           example: "camera"
         type:
           type: string
-          enum: [camera, lidar, imu, microphone, speaker, arm, base, battery, odometry, other]
+          enum: [camera, lidar, imu, microphone, speaker, arm, base, battery, power, odometry, other]
         status:
           type: string
           enum: [ok, degraded, error, unknown, disabled]

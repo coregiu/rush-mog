@@ -20,7 +20,10 @@
   TTS（espeak-ng 中文）与本地音频排队播放；录音时切 HFP、停止后恢复 A2DP，
   提供 `/api/speaker/*`、`/api/microphone/*`、`/body/say`、`/body/audio_status`、
   `/body/mic_status`、`/edge/audio`，dashboard 可直接播报/录音；
-- **健康检查**：ROS 节点/话题 + 相机/雷达/IMU/麦克风/音箱/机械臂等设备，
+- **树莓派电源监控**：`vcgencmd get_throttled` + `rpi_volt` 欠压告警，
+  驱动 dashboard“电源及转换板”模块，当前正常即报 `ok`，欠压/降频报
+  `degraded`/`error`，`/api/power` 可直接查询；
+- **健康检查**：ROS 节点/话题 + 相机/雷达/IMU/麦克风/音箱/机械臂/电源等设备，
   HTTP 供 Pi 上的 Edge Server/dashboard 代理，另有 ROS 话题/服务。
 
 验证状态（ROS2 Humble，本仓库）：
@@ -28,7 +31,7 @@
 | 项目 | 结果 |
 |---|---|
 | `colcon build --packages-select custom_msgs edge_server` | 通过 |
-| `pytest tests -q` | 115 passed |
+| `pytest tests -q` | 125 passed |
 | `tests/end_to_end_check.py` | 7/7 passed |
 | `tests/slam_nav_check.py` + `fake_slam_robot.py` | 6/6 passed |
 
@@ -215,7 +218,7 @@ ros2 run robot_localization ekf_node --ros-args \
 | `navigation_node` | `/center/navigate_to`，Nav2/直航后端 |
 | `target_detector_node` | 颜色/YOLO 检测、激光/bbox 测距、map 投影、跟踪 |
 | `object_search_node` | `/center/explore`、`/center/search_object` |
-| `edge_server_node` | Pi Edge Server：80 网页/API、8080 MJPEG、STM32 串口、蓝牙音箱/语音播报、HFP 录音与 `/edge/audio`、`/odom`、`/joint_states`、`/base/status`、`/body/audio_status`、`/body/mic_status` |
+| `edge_server_node` | Pi Edge Server：80 网页/API、8080 MJPEG、STM32 串口、蓝牙音箱/语音播报、HFP 录音与 `/edge/audio`、树莓派电源监控、`/odom`、`/joint_states`、`/base/status`、`/body/audio_status`、`/body/mic_status`、`/body/power_status` |
 | `base_bridge_node` | 旧版 Pi ↔ STM32 二进制串口桥（legacy） |
 | `imu_node` | Pi I2C 直连 ICM-20948 → `/imu/data` |
 | `health_monitor_node` | 节点/设备健康、`/center/health`、`/center/healthcheck`、HTTP `:8090` |
@@ -238,6 +241,7 @@ ros2 run robot_localization ekf_node --ros-args \
 | `/body/say` | `std_msgs/String` | 订阅（文本 -> TTS -> 蓝牙音箱） |
 | `/body/audio_status` | `std_msgs/String` | 发布（音箱状态 JSON，1 Hz；健康检查 speaker） |
 | `/body/mic_status` | `std_msgs/String` | 发布（麦克风状态 JSON，1 Hz；健康检查 microphone） |
+| `/body/power_status` | `std_msgs/String` | 发布（树莓派电源状态 JSON，1 Hz；健康检查 power） |
 | `/battery_state` | `sensor_msgs/BatteryState` | 订阅 |
 | `/base/status` | `std_msgs/String` | 发布/订阅（STM32 遥测 JSON） |
 | `/map` | `nav_msgs/OccupancyGrid` | 订阅/发布 |
@@ -347,7 +351,7 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
 
 - 代码默认监听 `127.0.0.1:8090`；`robot.yaml` 也保持回环，由同机 Edge Server 代理；跨机监控再改 `0.0.0.0` 并设置 `health.http.api_key`。
 - 设备参数（频率/超时/必需）与 health monitor 参数可在 dashboard 的 ROS 参数抽屉直接修改。
-- 设备清单在 `health.devices` 配置：camera/lidar/imu/microphone/speaker/arm/base/battery/odom。
+- 设备清单在 `health.devices` 配置：camera/lidar/imu/microphone/speaker/arm/base/battery/power/odom。
 - 音箱由 `edge_server_node` 发布 `/body/audio_status`，`online=false` 时显示 `degraded`；
   机械臂 `/arm/joint_states` 无反馈时显示 `unknown`，不伪造 `ok`；接入后无需改代码。
 - 整体状态：`ok` / `starting` / `degraded` / `error` / `disabled`；
@@ -370,6 +374,7 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
 | `GET /api/microphone` | HFP 麦克风能力/输入源/录音状态/最近录音 |
 | `POST /api/microphone/{start,stop,play,volume,list}` | 开始/停止录音、回放、音量、录音列表 |
 | `GET /api/microphone/recordings[/{name}]` | 录音列表 / 下载 WAV |
+| `GET /api/power` | 树莓派欠压/降频/温度/核心电压状态 |
 | `GET /api/modules` | Edge + 同机 ROS 子系统 + 外部模块（CENTER） |
 | `GET/POST /api/modules/edge/params` | Edge 参数（运动保活、图传帧率） |
 | `GET /api/modules/{id}/health|params` | 代理 ROS（同机）/CENTER（外部） |
@@ -474,6 +479,48 @@ ROS 侧录音时可以直接用 `ros2 topic hz /edge/audio`（约 10 Hz）确认
 `health_monitor_node` 用 `/body/mic_status` 的 `online` 判断麦克风
 `ok`/`degraded`。dashboard 的同一面板提供开始/停止/下载/回放。
 
+### 5.8 树莓派电源监控（电源及转换板）
+
+“电源及转换板”模块的状态直接取树莓派电源监控：
+
+- `vcgencmd get_throttled`：firmware 的欠压/降频/温度限制位；
+- `/sys/class/hwmon/hwmon*/in0_lcrit_alarm`（`rpi_volt`）：当前低电压告警；
+- `vcgencmd measure_volts core`、`measure_temp`：辅助展示；
+- `/proc/device-tree/model`：板卡型号。
+
+状态语义：
+
+| 条件 | status |
+|---|---|
+| 当前欠压（`0x1` 或 alarm=1） | `error` |
+| 当前降频/限流/软温度限制 | `degraded` |
+| 仅历史位（`0x10000`/`0x40000`/`0x80000`） | `ok` + `warning=true` |
+| 无欠压/降频 | `ok` |
+
+`0x50000` 是本次部署实测值：表示启动后曾发生过欠压和降频，但当前已恢复，
+所以 dashboard 电源模块显示 `ok`，详情标注“历史欠压已恢复”，
+`/api/power` 的 `warning=true`、`throttled_raw="0x50000"`。
+
+配置（`edge.power`）：
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `enabled` | `false`（robot/deploy 为 true） | 总开关 |
+| `sample_interval_sec` | `2.0` | 读取缓存周期 |
+| `status_rate_hz` | `1.0` | `/body/power_status` 发布频率 |
+| `status_topic` | `/body/power_status` | ROS 状态 JSON |
+| `model_path` / `alarm_path` | Pi 默认路径 | 可覆盖 sysfs 路径 |
+| `vcgencmd` | `vcgencmd` | 命令名/路径 |
+
+```bash
+curl -s http://192.168.3.26/api/power | python3 -m json.tool
+# 关键字段：status, healthy, warning, undervoltage, throttled_raw,
+#           core_voltage_v, temperature_c
+```
+
+dashboard 的 BOM「电源及转换板」卡片使用该状态；health monitor 的 `power`
+设备读取 `/body/power_status`，电源异常时整体健康会降级。
+
 ---
 
 ## 6. 配置
@@ -506,6 +553,8 @@ ROS 侧录音时可以直接用 `ros2 topic hz /edge/audio`（约 10 Hz）确认
   `volume` / `audio_dir` / `tts.*`（见 §5.6）
 - `edge.speaker.microphone.*`：`enabled` / `record_dir` / `sample_rate` / `channels` /
   `chunk_ms` / `max_duration_sec` / `volume` / `topic` / `status_topic`（见 §5.7）
+- `edge.power.*`：`enabled` / `sample_interval_sec` / `status_rate_hz` /
+  `status_topic` / `model_path` / `alarm_path` / `vcgencmd`（见 §5.8）
 - `health.devices.<id>` 的 `topic` / `message_type` / `expected_rate_hz` / `timeout_sec` / `required`
 
 ---
@@ -528,7 +577,7 @@ ROS 侧录音时可以直接用 `ros2 topic hz /edge/audio`（约 10 Hz）确认
 ```bash
 cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 115 passed
+# 125 passed
 ```
 
 单独跑健康检查（不依赖 ROS 图）：
@@ -656,6 +705,7 @@ software/edge_server/          # ROS 包根目录
 │   ├── edge_control.py        # 按钮/摇杆/运动保活/STM32 遥测纯逻辑
 │   ├── core/speaker.py        # 蓝牙音箱自动连接 + TTS/音频排队播放
 │   ├── core/microphone.py     # HFP 麦克风录音 + WAV/ROS AudioData
+│   ├── core/power.py          # 树莓派 vcgencmd/rpi_volt 电源监控
 │   ├── edge_web.py            # Edge 网页/API/MJPEG（stdlib）
 │   ├── http_health.py         # 健康检查 HTTP 网关（stdlib）
 │   └── utils/

@@ -311,6 +311,15 @@ edge_server:
         speed: 150
         pitch: 50
         max_chars: 200
+    # 树莓派电源监控：vcgencmd get_throttled + rpi_volt，正常即代表电源及转换板正常
+    power:
+      enabled: false
+      sample_interval_sec: 2.0
+      status_rate_hz: 1.0
+      status_topic: "/body/power_status"
+      model_path: "/proc/device-tree/model"
+      alarm_path: ""              # 空=自动查找 rpi_volt hwmon
+      vcgencmd: "vcgencmd"
     ros_health_url: "http://127.0.0.1:8090/ros/health"
     ros_params_url: "http://127.0.0.1:8090/ros/params"
     state_file: "~/.config/rush-mog/edge_params.json"
@@ -392,6 +401,15 @@ edge_server:
         expected_rate_hz: 10.0
         timeout_sec: 2.0
         required: true
+      power:
+        enabled: false
+        type: power
+        topic: "/body/power_status"
+        message_type: "std_msgs/msg/String"
+        expected_rate_hz: 1.0
+        timeout_sec: 3.0
+        required: false
+        description: "Raspberry Pi power monitor (vcgencmd throttled + rpi_volt)"
       odom:
         type: odometry
         topic: "/robot/odometry"

@@ -70,9 +70,11 @@
   - 蓝牙音箱：`edge.speaker` 启用，`device_name=newmine`、
     `device_mac=73:DB:39:F2:15:4B`，音频目录 `/var/lib/edge_server/audio`，
     A2DP 输出走本机 PipeWire（sink 名 `bluez_output.73_DB_39_F2_15_4B.a2dp-sink`）
-  - 健康检查：监控 camera/lidar/imu/base/odom/speaker/microphone 7 个设备，
-    `check_nodes=false`、`safety_required=false`；音箱/麦克风未连接时
-    `/body/audio_status`、`/body/mic_status` 的 `online=false` 会让对应设备显示 `degraded`
+  - 树莓派电源监控：`edge.power` 启用，读取 `vcgencmd get_throttled` 与
+    `rpi_volt`，发布 `/body/power_status`；dashboard“电源及转换板”模块使用该状态
+  - 健康检查：监控 camera/lidar/imu/base/odom/speaker/microphone/power 8 个设备，
+    `check_nodes=false`、`safety_required=false`；音箱/麦克风/电源 `online=false`
+    或电源异常时对应设备显示 `degraded`
 - `/opt/edge_server/deploy/edge_server.launch.py`：只启动
   `edge_server_node` + `health_monitor_node`，不启动 SLAM/Nav2/感知全栈。
 
@@ -116,6 +118,9 @@
 - 蓝牙麦克风：HFP profile 可用，`/api/microphone/start|stop` 录音实测成功
   （8 kHz mono WAV，`/edge/audio` 10 Hz AudioData），停止后 A2DP 自动恢复，
   health monitor 的 microphone 为 `ok`
+- 电源监控：`/api/power` 返回 `status=ok`，`throttled_raw=0x50000`
+  （历史欠压/降频已恢复，`warning=true`）；当前 `in0_lcrit_alarm=0`，
+  health monitor 的 power 为 `ok`
 - ROS 健康整体为 `degraded`（缺相机/雷达/IMU/底盘数据），当前属预期
 
 ---
@@ -175,7 +180,7 @@ cd /mnt/f/CODE/rush-mog/software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest -q tests
 ```
 
-当前基线：`115 passed`。
+当前基线：`125 passed`。
 
 ### 3.3 同步源码到 Pi
 
@@ -427,3 +432,31 @@ curl -X POST http://192.168.3.26/api/microphone/play \
   先 `bluetoothctl disconnect/connect`，再重试。
 - 录音文件很小或 RMS 接近 0：麦克风静音/距离远；检查
   `pactl list sources` 的 `Mute`/`Volume`，用 `/api/microphone/volume` 调大。
+
+### 7.5 电源监控（电源及转换板）
+
+树莓派 5V 输入没有独立的 ADC，使用 SoC 固件与 `rpi_volt` hwmon 判定：
+
+```bash
+vcgencmd get_throttled          # throttled=0x50000
+cat /sys/class/hwmon/hwmon1/in0_lcrit_alarm   # 0=正常，1=当前欠压
+vcgencmd measure_volts core
+vcgencmd measure_temp
+curl -s http://192.168.3.26/api/power | python3 -m json.tool
+```
+
+位定义与状态映射：
+
+- `0x1` 当前欠压 → `error`；
+- `0x2` ARM 限频、`0x4` 降频/限流、`0x8` 软温度限制 → `degraded`；
+- `0x10000` 历史欠压、`0x40000` 历史降频、`0x80000` 历史温度限制
+  → 当前 `ok`，`warning=true`，dashboard 显示“历史欠压已恢复”；
+- `/sys/class/hwmon/hwmon*/in0_lcrit_alarm=1` → `error`。
+
+当前部署实测 `throttled=0x50000`，是此前一次瞬时欠压留下的历史位，
+`in0_lcrit_alarm=0`，所以电源模块显示 `ok`。若需要清零历史位，
+重启树莓派或重新插拔电源后再观察；持续出现 `0x10000` 才说明供电/线缆
+/电源转换板需要检查。
+
+dashboard 的「电源及转换板」卡片直接使用 `/api/power`；health monitor 的
+`power` 设备使用 `/body/power_status`，电源异常时整体健康会降级。

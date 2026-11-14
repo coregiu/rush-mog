@@ -436,6 +436,8 @@ sudo chsh -s /bin/bash ubuntu
 | `/api/microphone` 的 `supported=false` | 耳机 card 没有 HFP/HSP profile，或音箱未连接 | `pactl list cards \| grep -A12 bluez_card`；确认 `headset-head-unit` 存在 |
 | 录音报“未找到蓝牙麦克风输入源” | HFP profile 切换失败/被手机占用 | `bluetoothctl disconnect/connect`；`pactl list short sources \| grep bluez_input`；再重试 |
 | 录音没声音/文件很小 | 麦克风静音、音量低或距离远 | `pactl list sources` 看 `Mute`/`Volume`；`POST /api/microphone/volume` 调大 |
+| `/api/power` 为 `error` / `undervoltage=true` | 5V 供电不足、线缆压降或电源转换板异常 | 检查 12V→5V 3A 输出、USB-C 线、接线端子；`vcgencmd get_throttled`、`dmesg \| grep -i undervolt` |
+| `/api/power` 为 `degraded` | 当前降频/温度限制，不一定是电源 | 看 `warnings`、`temperature_c`；先降温/降负载再复测 |
 | 网页 200 但还是旧界面 | 没 build/restart，或浏览器缓存 | 重新 build + restart，浏览器 Ctrl-F5 |
 | 服务反复重启 | 配置 YAML 写错/端口被占 | `journalctl -u edge_server -n 100` |
 | 日志时间比北京时间慢 8 小时 | Pi 时区是 UTC | `sudo timedatectl set-timezone Asia/Shanghai`（可选） |
@@ -462,6 +464,7 @@ sudo chsh -s /bin/bash ubuntu
 | Dashboard | `http://192.168.3.26/dashboard.html` |
 | 音箱状态 | `http://192.168.3.26/api/speaker` |
 | 麦克风状态 | `http://192.168.3.26/api/microphone` |
+| 电源状态 | `http://192.168.3.26/api/power` |
 | MJPEG | `http://192.168.3.26:8080/stream` |
 | 健康网关 | `http://127.0.0.1:8090/ros/health`（仅本机） |
 | 串口 | `/dev/ttyAMA1`（GPIO4/5，UART3），115200 8N1 |

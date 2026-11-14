@@ -408,6 +408,13 @@ class EdgeHttpApp:
             raise RuntimeError("麦克风功能未启用")
         return str(handler(str(name or "")))
 
+    # ------------------------------------------------------------- power
+    def power_payload(self) -> dict:
+        handler = getattr(self.runtime, "power_status", None)
+        if handler is None:
+            raise RuntimeError("电源监控不可用")
+        return handler()
+
     # ------------------------------------------------------------- static
     def _safe_path(self, root: str, request_path: str) -> Optional[str]:
         if not root:
@@ -869,6 +876,27 @@ class _EdgeRequestHandler(BaseHTTPRequestHandler):
                 filename=os.path.basename(filename),
                 head_only=head_only,
             )
+            return
+
+        if path == "/api/power":
+            try:
+                payload = app.power_payload()
+            except RuntimeError as exc:
+                self._send_json(
+                    503,
+                    app.error_payload("power_unavailable", str(exc)),
+                    head_only=head_only,
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("power status failed")
+                self._send_json(
+                    500,
+                    app.error_payload("power_failed", f"电源状态不可用: {exc}"),
+                    head_only=head_only,
+                )
+                return
+            self._send_json(200, payload, head_only=head_only)
             return
 
         if path == "/api/modules":

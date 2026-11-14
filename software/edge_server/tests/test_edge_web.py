@@ -72,6 +72,22 @@ class FakeRuntime:
             "error": "",
         }
         self.mic_file = ""
+        self.power_payload = {
+            "ok": True,
+            "enabled": True,
+            "available": True,
+            "source": "rpi",
+            "model": "Raspberry Pi 4 Model B Rev 1.4",
+            "status": "ok",
+            "healthy": True,
+            "online": True,
+            "undervoltage": False,
+            "throttled_raw": "0x50000",
+            "undervoltage_occurred": True,
+            "warning": True,
+            "core_voltage_v": 0.85,
+            "temperature_c": 39.4,
+        }
         self.body_payload = {
             "valid": True,
             "stale": False,
@@ -199,6 +215,9 @@ class FakeRuntime:
             "message": f"{action} ok",
             "speaker": self.speaker_payload,
         }
+
+    def power_status(self):
+        return dict(self.power_payload)
 
     def microphone_status(self):
         return dict(self.microphone_payload)
@@ -540,6 +559,16 @@ def test_stream_redirect(web_server):
         assert response.getheader("Location") == "http://127.0.0.1:18080/stream"
     finally:
         connection.close()
+
+
+def test_power_api(web_server):
+    port, _ = web_server
+    status, _, body = request(port, "/api/power")
+    payload = json.loads(body)
+    assert status == 200
+    assert payload["status"] == "ok"
+    assert payload["model"].startswith("Raspberry Pi 4")
+    assert payload["warning"] is True
 
 
 def test_microphone_api(web_server, tmp_path):

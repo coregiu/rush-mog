@@ -57,6 +57,7 @@ software/
 │   │   ├── edge_web.py          HTTP 服务器/路由/静态文件/模块代理
 │   │   ├── core/speaker.py      蓝牙音箱自动连接 + TTS/音频播放队列
 │   │   ├── core/microphone.py   HFP 麦克风录音 + WAV/ROS AudioData
+│   │   ├── core/power.py        树莓派 vcgencmd/rpi_volt 电源监控
 │   │   ├── http_health.py       健康接口数据组装
 │   │   ├── core/                业务核心：body_drive、odometry、velocity_mux、
 │   │   │                        safety_checker、vla_engine、navigation、object_search…
@@ -99,7 +100,7 @@ software/
 
 | 进程 | 入口 | 作用 | 端口 |
 |---|---|---|---|
-| `edge_server_node` | `ros_nodes/edge_server_node.py:main` | 网页/API、串口、`/cmd_vel`→STM32、STM32→`/odom`、蓝牙音箱/语音播报、HFP 麦克风录音 | 80、8080 |
+| `edge_server_node` | `ros_nodes/edge_server_node.py:main` | 网页/API、串口、`/cmd_vel`→STM32、STM32→`/odom`、蓝牙音箱/语音播报、HFP 麦克风录音、树莓派电源监控 | 80、8080 |
 | `health_monitor_node` | `ros_nodes/health_monitor_node.py:main` | 话题/设备健康检查 | 127.0.0.1:8090 |
 
 ### 3.2 全栈（可选）
@@ -235,6 +236,7 @@ Twist 量化规则（`core/body_drive.py`）：
 | GET | `/api/microphone` | HFP 麦克风/录音状态 |
 | POST | `/api/microphone/{start,stop,play,volume,list}` | 录音/回放/音量/列表 |
 | GET | `/api/microphone/recordings[/{name}]` | 录音列表/WAV 下载 |
+| GET | `/api/power` | 树莓派欠压/降频/温度/核心电压状态 |
 | GET | `/api/modules` | 模块注册表 |
 | GET | `/api/modules/edge` | Edge 模块详情 |
 | GET | `/api/modules/edge/params` | 可调参数（含 `speaker_volume`） |

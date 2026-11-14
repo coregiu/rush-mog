@@ -529,6 +529,7 @@ string metrics_json
 | `arm` | arm | `/arm/joint_states` | 否 | 10 Hz | **当前无反馈，unknown**；接入后校验 j1..j5 |
 | `base` | base | `/base/status` | 是 | 1 Hz | JSON；`encoder_ok=false` 判非法 |
 | `battery` | battery | `/battery_state` | 否 | 1 Hz | 低于 `battery_low_percent` 判非法 |
+| `power` | power | `/body/power_status` | 否 | 1 Hz | JSON；`online=false` 或 `status=error/degraded` 判非法 |
 | `odom` | odometry | `/odom` | 是 | 20 Hz | 非有限位姿判非法 |
 
 仿真默认（`config.yaml`）使用 `/edge/video`、`/edge/radar`、`/edge/audio`、`/robot/odometry`、`/robot/joint_states`，`base`/`battery` 关闭。详见配置文件注释。
@@ -570,6 +571,26 @@ string metrics_json
 - `available = 已连接 && supported`，即 `online`；
 - 录音时 `recording=true` 且 `/edge/audio` 以 10 Hz 发布 `AudioData`；
 - 未启用 `edge.speaker.microphone.enabled=false` 时不发布，健康检查保持 `unknown`。
+
+#### 电源 `/body/power_status`（已实现）
+
+`edge_server_node` 以 1 Hz 发布 `std_msgs/msg/String`，内容来自树莓派
+`vcgencmd get_throttled` + `rpi_volt`：
+
+```json
+{"ok": true, "enabled": true, "available": true, "online": true,
+ "model": "Raspberry Pi 4 Model B Rev 1.4", "status": "ok",
+ "healthy": true, "warning": true, "throttled_raw": "0x50000",
+ "undervoltage": false, "undervoltage_occurred": true,
+ "throttled_occurred": true, "core_voltage_v": 0.85,
+ "temperature_c": 39.4, "error": ""}
+```
+
+- 当前欠压（`0x1` 或 `in0_lcrit_alarm=1`）→ `status=error`；
+- 当前降频/温度限制 → `status=degraded`；
+- 仅历史位（如 `0x50000`）→ `status=ok, warning=true`，当前电源正常；
+- `online=false` 或 `status=error/degraded` 判设备非法（可选 → `degraded`）；
+- 未启用 `edge.power.enabled=false` 时不发布，健康检查保持 `unknown`。
 
 #### 机械臂 `/arm/joint_states`（待接入）
 
@@ -799,7 +820,7 @@ cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests/test_health_monitor.py tests/test_health_http.py -q
 # 29 passed
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 115 passed（含音箱/API 新增用例）
+# 125 passed（含音箱/API 新增用例）
 ```
 
 覆盖：

@@ -18,6 +18,7 @@ const API = {
   speakerAction: (action) => `/api/speaker/${encodeURIComponent(action)}`,
   microphone: '/api/microphone',
   microphoneAction: (action) => `/api/microphone/${encodeURIComponent(action)}`,
+  power: '/api/power',
   module: (id) => `/api/modules/${encodeURIComponent(id)}`,
   health: (id) => `/api/modules/${encodeURIComponent(id)}/health`,
   params: (id) => `/api/modules/${encodeURIComponent(id)}/params`,
@@ -128,6 +129,10 @@ const state = {
   microphonePolling: false,
   microphoneTimer: null,
   microphoneError: '',
+  power: null,
+  powerPolling: false,
+  powerTimer: null,
+  powerError: '',
   body: {
     lastOdom: null,
     sessionDistance: 0,
@@ -1114,6 +1119,40 @@ function hardwareState(id) {
       };
     }
     case 'power': {
+      const power = state.power;
+      if (power) {
+        let status = 'unknown';
+        if (power.enabled === false) status = 'disabled';
+        else if (power.status === 'ok') status = 'ok';
+        else if (power.status === 'degraded') status = 'degraded';
+        else if (power.status === 'error') status = 'error';
+        let detail = '树莓派电源监控不可用';
+        if (power.status === 'ok') {
+          detail = power.warning
+            ? '树莓派电源正常 · 历史欠压已恢复'
+            : '树莓派电源正常 · 5V/3.3V 输出正常';
+        } else if (power.status === 'error') {
+          detail = `电源异常 · ${power.error || '当前欠压/降频'} (${power.throttled_raw || '--'})`;
+        } else if (power.status === 'degraded') {
+          detail = `电源降级 · ${power.throttled_raw || '--'}`;
+        } else if (power.enabled === false) {
+          detail = '树莓派电源监控未启用';
+        }
+        if (power.model) detail += ` · ${power.model}`;
+        return {
+          status,
+          detail,
+          chips: [
+            `THR ${power.throttled_raw || '--'}`,
+            power.core_voltage_v != null
+              ? `CORE ${fmtNumber(power.core_voltage_v, 2)}V`
+              : 'CORE --',
+            power.temperature_c != null
+              ? `TEMP ${fmtNumber(power.temperature_c, 1)}°C`
+              : 'TEMP --',
+          ],
+        };
+      }
       const percent = numberOrNull(body.percent);
       const voltage = numberOrNull(body.voltage);
       const device = rosDevice('battery');
@@ -1121,7 +1160,9 @@ function hardwareState(id) {
         status: percent != null
           ? (percent < 20 ? 'degraded' : 'ok')
           : (device ? device.status : 'unknown'),
-        detail: '12V → 5V / 3.3V · 电压未上报',
+        detail: state.powerError
+          ? `树莓派电源监控不可用：${state.powerError}`
+          : '12V → 5V / 3.3V · 等待树莓派电源监控',
         chips: [
           voltage != null ? `VOLT ${fmtNumber(voltage, 2)}V` : 'VOLT --',
           percent != null ? `BAT ${fmtNumber(percent)}%` : 'BAT --',
@@ -2106,6 +2147,21 @@ function bindMicrophoneEvents() {
   }
 }
 
+async function pollPower() {
+  if (state.powerPolling) return;
+  state.powerPolling = true;
+  try {
+    state.power = await fetchJson(API.power, {}, 3000);
+    state.powerError = '';
+  } catch (error) {
+    state.power = null;
+    state.powerError = error && error.message ? error.message : String(error);
+  } finally {
+    state.powerPolling = false;
+    renderHardware();
+  }
+}
+
 function startPolling() {
   stopPolling();
   state.bodyFailures = 0;
@@ -2124,10 +2180,14 @@ function startPolling() {
   state.microphoneTimer = setInterval(() => {
     if (!document.hidden) pollMicrophone();
   }, 3000);
+  state.powerTimer = setInterval(() => {
+    if (!document.hidden) pollPower();
+  }, 3000);
   pollBody();
   pollEvents();
   pollSpeaker();
   pollMicrophone();
+  pollPower();
   poll();
 }
 
@@ -2142,11 +2202,13 @@ function stopPolling() {
   state.speakerTimer = null;
   if (state.microphoneTimer) clearInterval(state.microphoneTimer);
   state.microphoneTimer = null;
+  if (state.powerTimer) clearInterval(state.powerTimer);
+  state.powerTimer = null;
 }
 
 function bindEvents() {
   const refresh = $('#refresh-btn');
-  if (refresh) refresh.addEventListener('click', () => { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); poll(); });
+  if (refresh) refresh.addEventListener('click', () => { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); pollPower(); poll(); });
   bindSpeakerEvents();
   bindMicrophoneEvents();
 
@@ -2186,10 +2248,10 @@ function bindEvents() {
   });
 
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); poll(); }
+    if (!document.hidden) { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); pollPower(); poll(); }
   });
 
-  window.addEventListener('online', () => { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); poll(); });
+  window.addEventListener('online', () => { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); pollPower(); poll(); });
 }
 
 function init() {

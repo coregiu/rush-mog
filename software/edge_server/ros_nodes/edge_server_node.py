@@ -42,6 +42,7 @@ from tf2_ros import TransformBroadcaster
 from edge_server.core.body_drive import BodyDriveConfig, twist_to_body_command
 from edge_server.core.microphone import MicrophoneManager
 from edge_server.core.odometry import MecanumGeometry, WheelOdometry, wheel_names
+from edge_server.core.power import PowerMonitor
 from edge_server.core.speaker import SpeakerError, SpeakerManager
 from edge_server.edge_control import (
     BodyTelemetry,
@@ -216,6 +217,7 @@ class EdgeServerNode(Node):
         motion_cfg = dict(edge_cfg.get("motion") or {})
         speaker_cfg = dict(edge_cfg.get("speaker") or {})
         mic_cfg = dict(speaker_cfg.get("microphone") or {})
+        power_cfg = dict(edge_cfg.get("power") or {})
 
         self.started_monotonic = time.monotonic()
         self.hostname = socket.gethostname()
@@ -319,6 +321,19 @@ class EdgeServerNode(Node):
         self.pub_mic_status = self.create_publisher(
             String,
             self.microphone.status_topic,
+            10,
+        )
+        self.power = PowerMonitor(power_cfg)
+        self.power_status_topic = str(
+            power_cfg.get("status_topic", "/body/power_status")
+            or "/body/power_status"
+        )
+        self.power_status_rate_hz = max(
+            0.1, float(power_cfg.get("status_rate_hz", 1.0))
+        )
+        self.pub_power_status = self.create_publisher(
+            String,
+            self.power_status_topic,
             10,
         )
 
@@ -452,6 +467,11 @@ class EdgeServerNode(Node):
         self._speaker_timer = self.create_timer(
             1.0 / max(0.1, self.speaker.status_rate_hz),
             self.on_speaker_timer,
+            clock=self._steady_clock,
+        )
+        self._power_timer = self.create_timer(
+            1.0 / self.power_status_rate_hz,
+            self.on_power_timer,
             clock=self._steady_clock,
         )
         self.speaker.start()
@@ -642,6 +662,17 @@ class EdgeServerNode(Node):
             self.pub_mic_status.publish(
                 String(data=json.dumps(mic_payload, ensure_ascii=False))
             )
+
+    def on_power_timer(self) -> None:
+        if not self.power.enabled:
+            return
+        payload = self.power.status()
+        self.pub_power_status.publish(
+            String(data=json.dumps(payload, ensure_ascii=False))
+        )
+
+    def power_status(self) -> dict:
+        return self.power.status()
 
     def speaker_status(self) -> dict:
         return self.speaker.status()
@@ -1007,6 +1038,7 @@ class EdgeServerNode(Node):
         health = self._ros_health()
         speaker = self.speaker.status()
         microphone = self.microphone.status()
+        power = self.power.status()
         return {
             "uptime_ms": int((now - self.started_monotonic) * 1000.0),
             "free_heap": int(_free_memory_bytes()),
@@ -1028,6 +1060,12 @@ class EdgeServerNode(Node):
             "mic_available": bool(microphone["available"]),
             "mic_recording": bool(microphone["recording"]),
             "mic_source": str(microphone["source"]),
+            "power": power,
+            "power_status": str(power["status"]),
+            "power_ok": bool(power["healthy"]),
+            "undervoltage": bool(power["undervoltage"]),
+            "core_voltage_v": power["core_voltage_v"],
+            "temperature_c": power["temperature_c"],
             "ip": self.ip_address,
             "hostname": self.hostname,
         }
@@ -1122,6 +1160,7 @@ class EdgeServerNode(Node):
         health = self._ros_health() or {}
         speaker = self.speaker.status()
         microphone = self.microphone.status()
+        power = self.power.status()
         return {
             "motion_keepalive_ms": int(motion["keepalive_ms"]),
             "stream_fps": self.stream_fps,
@@ -1154,6 +1193,13 @@ class EdgeServerNode(Node):
             "mic_source": str(microphone["source"]),
             "mic_last_file": str(microphone["last_file_name"]),
             "mic_volume": int(microphone["volume"]),
+            "power_status": str(power["status"]),
+            "power_model": str(power["model"]),
+            "power_throttled": str(power["throttled_raw"]),
+            "power_undervoltage": bool(power["undervoltage"]),
+            "power_history_warning": bool(power["warning"]),
+            "power_core_voltage_v": power["core_voltage_v"],
+            "power_temperature_c": power["temperature_c"],
             "hostname": self.hostname,
             "ip": self.ip_address,
             "platform": self.platform_name,
@@ -1168,6 +1214,10 @@ class EdgeServerNode(Node):
             status = "degraded"
         elif not serial_ok:
             status = "degraded"
+        elif params["power_status"] == "error":
+            status = "error"
+        elif params["power_status"] == "degraded":
+            status = "degraded"
         elif ros_status == "ok":
             status = "ok"
         elif ros_status in {"degraded", "starting", "unknown"}:
@@ -1179,7 +1229,8 @@ class EdgeServerNode(Node):
             f"ros={ros_status}, "
             f"camera={'on' if params['camera'] else 'off'}, "
             f"base={'on' if params['motion_active'] else 'idle'}, "
-            f"speaker={'on' if params['speaker_connected'] else params['speaker_state']}"
+            f"speaker={'on' if params['speaker_connected'] else params['speaker_state']}, "
+            f"power={params['power_status']}"
         )
         return {
             "id": "edge",
@@ -1255,6 +1306,24 @@ class EdgeServerNode(Node):
                    "string", "音频", False, "", "", "", ""),
             _param("mic_volume", "麦克风音量", values["mic_volume"],
                    "int", "音频", True, "%", "0", "100", "5"),
+            _param("power_status", "电源状态", json.dumps(values["power_status"]),
+                   "string", "电源", False, "", "", "", ""),
+            _param("power_model", "树莓派型号", json.dumps(values["power_model"]),
+                   "string", "电源", False, "", "", "", ""),
+            _param("power_throttled", "欠压/降频标志", json.dumps(values["power_throttled"]),
+                   "string", "电源", False, "", "", "", ""),
+            _param("power_undervoltage", "当前欠压",
+                   _bool_literal(values["power_undervoltage"]),
+                   "bool", "电源", False, "", "", "", ""),
+            _param("power_history_warning", "历史欠压",
+                   _bool_literal(values["power_history_warning"]),
+                   "bool", "电源", False, "", "", "", ""),
+            _param("power_core_voltage_v", "核心电压",
+                   values["power_core_voltage_v"] if values["power_core_voltage_v"] is not None else "null",
+                   "float", "电源", False, "V", "", "", ""),
+            _param("power_temperature_c", "SoC 温度",
+                   values["power_temperature_c"] if values["power_temperature_c"] is not None else "null",
+                   "float", "电源", False, "°C", "", "", ""),
         ]
         return {
             "ok": True,
