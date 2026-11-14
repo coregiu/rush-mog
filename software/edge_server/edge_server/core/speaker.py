@@ -22,6 +22,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import wave
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Mapping, Optional
 
@@ -260,6 +261,14 @@ class SpeakerManager:
         self.tts_speed = int(_clamp(int(tts_cfg.get("speed", 150)), 80, 300))
         self.tts_pitch = int(_clamp(int(tts_cfg.get("pitch", 50)), 0, 99))
         self.tts_max_chars = int(_clamp(int(tts_cfg.get("max_chars", 200)), 1, 1000))
+        # A2DP 从 SUSPENDED 唤醒/功放启动会吞掉开头约 100~400ms；在 TTS
+        # 前补一段静音，保证第一个字完整。播放客户端也请求更大缓冲，降低卡顿。
+        self.tts_pre_roll_ms = int(
+            _clamp(int(tts_cfg.get("pre_roll_ms", 450)), 0, 2000)
+        )
+        self.playback_latency_ms = int(
+            _clamp(int(cfg.get("playback_latency_ms", 250)), 0, 3000)
+        )
         self.say_topic = str(cfg.get("say_topic", "/body/say") or "/body/say")
         self.status_topic = str(
             cfg.get("status_topic", "/body/audio_status") or "/body/audio_status"
@@ -383,6 +392,8 @@ class SpeakerManager:
                     "backend": self._tts_backend_name(),
                     "voice": self.tts_voice,
                     "speed": int(self.tts_speed),
+                    "pre_roll_ms": int(self.tts_pre_roll_ms),
+                    "playback_latency_ms": int(self.playback_latency_ms),
                 },
                 "playback": {
                     "playing": bool(self._playing),
@@ -954,6 +965,7 @@ class SpeakerManager:
                 pass
             if not convert.ok or not os.path.isfile(path):
                 raise SpeakerError(f"音频转码失败: {_short_output(convert.stderr)}")
+            _prepend_wav_silence(path, self.tts_pre_roll_ms)
             return
 
         binary = self._which("espeak-ng" if backend == "espeak-ng" else "espeak")
@@ -976,6 +988,7 @@ class SpeakerManager:
         )
         if not result.ok or not os.path.isfile(path) or os.path.getsize(path) <= 44:
             raise SpeakerError(f"TTS 合成失败: {_short_output(result.stderr)}")
+        _prepend_wav_silence(path, self.tts_pre_roll_ms)
 
     def _play_path(self, path: str, *, text: str = "") -> None:
         if not os.path.isfile(path):
@@ -1005,6 +1018,9 @@ class SpeakerManager:
             if text:
                 self._last_text = text
         env = dict(os.environ)
+        if self.playback_latency_ms > 0:
+            # libpulse 客户端请求更大的缓冲，降低蓝牙链路抖动导致的卡顿。
+            env["PULSE_LATENCY_MSEC"] = str(int(self.playback_latency_ms))
         try:
             proc = subprocess.Popen(
                 command,
@@ -1119,6 +1135,29 @@ class SpeakerManager:
             callback(str(kind), str(text), str(status))
         except Exception:  # noqa: BLE001
             pass
+
+
+def _prepend_wav_silence(path: str, milliseconds: int) -> None:
+    """在 WAV 前补静音；用于 A2DP 唤醒/功放启动的预滚。"""
+    ms = int(milliseconds)
+    if ms <= 0 or not path.lower().endswith(".wav"):
+        return
+    try:
+        with wave.open(path, "rb") as source:
+            params = source.getparams()
+            frames = source.readframes(source.getnframes())
+        silence_frames = int(params.framerate * ms / 1000.0)
+        silence = b"\x00" * (
+            silence_frames * params.nchannels * params.sampwidth
+        )
+        temporary = path + ".preroll.tmp"
+        with wave.open(temporary, "wb") as target:
+            target.setparams(params)
+            target.writeframes(silence)
+            target.writeframes(frames)
+        os.replace(temporary, path)
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.warning("add TTS pre-roll failed: %s", exc)
 
 
 def _short_output(value: Any, limit: int = 120) -> str:

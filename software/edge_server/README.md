@@ -31,7 +31,7 @@
 | 项目 | 结果 |
 |---|---|
 | `colcon build --packages-select custom_msgs edge_server` | 通过 |
-| `pytest tests -q` | 125 passed |
+| `pytest tests -q` | 126 passed |
 | `tests/end_to_end_check.py` | 7/7 passed |
 | `tests/slam_nav_check.py` + `fake_slam_robot.py` | 6/6 passed |
 
@@ -421,7 +421,9 @@ Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
 | `volume` | `70` | 首次连接音量 0..100 |
 | `audio_dir` | `~/.local/share/rush-mog/audio` | `POST /api/speaker/play` 允许的目录 |
 | `say_topic` / `status_topic` | `/body/say` / `/body/audio_status` | ROS 话题 |
+| `playback_latency_ms` | `250` | paplay 请求缓冲，降低蓝牙抖动卡顿 |
 | `tts.backend` | `auto` | `espeak-ng` / `edge-tts` / `none` |
+| `tts.pre_roll_ms` | `450` | TTS 前补静音，避免 A2DP 唤醒吞掉第一个字 |
 | `tts.voice` | `cmn` | espeak-ng 中文音色；英文用 `en-us` |
 
 接口示例：
@@ -464,6 +466,7 @@ dashboard 的「蓝牙音箱与语音播报」面板提供连接、停止、音�
 | `chunk_ms` | `100` | ROS AudioData 帧长度 |
 | `max_duration_sec` | `60` | 单次录音上限 |
 | `volume` | `100` | 麦克风输入音量 0..100 |
+| `gain` | `3.0` | 软件增益 1.0..8.0，HFP 麦克风偏小时调大（默认 +9.5dB） |
 | `topic` / `status_topic` | `/edge/audio` / `/body/mic_status` | ROS 话题 |
 
 ```bash
@@ -577,7 +580,7 @@ dashboard 的 BOM「电源及转换板」卡片使用该状态；health monitor 
 ```bash
 cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 125 passed
+# 126 passed
 ```
 
 单独跑健康检查（不依赖 ROS 图）：

@@ -95,6 +95,8 @@ edge_server:
       say_topic: "/body/say"
       status_topic: "/body/audio_status"
       status_rate_hz: 1.0
+      # paplay 请求的缓冲；蓝牙链路抖动时可适当加大
+      playback_latency_ms: 250
       # 同一台 newmine 的 HFP 麦克风；录音时临时切 HFP，停止后恢复 A2DP
       microphone:
         enabled: true
@@ -104,6 +106,7 @@ edge_server:
         chunk_ms: 100
         max_duration_sec: 60
         volume: 100
+        gain: 3.0
         topic: "/edge/audio"
         status_topic: "/body/mic_status"
         status_rate_hz: 1.0
@@ -113,6 +116,7 @@ edge_server:
         speed: 150
         pitch: 50
         max_chars: 200
+        pre_roll_ms: 450
     # 树莓派电源监控：vcgencmd get_throttled + rpi_volt，正常即代表电源及转换板正常
     power:
       enabled: true

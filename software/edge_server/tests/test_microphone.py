@@ -1,8 +1,10 @@
 """蓝牙 HFP 麦克风采集/录音测试（不依赖真实蓝牙）。"""
 
+import audioop
 import os
 import stat
 import time
+import wave
 
 import pytest
 
@@ -177,7 +179,7 @@ def test_record_and_finish_restores_profile(tmp_path, monkeypatch):
     fake_parec = bin_dir / "parec"
     fake_parec.write_text(
         "#!/bin/sh\n"
-        "while true; do dd if=/dev/zero bs=320 count=1 2>/dev/null; sleep 0.02; done\n",
+        "while true; do dd if=/dev/zero bs=320 count=1 2>/dev/null | tr '\\000' '\\020'; sleep 0.02; done\n",
         encoding="utf-8",
     )
     fake_parec.chmod(fake_parec.stat().st_mode | stat.S_IXUSR)
@@ -187,6 +189,7 @@ def test_record_and_finish_restores_profile(tmp_path, monkeypatch):
         tmp_path,
         speaker=speaker,
         which=lambda name: str(fake_parec) if name == "parec" else None,
+        gain=2.0,
     )
     manager.refresh_capabilities(force=True)
     manager.start(duration=0.3)
@@ -200,3 +203,7 @@ def test_record_and_finish_restores_profile(tmp_path, monkeypatch):
     assert ("set_profile", "a2dp-sink") in speaker.calls
     with open(status["last_file"], "rb") as handle:
         assert handle.read(4) == b"RIFF"
+    with wave.open(status["last_file"], "rb") as handle:
+        pcm = handle.readframes(handle.getnframes())
+    # 假 parec 输出 0x1010，增益 2x 后应接近 0x2020（8224）。
+    assert audioop.max(pcm, 2) > 7000

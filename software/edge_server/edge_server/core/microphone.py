@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import audioop
 import logging
 import os
 import re
@@ -100,6 +101,8 @@ class MicrophoneManager:
             float(cfg.get("max_duration_sec", 60.0)), 1.0, 600.0
         )
         self.volume = int(_clamp(int(cfg.get("volume", 100)), 0, 100))
+        # HFP/CVSD 麦克风通常偏小；软件增益在写 WAV/发布 ROS 前应用。
+        self.gain = float(_clamp(float(cfg.get("gain", 3.0)), 1.0, 8.0))
         self.topic = str(cfg.get("topic", "/edge/audio") or "/edge/audio")
         self.status_topic = str(
             cfg.get("status_topic", "/body/mic_status") or "/body/mic_status"
@@ -234,6 +237,7 @@ class MicrophoneManager:
                 "last_duration_ms": int(max(0.0, self._last_duration) * 1000.0),
                 "bytes": int(self._bytes),
                 "volume": int(self.volume),
+                "gain": round(float(self.gain), 2),
                 "error": str(self._error),
                 "max_duration_sec": float(self.max_duration_sec),
                 "record_dir": self.record_dir,
@@ -425,13 +429,22 @@ class MicrophoneManager:
         def publish_chunk(chunk: bytes) -> None:
             if not chunk:
                 return
-            wave_handle.writeframes(chunk)
+            pcm = chunk
             with self._lock:
-                self._bytes += len(chunk)
+                gain = float(self.gain)
+            if gain > 1.0:
+                try:
+                    pcm = audioop.mul(chunk, 2, gain)
+                except Exception as exc:  # noqa: BLE001
+                    LOGGER.warning("microphone gain failed: %s", exc)
+                    pcm = chunk
+            wave_handle.writeframes(pcm)
+            with self._lock:
+                self._bytes += len(pcm)
             callback = self._on_audio_chunk
             if callback is not None:
                 try:
-                    callback(bytes(chunk), self.sample_rate, self.channels)
+                    callback(bytes(pcm), self.sample_rate, self.channels)
                 except Exception as exc:  # noqa: BLE001
                     LOGGER.warning("microphone chunk callback failed: %s", exc)
 
@@ -655,6 +668,17 @@ class MicrophoneManager:
             source = str(self._source)
         if source:
             self._apply_volume(source)
+        return self.status()
+
+    def set_gain(self, value: Any) -> Dict[str, Any]:
+        try:
+            gain = float(str(value).strip())
+        except (TypeError, ValueError):
+            raise ValueError("gain 必须是数字")
+        if gain < 1.0 or gain > 8.0:
+            raise ValueError("gain 必须在 1.0..8.0")
+        with self._lock:
+            self.gain = gain
         return self.status()
 
     # ------------------------------------------------------------- helpers

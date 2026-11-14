@@ -640,7 +640,7 @@ class _EdgeRequestHandler(BaseHTTPRequestHandler):
 
         if path.startswith("/api/microphone"):
             action = path[len("/api/microphone") :].strip("/")
-            if action not in {"start", "stop", "play", "volume", "list"}:
+            if action not in {"start", "stop", "play", "volume", "gain", "list"}:
                 self._send_json(
                     404,
                     app.error_payload("not_found", "未知麦克风操作"),

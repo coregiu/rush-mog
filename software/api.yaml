@@ -1112,6 +1112,7 @@ paths:
         - `stop`：停止录音并恢复 A2DP；
         - `play`：`{"file":"mic-....wav"}` 回放录音；
         - `volume`：`{"volume":100}` 麦克风音量 0..100；
+        - `gain`：`{"gain":3.0}` 软件增益 1.0..8.0（HFP 麦克风偏小时使用）；
         - `list`：返回录音文件列表。
       operationId: edgeMicrophoneAction
       parameters:
@@ -1120,7 +1121,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [start, stop, play, volume, list]
+            enum: [start, stop, play, volume, gain, list]
       requestBody:
         required: false
         content:
@@ -2320,6 +2321,7 @@ components:
         last_duration_ms: {type: integer}
         bytes: {type: integer}
         volume: {type: integer, minimum: 0, maximum: 100}
+        gain: {type: number, minimum: 1.0, maximum: 8.0}
         max_duration_sec: {type: number}
         record_dir: {type: string}
         topic: {type: string, example: "/edge/audio"}
@@ -2369,6 +2371,8 @@ components:
             backend: {type: string, example: espeak-ng}
             voice: {type: string, example: cmn}
             speed: {type: integer}
+            pre_roll_ms: {type: integer, example: 450}
+            playback_latency_ms: {type: integer, example: 250}
         playback:
           type: object
           properties:

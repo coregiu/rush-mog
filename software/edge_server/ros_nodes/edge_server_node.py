@@ -264,6 +264,8 @@ class EdgeServerNode(Node):
             speaker_cfg["volume"] = saved.get("speaker_volume")
         if "microphone_volume" in saved:
             mic_cfg["volume"] = saved.get("microphone_volume")
+        if "microphone_gain" in saved:
+            mic_cfg["gain"] = saved.get("microphone_gain")
         keepalive_ms = _int_or(
             saved.get("motion_keepalive_ms"),
             _int_or(motion_cfg.get("keepalive_ms"), 200),
@@ -513,6 +515,7 @@ class EdgeServerNode(Node):
             "stream_fps": self.stream_fps,
             "speaker_volume": self.speaker.volume,
             "microphone_volume": self.microphone.volume,
+            "microphone_gain": self.microphone.gain,
         }
         try:
             directory = os.path.dirname(self._state_file)
@@ -715,6 +718,11 @@ class EdgeServerNode(Node):
             value = fields.get("volume", fields.get("value", ""))
             status = self.microphone.set_volume(value)
             return {"ok": True, "message": "麦克风音量已更新", "microphone": status}
+        if name == "gain":
+            value = fields.get("gain", fields.get("value", ""))
+            status = self.microphone.set_gain(value)
+            self._save_state()
+            return {"ok": True, "message": "麦克风增益已更新", "microphone": status}
         if name == "list":
             return self.microphone.recordings()
         raise ValueError(f"未知麦克风动作: {name}")
@@ -1193,6 +1201,7 @@ class EdgeServerNode(Node):
             "mic_source": str(microphone["source"]),
             "mic_last_file": str(microphone["last_file_name"]),
             "mic_volume": int(microphone["volume"]),
+            "mic_gain": float(microphone["gain"]),
             "power_status": str(power["status"]),
             "power_model": str(power["model"]),
             "power_throttled": str(power["throttled_raw"]),
@@ -1306,6 +1315,8 @@ class EdgeServerNode(Node):
                    "string", "音频", False, "", "", "", ""),
             _param("mic_volume", "麦克风音量", values["mic_volume"],
                    "int", "音频", True, "%", "0", "100", "5"),
+            _param("mic_gain", "麦克风增益", values["mic_gain"],
+                   "float", "音频", True, "x", "1", "8", "1"),
             _param("power_status", "电源状态", json.dumps(values["power_status"]),
                    "string", "电源", False, "", "", "", ""),
             _param("power_model", "树莓派型号", json.dumps(values["power_model"]),
@@ -1367,6 +1378,15 @@ class EdgeServerNode(Node):
                     raise ValueError("mic_volume 必须在 0..100")
                 self.microphone.set_volume(value)
                 changed[name] = value
+            elif name == "mic_gain":
+                try:
+                    gain = float(str(raw).strip())
+                except (TypeError, ValueError):
+                    raise ValueError("mic_gain 必须是 1.0..8.0")
+                if gain < 1.0 or gain > 8.0:
+                    raise ValueError("mic_gain 必须在 1.0..8.0")
+                self.microphone.set_gain(gain)
+                changed[name] = gain
             else:
                 raise ValueError(f"参数不可修改: {name}")
         if not changed:

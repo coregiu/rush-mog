@@ -435,7 +435,8 @@ sudo chsh -s /bin/bash ubuntu
 | 语音播报入队但没声音 | 默认 sink 不是蓝牙，或音箱静音/音量 0 | `pactl get-default-sink`、`pactl set-sink-mute <name> 0`、`POST /api/speaker/volume` |
 | `/api/microphone` 的 `supported=false` | 耳机 card 没有 HFP/HSP profile，或音箱未连接 | `pactl list cards \| grep -A12 bluez_card`；确认 `headset-head-unit` 存在 |
 | 录音报“未找到蓝牙麦克风输入源” | HFP profile 切换失败/被手机占用 | `bluetoothctl disconnect/connect`；`pactl list short sources \| grep bluez_input`；再重试 |
-| 录音没声音/文件很小 | 麦克风静音、音量低或距离远 | `pactl list sources` 看 `Mute`/`Volume`；`POST /api/microphone/volume` 调大 |
+| 录音没声音/文件很小 | 麦克风静音、音量低或距离远 | `pactl list sources` 看 `Mute`/`Volume`；`POST /api/microphone/volume` 调大；`POST /api/microphone/gain` 调软件增益 |
+| 语音卡顿/少第一个字 | A2DP 唤醒丢包、WiFi 2.4G 共存或 PipeWire 无实时调度 | 已配置预滚/缓冲/常驻 sink/RTKit/WiFi 省电关闭；仍卡顿优先切 5GHz WiFi |
 | `/api/power` 为 `error` / `undervoltage=true` | 5V 供电不足、线缆压降或电源转换板异常 | 检查 12V→5V 3A 输出、USB-C 线、接线端子；`vcgencmd get_throttled`、`dmesg \| grep -i undervolt` |
 | `/api/power` 为 `degraded` | 当前降频/温度限制，不一定是电源 | 看 `warnings`、`temperature_c`；先降温/降负载再复测 |
 | 网页 200 但还是旧界面 | 没 build/restart，或浏览器缓存 | 重新 build + restart，浏览器 Ctrl-F5 |
@@ -465,6 +466,9 @@ sudo chsh -s /bin/bash ubuntu
 | 音箱状态 | `http://192.168.3.26/api/speaker` |
 | 麦克风状态 | `http://192.168.3.26/api/microphone` |
 | 电源状态 | `http://192.168.3.26/api/power` |
+| WirePlumber 音频规则 | `/home/ubuntu/.config/wireplumber/bluetooth.lua.d/51-rush-mog.lua` |
+| RTKit 授权 | `/etc/polkit-1/localauthority/50-local.d/50-rush-mog-rtkit.pkla` |
+| WiFi 省电关闭 | `/etc/systemd/system/wifi-powersave-off.service` |
 | MJPEG | `http://192.168.3.26:8080/stream` |
 | 健康网关 | `http://127.0.0.1:8090/ros/health`（仅本机） |
 | 串口 | `/dev/ttyAMA1`（GPIO4/5，UART3），115200 8N1 |

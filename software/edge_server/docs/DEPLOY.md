@@ -180,7 +180,7 @@ cd /mnt/f/CODE/rush-mog/software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest -q tests
 ```
 
-当前基线：`125 passed`。
+当前基线：`126 passed`。
 
 ### 3.3 同步源码到 Pi
 
@@ -372,6 +372,10 @@ ros2 topic pub --once /body/say std_msgs/msg/String "{data: 请注意避让}"
 
 - TTS 使用 `espeak-ng -v cmn`，离线可用；音色/语速在
   `edge.speaker.tts.voice/speed` 调整；
+- 每个 TTS 默认前置 450ms 静音（`tts.pre_roll_ms`），避免 A2DP 从
+  SUSPENDED 唤醒时吞掉第一个字；
+- `playback_latency_ms`（默认 250）通过 `PULSE_LATENCY_MSEC` 请求更大
+  播放缓冲，降低蓝牙/WiFi 抖动造成的卡顿；
 - 播放队列串行，最多 20 条；`POST /api/speaker/stop` 清空并停止；
 - 播放本地文件：先放到 `/var/lib/edge_server/audio/`，再
   `POST /api/speaker/play -d '{"file":"prompt.wav"}'`；只允许该目录
@@ -421,6 +425,8 @@ curl -X POST http://192.168.3.26/api/microphone/play \
 
 录音期间：
 - `GET /api/microphone` 的 `recording=true`，`source=bluez_input...`；
+- 默认 `gain=3.0` 会在写 WAV/发 ROS 前做软件增益（约 +9.5dB）；
+  可在 `/api/microphone/gain` 或 dashboard 参数里调整 1.0..8.0；
 - `ros2 topic hz /edge/audio` 约 10 Hz；
 - 输出 sink 变为 `...headset-head-unit`，属正常；
 - 停止后 `GET /api/speaker` 的 sink 恢复 `...a2dp-sink`。
@@ -460,3 +466,41 @@ curl -s http://192.168.3.26/api/power | python3 -m json.tool
 
 dashboard 的「电源及转换板」卡片直接使用 `/api/power`；health monitor 的
 `power` 设备使用 `/body/power_status`，电源异常时整体健康会降级。
+
+### 7.6 语音卡顿/少第一个字与麦克风音量优化
+
+已部署的优化（2026-11-14）：
+
+1. **TTS 预滚 450ms**：`edge.speaker.tts.pre_roll_ms`，在 espeak 合成后
+   给 WAV 前补静音，覆盖 A2DP 从挂起唤醒/功放启动的时间，避免第一个字被吞。
+2. **播放缓冲 250ms**：`edge.speaker.playback_latency_ms`，通过
+   `PULSE_LATENCY_MSEC` 让 `paplay` 请求更大缓冲，降低蓝牙链路抖动卡顿。
+3. **A2DP sink 常驻**：`/home/ubuntu/.config/wireplumber/bluetooth.lua.d/51-rush-mog.lua`
+   给 `bluez_output.*` 设置 `session.suspend-timeout-seconds=0`，播放结束后
+   sink 保持 IDLE 而不是 SUSPENDED，减少下次唤醒丢字。
+4. **PipeWire 实时调度**：`/etc/polkit-1/localauthority/50-local.d/50-rush-mog-rtkit.pkla`
+   允许 `ubuntu` 获取 RealtimeKit 实时权限；重启后 `pipewire` 音频线程为
+   `RR 20`，不再报 `RTKit ... AccessDenied`。
+5. **WiFi 省电关闭**：`/etc/systemd/system/wifi-powersave-off.service`
+   开机执行 `iw dev wlan0 set power_save off`，降低 2.4GHz WiFi 与蓝牙
+   共存抖动。
+6. **麦克风软件增益**：`edge.speaker.microphone.gain` 默认 `3.0`（约 +9.5dB），
+   在写 WAV/发 ROS 前用 `audioop.mul` 放大；可用
+   `POST /api/microphone/gain {"gain":3.0}` 在线调整（1.0..8.0）。
+
+检查：
+
+```bash
+# sink 播放后保持 IDLE 而不是 SUSPENDED
+pactl list short sinks | grep bluez_output
+# PipeWire 实时线程
+ps -eLo pid,tid,cls,rtprio,ni,comm | grep -E 'pipewire|wireplumber'
+# WiFi 省电
+iw dev wlan0 get power_save
+# 麦克风增益/录音
+curl -s http://192.168.3.26/api/microphone | python3 -m json.tool
+```
+
+如果仍卡顿，优先把 Pi 的 WiFi 切到 **5GHz**（当前 `wlan0` 在 2.4GHz
+channel 1，与蓝牙共用天线），或靠近路由器/音箱；这是无线共存问题，
+软件缓冲只能缓解，不能完全消除 2.4GHz 干扰。

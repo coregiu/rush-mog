@@ -5,6 +5,7 @@ import pytest
 from edge_server.core.speaker import (
     CommandResult,
     SpeakerManager,
+    _prepend_wav_silence,
     normalize_mac,
     parse_bluetooth_devices,
     parse_bluetooth_info,
@@ -175,6 +176,21 @@ def test_say_validation_and_disabled(tmp_path):
     with pytest.raises(Exception):
         manager.say("你好")
     assert manager.status()["status"] == "disabled"
+
+
+def test_prepend_wav_silence(tmp_path):
+    import wave
+
+    path = tmp_path / "say.wav"
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(8000)
+        handle.writeframes(b"\x10\x00" * 800)
+    _prepend_wav_silence(str(path), 450)
+    with wave.open(str(path), "rb") as handle:
+        assert handle.getnframes() == 800 + int(8000 * 0.45)
+        assert handle.getframerate() == 8000
 
 
 def test_player_command_prefers_paplay(tmp_path):
