@@ -114,6 +114,8 @@ edge_server:
       scan_timeout_sec: 10
       connect_timeout_sec: 20
       sink_wait_sec: 8
+      recover_wireplumber: true       # profile-unavailable 时重启用户级 WirePlumber
+      recover_interval_sec: 180
       volume: 70
       audio_dir: "~/.local/share/rush-mog/audio"
       say_topic: "/body/say"

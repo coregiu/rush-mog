@@ -30,13 +30,12 @@ const MODULE_META = {
   center: { name: 'CENTER SERVER', subtitle: 'SmolVLA · 推理中心', glyph: 'C', order: 2 },
 };
 
-// hardware/README.md 的 BOM 清单（11 项；麦轮底盘与电机驱动合并，Astra 彩色/深度分卡）
+// hardware/README.md 的 BOM 清单（10 项；麦轮底盘与电机驱动合并，Astra RGB-D 合并）
 const HARDWARE_MODULES = [
   { id: 'pi', name: '板载计算机', model: 'Raspberry Pi 4B', glyph: 'PI' },
   { id: 'stm32', name: 'STM 控制板', model: 'STM32F103C8T6', glyph: 'MCU' },
   { id: 'lidar', name: '雷达', model: 'D6 / LD19', glyph: 'LID' },
-  { id: 'camera', name: '相机', model: 'Astra Pro · RGB', glyph: 'CAM' },
-  { id: 'depth', name: '深度相机', model: 'Astra Pro · Depth', glyph: 'DEP' },
+  { id: 'camera', name: '深度相机', model: 'Astra Pro · RGB-D', glyph: 'CAM' },
   { id: 'imu', name: '陀螺仪', model: 'ICM-20948', glyph: 'IMU' },
   { id: 'cliff', name: '悬崖传感器', model: 'TCRT5000 ×2', glyph: 'CLF' },
   { id: 'chassis', name: '电机驱动+编码器', model: 'JGB37-520 ×4 · L298N', glyph: 'CHS' },
@@ -1080,23 +1079,52 @@ function hardwareState(id) {
       };
     }
     case 'camera': {
-      const device = rosDevice('camera');
+      // Astra Pro 的 RGB 与 Depth 是同一个物理模块，合并为一张「深度相机」卡片。
+      const rgb = rosDevice('camera');
+      const depth = rosDevice('depth_camera');
       const streaming = Boolean(p.camera);
-      const chips = deviceMetricChips(device);
-      if (!device && streaming) chips.unshift('MJPEG OK');
-      return {
-        status: device ? device.status : (streaming ? 'ok' : 'unknown'),
-        detail: deviceDetail(device, streaming ? 'MJPEG 可用' : '未接入 · 等待 /camera/color/image_raw'),
-        chips,
+      const statuses = [rgb, depth]
+        .map((device) => (device ? device.status : ''))
+        .filter((status) => status && status !== 'unknown' && status !== 'disabled');
+      const okCount = statuses.filter((status) => status === 'ok').length;
+      let status = 'unknown';
+      if (rgb && depth && rgb.status === 'ok' && depth.status === 'ok') {
+        status = 'ok';
+      } else if (statuses.length === 0) {
+        status = streaming ? 'degraded' : 'unknown';
+      } else if (statuses.length > 0 && statuses.every((value) => value === 'error')) {
+        status = 'error';
+      } else if (okCount > 0) {
+        status = 'degraded';
+      } else if (statuses.length > 0) {
+        status = 'degraded';
+      }
+
+      const streamChip = (label, device) => {
+        if (!device) return `${label} --`;
+        if (device.status === 'ok' && device.rate_hz != null) {
+          return `${label} ${fmtNumber(device.rate_hz)}Hz`;
+        }
+        return `${label} ${statusLabel(device.status)}`;
       };
-    }
-    case 'depth': {
-      const device = rosDevice('depth_camera');
-      return {
-        status: device ? device.status : 'unknown',
-        detail: deviceDetail(device, '未接入 · 等待 /camera/depth/image_raw'),
-        chips: deviceMetricChips(device),
-      };
+      const chips = [
+        streamChip('RGB', rgb),
+        streamChip('DEP', depth),
+        streaming ? 'MJPEG OK' : 'RGB-D',
+      ];
+      let detail = 'Astra Pro RGB-D · 640×480@10Hz · /camera/color + /camera/depth';
+      if (!rgb && !depth) {
+        detail = '未接入 · 等待 /camera/color/image_raw + /camera/depth/image_raw';
+      } else if (!rgb) {
+        detail = '深度已接入，彩色缺失 · 等待 /camera/color/image_raw';
+      } else if (!depth) {
+        detail = '彩色已接入，深度缺失 · 等待 /camera/depth/image_raw';
+      } else if (status === 'ok') {
+        detail = 'Astra Pro RGB + Depth · 640×480@10Hz · 深度对齐彩色';
+      } else {
+        detail = 'Astra Pro RGB-D · 至少一路异常，见 ROS health';
+      }
+      return { status, detail, chips };
     }
     case 'imu': {
       const device = rosDevice('imu');
@@ -1245,6 +1273,19 @@ function hardwareState(id) {
     }
     case 'speaker': {
       const device = rosDevice('speaker');
+      const speaker = state.speaker;
+      if (speaker && speaker.enabled !== false && !speaker.connected) {
+        const reason = String(speaker.last_error || '').trim();
+        return {
+          status: speaker.status === 'error' ? 'error' : 'degraded',
+          detail: reason || '音箱未连接，后台每 20s 自动重试',
+          chips: [
+            String(speaker.state || 'offline').toUpperCase(),
+            'A2DP --',
+            'RETRY 20s',
+          ],
+        };
+      }
       return {
         status: device ? device.status : 'unknown',
         detail: deviceDetail(device, '未接入 · 蓝牙音箱'),

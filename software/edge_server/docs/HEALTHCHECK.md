@@ -822,7 +822,7 @@ cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests/test_health_monitor.py tests/test_health_http.py -q
 # 29 passed
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 133 passed（含音箱/API 新增用例）
+# 134 passed（含音箱/API 新增用例）
 ```
 
 覆盖：

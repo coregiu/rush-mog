@@ -31,7 +31,7 @@
 | 项目 | 结果 |
 |---|---|
 | `colcon build --packages-select custom_msgs edge_server` | 通过 |
-| `pytest tests -q` | 133 passed |
+| `pytest tests -q` | 134 passed |
 | `tests/end_to_end_check.py` | 7/7 passed |
 | `tests/slam_nav_check.py` + `fake_slam_robot.py` | 6/6 passed |
 
@@ -213,12 +213,13 @@ ros2 launch edge_server slam_stack.launch.py
 # 定位/导航（注意：Nav2 最终速度被重映射到 /nav/cmd_vel）
 ros2 launch edge_server nav2_stack.launch.py map:=$HOME/rush_mog/maps/rush_mog.yaml
 
-# EKF（单独启动）
-ros2 run robot_localization ekf_node --ros-args \
-  --params-file <install>/share/edge_server/config/ekf.yaml
+# EKF（可选；先确认 base.publish_tf=false，避免和 edge_server 抢 odom->base_link）
+ros2 launch edge_server ekf.launch.py
 ```
 
 若未安装 Nav2，`navigation.backend: auto` 会自动回退到内置直航，只需 `/scan`、`/center/pose`。
+当前 Pi 已安装 `slam_toolbox`、`robot_localization`；`nav2_bringup` 尚未安装。
+建图前先确认 `/scan` 有 publisher、`base_link→laser_link` 和 `odom→base_link` TF 正常。
 
 ---
 
@@ -663,7 +664,7 @@ curl -s http://192.168.3.26/api/modules/ros/health | python3 -m json.tool | grep
 ```bash
 cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 133 passed
+# 134 passed
 ```
 
 单独跑健康检查（不依赖 ROS 图）：

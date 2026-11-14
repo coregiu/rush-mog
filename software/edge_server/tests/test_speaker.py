@@ -133,6 +133,27 @@ def test_connect_selects_bluez_sink(tmp_path):
     assert runner.called("pactl", "set-sink-volume")
 
 
+def test_profile_unavailable_restarts_wireplumber_once(tmp_path, monkeypatch):
+    import edge_server.core.speaker as speaker_module
+
+    monkeypatch.setattr(speaker_module.time, "sleep", lambda _seconds: None)
+    runner = FakeRunner()
+    manager = SpeakerManager(
+        {
+            "enabled": True,
+            "device_mac": "73:DB:39:F2:15:4B",
+            "audio_dir": str(tmp_path),
+            "recover_interval_sec": 60.0,
+        },
+        runner=runner,
+        which=fake_which,
+        temp_dir=str(tmp_path / "tmp"),
+    )
+    assert manager._recover_audio_profile("org.bluez.Error.Failed br-connection-profile-unavailable")
+    assert runner.called("systemctl", "--user", "restart", "wireplumber")
+    assert not manager._recover_audio_profile("br-connection-profile-unavailable")
+
+
 def test_connected_without_sink_reconnects_profile(tmp_path):
     runner = FakeRunner(sinks=[])
     manager = SpeakerManager(

@@ -30,8 +30,9 @@
   - `build-essential`、`cmake`。
 - SLAM/导航依赖（2026-11-14）：
   - 已安装 `ros-humble-slam-toolbox`，可直接 `ros2 launch edge_server slam_stack.launch.py`；
-  - `ros-humble-navigation2`、`ros-humble-robot-localization` 尚未安装；
-    没有 Nav2 时 `navigation_node` 的 `backend: auto` 会回退到内置直航。
+  - 已安装 `ros-humble-robot-localization`，可用 `ekf.launch.py`；
+  - `ros-humble-navigation2`/`nav2_bringup` 尚未安装；没有 Nav2 时
+    `navigation_node` 的 `backend: auto` 会回退到内置直航。
 - 启用 GPIO4/5 的 UART3（2026-11-14）：
   - `/boot/firmware/config.txt` 末尾追加 `dtoverlay=uart3`；
   - 重启后生成 `/dev/ttyAMA1`，供 `edge_server_node` 直连 STM32 USART3；
@@ -134,10 +135,12 @@
 - ICM-20948：`i2c-tools`/`python3-smbus2` 已安装，`imu.enabled=true`，
   `imu_node` 已随 edge_server 服务启动；当前 I2C1 扫描为空（无 0x68/0x69），
   节点每 2s 重试，health `imu` 为 `unknown`；接好线即自动出数据
-- 悬崖：STM32 固件源码已加 `cliff_mask`，本机已编译出
-  `software/body_control/build/src/body_control.bin`；**当前 STM32 仍运行
-  旧 8 字段固件，尚未烧录**，所以 `/body/cliff_status` 的 `available=false`，
-  dashboard 显示“无悬崖遥测”；烧录 §7.9 的固件后生效
+- 音箱/麦克风：当前 newmine 连续 `br-connection-page-timeout/profile-unavailable`，
+  扫描不到广播；软件已做 20s 重连、A2DP sink 重协商和 WirePlumber 自愈（180s 冷却），
+  但仍需音箱开机/充电并断开手机；麦克风会随音箱恢复
+- 悬崖：STM32 已上报 9 字段 `$B`（`cliff_mask` 可用）；当前 `mask=3`，
+  即 PB3/PB4 都被判为触发；如果传感器实际不在桌沿，检查模块供电/DO 电平/
+  触发宏，dashboard 会如实显示左右 `CLIFF`
 - ROS 健康整体为 `degraded`（缺相机/雷达/IMU/底盘数据），当前属预期
 
 ---
@@ -197,7 +200,7 @@ cd /mnt/f/CODE/rush-mog/software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest -q tests
 ```
 
-当前基线：`133 passed`。
+当前基线：`134 passed`。
 
 ### 3.3 同步源码到 Pi
 
@@ -403,6 +406,10 @@ ros2 topic pub --once /body/say std_msgs/msg/String "{data: 请注意避让}"
 - **`br-connection-page-timeout`**：音箱未响应经典蓝牙寻呼。多数是：
   音箱被手机连着、处于休眠/关机、超出距离，或需要按一下音箱上的配对键。
   在手机端断开后，节点会在下一个 20s 周期自动连上。
+- **`br-connection-profile-unavailable`**：BlueZ 已连上但 A2DP endpoint 未注册。
+  `speaker.py` 会带 180s 冷却重启用户级 WirePlumber 后重试；dashboard 事件里会显示
+  “检测到 A2DP profile 不可用...”。如果同时出现 `page-timeout`/设备不广播，
+  优先检查音箱电源，而不是继续重试。
 - **已连接但 `audio_ready=false`**：PipeWire/WirePlumber 没起来。检查：
   ```bash
   systemctl --user is-active pipewire pipewire-pulse wireplumber
@@ -770,3 +777,51 @@ sudo i2cdetect -y 1
 ros2 topic hz /imu/data
 curl -s http://127.0.0.1:8090/ros/health | python3 -m json.tool | grep -A5 '"id": "imu"'
 ```
+
+### 7.11 SLAM 链路验收
+
+当前 Edge 侧模块已齐：
+
+| 模块 | 状态 |
+|---|---|
+| `slam_toolbox` | 已安装，`slam_stack.launch.py` 可启动 |
+| `map_manager_node` | 已随 `edge_server` 服务启动，`/center/map_control` 可用 |
+| `/scan` 驱动 | `lidar_node` 已部署；当前无雷达硬件，`/scan` 无 publisher |
+| TF | `edge_server_node` 发布 `odom→base_link`；`lidar_node` 发布 `base_link→laser_link`（雷达启动时） |
+| EKF | `robot_localization` 已安装，`ekf.launch.py` + `ekf.yaml` 可用；默认不启动，避免和 `base.publish_tf` 抢 TF |
+| Nav2 | `nav2_bringup` 未安装；`navigation_node` 自动回退内置直航 |
+
+启动顺序：
+
+```bash
+# 1) 实车边端（含 map_manager；若用完整栈也可 robot_bringup）
+ros2 launch edge_server robot_bringup.launch.py
+
+# 2) 建图
+ros2 launch edge_server slam_stack.launch.py
+
+# 3) 可选：EKF（先把 robot.yaml 的 base.publish_tf 改 false）
+ros2 launch edge_server ekf.launch.py
+```
+
+验收：
+
+```bash
+ros2 topic hz /scan                 # 需雷达；当前 0 publisher
+ros2 run tf2_ros tf2_echo base_link laser_link
+ros2 run tf2_ros tf2_echo odom base_link
+ros2 run tf2_ros tf2_echo map odom
+ros2 topic echo /map --once         # slam_toolbox 启动后应有 OccupancyGrid
+```
+
+地图保存（已实测）：
+
+```bash
+ros2 service call /center/map_control custom_msgs/srv/MapControl \
+  "{command: save, map_name: /tmp/rush_slam_test}"
+# 成功时应生成 /tmp/rush_slam_test.pgm + .yaml
+```
+
+当前这台 Pi 的 `/scan` publisher 数量为 0、`/imu/data` 无数据，所以真实 SLAM
+还不能跑；先按 §7.7/§7.10 接好 D6 和 ICM-20948。合成激光 + TF + slam_toolbox
+已联调通过，`/map` 能生成并保存。

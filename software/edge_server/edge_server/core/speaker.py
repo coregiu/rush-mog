@@ -246,6 +246,10 @@ class SpeakerManager:
         self.connect_timeout_sec = _clamp(
             float(cfg.get("connect_timeout_sec", 20.0)), 5.0, 60.0
         )
+        self.recover_wireplumber = bool(cfg.get("recover_wireplumber", True))
+        self.recover_interval_sec = _clamp(
+            float(cfg.get("recover_interval_sec", 180.0)), 30.0, 1800.0
+        )
         self.sink_wait_sec = _clamp(
             float(cfg.get("sink_wait_sec", 8.0)), 1.0, 30.0
         )
@@ -297,6 +301,7 @@ class SpeakerManager:
         self._sink_ready = False
         self._last_error = ""
         self._last_connected_at = 0.0
+        self._last_profile_recover_at = 0.0
         self._last_played_at = 0.0
         self._last_text = ""
         self._playing = False
@@ -751,11 +756,23 @@ class SpeakerManager:
             info = self._bluetooth_info(mac)
             if not info.get("connected"):
                 detail = _short_output(connect.stderr or connect.stdout)
-                self._set_error(
-                    f"蓝牙连接失败 {display_name}"
-                    + (f"（{detail}）" if detail else "")
-                )
-                return
+                # BlueZ 已连过该设备但 A2DP endpoint 未注册时，重试 connect
+                # 往往仍报 profile-unavailable；重启 WirePlumber 可恢复。
+                if self._recover_audio_profile(detail):
+                    connect = self._run(
+                        ["bluetoothctl", "connect", mac],
+                        timeout=self.connect_timeout_sec,
+                    )
+                    time.sleep(0.6)
+                    info = self._bluetooth_info(mac)
+                    if not info.get("connected"):
+                        detail = _short_output(connect.stderr or connect.stdout)
+                if not info.get("connected"):
+                    self._set_error(
+                        f"蓝牙连接失败 {display_name}"
+                        + (f"（{detail}）" if detail else "")
+                    )
+                    return
 
         with self._lock:
             self._connected = True
@@ -766,6 +783,29 @@ class SpeakerManager:
             self._last_connected_at = float(self._wall_clock())
         self._emit("speaker", f"蓝牙音箱已连接 {display_name} ({mac})", "ok")
         self._refresh_sink(mac, initial=True)
+
+    def _recover_audio_profile(self, detail: str) -> bool:
+        """profile-unavailable 时重启一次用户级 WirePlumber（带冷却）。"""
+        if not self.recover_wireplumber:
+            return False
+        text = str(detail or "").lower()
+        if "profile-unavailable" not in text and "profile unavailable" not in text:
+            return False
+        now = time.monotonic()
+        if (now - self._last_profile_recover_at) < self.recover_interval_sec:
+            return False
+        self._last_profile_recover_at = now
+        self._emit(
+            "speaker",
+            "检测到 A2DP profile 不可用，重启 WirePlumber 后重试",
+            "warn",
+        )
+        self._run(
+            ["systemctl", "--user", "restart", "wireplumber"],
+            timeout=15.0,
+        )
+        time.sleep(1.2)
+        return True
 
     def _refresh_sink(self, mac: str, *, initial: bool = False) -> bool:
         deadline = time.monotonic() + (self.sink_wait_sec if initial else 2.0)
