@@ -404,7 +404,7 @@ class HealthMonitorNode(Node):
                 error = "non-finite odometry"
         elif isinstance(msg, String):
             metrics["bytes"] = len(msg.data)
-            if spec.kind in {"base", "speaker", "microphone", "power"}:
+            if spec.kind in {"base", "speaker", "microphone", "power", "cliff"}:
                 try:
                     data = json.loads(msg.data)
                 except Exception:  # noqa: BLE001
@@ -437,6 +437,21 @@ class HealthMonitorNode(Node):
                                     + ": "
                                     + str(data.get("error") or data.get("throttled_raw") or "")
                                 )
+                        if spec.kind == "cliff":
+                            if data.get("available") is False:
+                                invalid = True
+                                error = "cliff telemetry unavailable (STM32 firmware needs update)"
+                            elif data.get("triggered") is True:
+                                side = []
+                                if data.get("left"):
+                                    side.append("left")
+                                if data.get("right"):
+                                    side.append("right")
+                                invalid = True
+                                error = "cliff detected: " + ("+".join(side) or "unknown")
+                            elif data.get("online") is False:
+                                invalid = True
+                                error = "cliff sensor offline"
         else:
             metrics["message_class"] = type(msg).__name__
 

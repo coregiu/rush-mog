@@ -92,6 +92,11 @@ $ 如果在wsl中执行烧录，需要的windows terminal中执行：
 - 任一模块触发：立即清空命令队列、封锁运动并写 STOP；触发期间只允许停车 `0` 和后退 `2`，前进、横移、转向、测试序列都会被改成停车。
 - 传感器恢复（通常是已经后退离开悬崖）后自动解除封锁，恢复遥控/ROS 控制。
 - 没有使用 EXTI：EXTI3/EXTI4 已被 PA3/PA4 编码器占用。
+- 遥测第 9 字段为悬崖掩码：`$B,<seq>,<uptime_ms>,<fl>,<fr>,<rl>,<rr>,<distance_mm>,<cliff_mask>`；
+  `cliff_mask` bit0=左前 PB3、bit1=右前 PB4，1=触发。旧固件仍是 8 字段，
+  Edge Server 会兼容解析并显示“无悬崖遥测”。
+- Edge Server 1 Hz 发布 `/body/cliff_status`，health `cliff` 与 dashboard「悬崖传感器」
+  卡片读取；触发时 dashboard 显示红色 `CLIFF`，并写入运行事件。
 
 接线与标定注意：
 

@@ -353,9 +353,11 @@ x-body-control-uart:
     note: |
       STM32 不返回命令 ACK，uart_log 输出已关闭。
       USART3 上会周期发送编码器遥测（STM32 -> Pi Edge Server）：
-      $B,<seq>,<uptime_ms>,<fl>,<fr>,<rl>,<rr>,<distance_mm>\n
-      轮速单位 mm/s，里程单位 mm；Edge Server 解析后通过 GET /api/body
-      和 GET /api/modules 的 edge.body 暴露，同时发布 ROS /odom。
+      $B,<seq>,<uptime_ms>,<fl>,<fr>,<rl>,<rr>,<distance_mm>,<cliff_mask>\n
+      轮速单位 mm/s，里程单位 mm；cliff_mask bit0=左前 PB3、bit1=右前 PB4。
+      Edge Server 兼容旧 8 字段固件，解析后通过 GET /api/body 和
+      GET /api/modules 的 edge.body 暴露，同时发布 ROS /odom 与
+      /body/cliff_status。
   second_byte:
     motion_direct: "0-9/A/B/C/D 命令可带 1 位 PWM：0=停，1..9 对应约 11%..100% 占空比。"
     audio_play: "P 命令可带 1 位曲目索引 1..9；不带则播放 V8_STOP（索引 1）。"
@@ -975,6 +977,7 @@ paths:
         Pi Edge Server 从 UART 解析 STM32 编码器遥测后缓存的最新帧。
         轮速单位 mm/s，distance_mm 为四轮平均绝对里程。
         `valid=false` 表示从未收到；`stale=true` 表示超过 2s 未更新。
+        `cliff.available=false` 表示 STM32 固件尚未上报第 9 字段 cliff_mask。
       operationId: edgeBody
       responses:
         '200':
@@ -988,6 +991,15 @@ paths:
                   body:
                     type: object
                     properties:
+                      cliff:
+                        type: object
+                        properties:
+                          available: {type: boolean}
+                          mask: {type: integer}
+                          left: {type: boolean}
+                          right: {type: boolean}
+                          triggered: {type: boolean}
+                          state: {type: string}
                       valid: {type: boolean}
                       stale: {type: boolean}
                       source: {type: string, example: stm32}

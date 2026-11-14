@@ -486,6 +486,14 @@ edge_server:
         timeout_sec: 3.0
         required: true
         qos: "reliable"
+      cliff:
+        type: cliff
+        topic: "/body/cliff_status"
+        message_type: "std_msgs/msg/String"
+        expected_rate_hz: 1.0
+        timeout_sec: 3.0
+        required: false
+        description: "STM32 TCRT5000 cliff sensors PB3/PB4"
       battery:
         type: battery
         topic: "/battery_state"

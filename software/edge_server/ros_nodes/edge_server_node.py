@@ -231,6 +231,7 @@ class EdgeServerNode(Node):
 
         self.telemetry = BodyTelemetry()
         self._last_uptime_ms: Optional[int] = None
+        self._last_cliff_mask: Optional[int] = None
         self._telemetry_mono = 0.0
         self._serial_connected = False
         self._estop = False
@@ -384,6 +385,7 @@ class EdgeServerNode(Node):
         self.pub_odom = self.create_publisher(Odometry, "/odom", 20)
         self.pub_joint = self.create_publisher(JointState, "/joint_states", 20)
         self.pub_status = self.create_publisher(String, "/base/status", 10)
+        self.pub_cliff = self.create_publisher(String, "/body/cliff_status", 10)
         self.create_subscription(Twist, "/cmd_vel", self.on_cmd_vel, 10)
         self.create_subscription(
             SafetyState, "/center/safety_state", self.on_safety, 10
@@ -812,6 +814,30 @@ class EdgeServerNode(Node):
             self.telemetry = telemetry
             self._last_uptime_ms = telemetry.uptime_ms
             self._telemetry_mono = now
+        if telemetry.cliff_available:
+            previous_mask = self._last_cliff_mask
+            mask = int(telemetry.cliff_mask)
+            if mask != previous_mask:
+                if mask:
+                    sides = []
+                    if mask & 0x01:
+                        sides.append("左前")
+                    if mask & 0x02:
+                        sides.append("右前")
+                    self._record_event(
+                        "cliff",
+                        "悬崖触发：" + "+".join(sides) + "，已封锁前进/横移",
+                        source="cliff",
+                        status="error",
+                    )
+                elif previous_mask:
+                    self._record_event(
+                        "cliff",
+                        "悬崖解除，恢复运动控制",
+                        source="cliff",
+                        status="ok",
+                    )
+                self._last_cliff_mask = mask
         dt = 0.0
         if previous_uptime is not None:
             delta_ms = int(telemetry.uptime_ms) - int(previous_uptime)
@@ -964,6 +990,7 @@ class EdgeServerNode(Node):
                 if self._telemetry_mono > 0.0
                 else -1
             )
+            body_payload = telemetry.to_dict(now)
             payload = {
                 "source": "pi",
                 "seq": int(telemetry.seq),
@@ -978,8 +1005,25 @@ class EdgeServerNode(Node):
                 ),
                 "uptime_ms": int(telemetry.uptime_ms),
                 "serial_connected": bool(self._serial_connected),
+                "cliff": body_payload["cliff"],
+            }
+            cliff_payload = {
+                "source": "stm32",
+                "online": bool(fresh and body_payload["cliff"]["available"]),
+                "available": bool(body_payload["cliff"]["available"]),
+                "triggered": bool(body_payload["cliff"]["triggered"]),
+                "left": bool(body_payload["cliff"]["left"]),
+                "right": bool(body_payload["cliff"]["right"]),
+                "mask": int(body_payload["cliff"]["mask"]),
+                "state": str(body_payload["cliff"]["state"]),
+                "seq": int(telemetry.seq),
+                "age_ms": age_ms,
+                "stale": bool(body_payload["stale"]),
             }
         self.pub_status.publish(String(data=json.dumps(payload, ensure_ascii=False)))
+        self.pub_cliff.publish(
+            String(data=json.dumps(cliff_payload, ensure_ascii=False))
+        )
 
     def on_keepalive_timer(self) -> None:
         command = self.motion.tick()
@@ -1047,6 +1091,8 @@ class EdgeServerNode(Node):
         speaker = self.speaker.status()
         microphone = self.microphone.status()
         power = self.power.status()
+        body = self.body()
+        cliff = body.get("cliff") or {}
         return {
             "uptime_ms": int((now - self.started_monotonic) * 1000.0),
             "free_heap": int(_free_memory_bytes()),
@@ -1209,6 +1255,12 @@ class EdgeServerNode(Node):
             "power_history_warning": bool(power["warning"]),
             "power_core_voltage_v": power["core_voltage_v"],
             "power_temperature_c": power["temperature_c"],
+            "cliff_available": bool(cliff.get("available", False)),
+            "cliff_triggered": bool(cliff.get("triggered", False)),
+            "cliff_left": bool(cliff.get("left", False)),
+            "cliff_right": bool(cliff.get("right", False)),
+            "cliff_mask": int(cliff.get("mask", 0)),
+            "cliff_state": str(cliff.get("state", "unknown")),
             "hostname": self.hostname,
             "ip": self.ip_address,
             "platform": self.platform_name,
@@ -1227,6 +1279,8 @@ class EdgeServerNode(Node):
             status = "error"
         elif params["power_status"] == "degraded":
             status = "degraded"
+        elif params["cliff_triggered"]:
+            status = "degraded"
         elif ros_status == "ok":
             status = "ok"
         elif ros_status in {"degraded", "starting", "unknown"}:
@@ -1239,7 +1293,8 @@ class EdgeServerNode(Node):
             f"camera={'on' if params['camera'] else 'off'}, "
             f"base={'on' if params['motion_active'] else 'idle'}, "
             f"speaker={'on' if params['speaker_connected'] else params['speaker_state']}, "
-            f"power={params['power_status']}"
+            f"power={params['power_status']}, "
+            f"cliff={params['cliff_state']}"
         )
         return {
             "id": "edge",
@@ -1335,6 +1390,13 @@ class EdgeServerNode(Node):
             _param("power_temperature_c", "SoC 温度",
                    values["power_temperature_c"] if values["power_temperature_c"] is not None else "null",
                    "float", "电源", False, "°C", "", "", ""),
+            _param("cliff_available", "悬崖遥测",
+                   _bool_literal(values["cliff_available"]),
+                   "bool", "安全", False, "", "", "", ""),
+            _param("cliff_state", "悬崖状态", json.dumps(values["cliff_state"]),
+                   "string", "安全", False, "", "", "", ""),
+            _param("cliff_mask", "悬崖掩码", values["cliff_mask"],
+                   "int", "安全", False, "", "", "", ""),
         ]
         return {
             "ok": True,

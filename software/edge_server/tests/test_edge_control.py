@@ -42,6 +42,26 @@ def test_parse_body_line_rejects_invalid(line):
     assert parse_body_line(line) is None
 
 
+def test_cliff_mask_new_and_legacy_firmware():
+    new = parse_body_line("$B,8,1234,0,0,0,0,5678,3", now=10.0)
+    assert new is not None
+    assert new.cliff_available is True
+    assert new.cliff_mask == 3
+    payload = new.to_dict(now=10.1)
+    assert payload["cliff"]["left"] is True
+    assert payload["cliff"]["right"] is True
+    assert payload["cliff"]["triggered"] is True
+    assert payload["cliff"]["state"] == "both"
+
+    old = parse_body_line("$B,8,1234,0,0,0,0,5678", now=10.0)
+    assert old is not None
+    assert old.cliff_available is False
+    assert old.to_dict(now=10.1)["cliff"]["available"] is False
+    assert old.to_dict(now=10.1)["cliff"]["state"] == "unknown"
+
+    assert parse_body_line("$B,8,1234,0,0,0,0,5678,4") is None
+
+
 def test_stale_telemetry_is_flagged():
     telemetry = parse_body_line("$B,1,10,0,0,0,0,0", now=100.0)
     assert telemetry is not None

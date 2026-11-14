@@ -144,11 +144,12 @@ dashboard 的 **BODY CONTROL** 面板实时显示。
 <img src="modules/power_module.jpg" />
 
 #### 10 全向麦克风
-
+使用NewMine音箱和麦克风合的蓝牙音箱。
 
 #### 11 蓝牙音箱
-如果嫌声音小，可以这个放大器进一步放大音量。
+使用NewMine音箱和麦克风合的蓝牙音箱。
 
+<img src="modules/speaker.jpg" />
 
 ## 硬件设计工具KiCAD
 

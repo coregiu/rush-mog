@@ -523,6 +523,7 @@ string metrics_json
 |---|---|---|---|---|---|
 | `camera` | camera | `/camera/color/image_raw` | 是 | 15 Hz | 空图/宽高为 0 判非法 |
 | `depth_camera` | camera | `/camera/depth/image_raw` | 否 | 10 Hz | Astra Pro 深度；空深度帧判非法 |
+| `cliff` | cliff | `/body/cliff_status` | 否 | 1 Hz | STM32 悬崖掩码；触发/无遥测判非法 |
 | `lidar` | lidar | `/scan` | 是 | 10 Hz | 空 ranges 判非法 |
 | `imu` | imu | `/imu/data` | 是 | 100 Hz | 全零/非有限值判非法 |
 | `microphone` | microphone | `/body/mic_status` | 否 | 1 Hz | JSON；`online=false` 判非法（HFP 不可用/未连接） |
@@ -821,7 +822,7 @@ cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests/test_health_monitor.py tests/test_health_http.py -q
 # 29 passed
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 131 passed（含音箱/API 新增用例）
+# 132 passed（含音箱/API 新增用例）
 ```
 
 覆盖：

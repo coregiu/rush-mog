@@ -461,6 +461,14 @@ edge_server:
         expected_rate_hz: 1.0
         timeout_sec: 3.0
         required: true
+      cliff:
+        enabled: false
+        type: cliff
+        topic: "/body/cliff_status"
+        message_type: "std_msgs/msg/String"
+        expected_rate_hz: 1.0
+        timeout_sec: 3.0
+        required: false
       battery:
         enabled: false
         type: battery

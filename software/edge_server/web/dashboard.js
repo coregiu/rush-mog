@@ -69,6 +69,7 @@ const EVENT_KIND_LABELS = {
   system: 'SYS',
   serial: 'LINK',
   safety: 'SAFE',
+  cliff: 'CLIFF',
   error: 'ERR',
 };
 
@@ -1105,12 +1106,37 @@ function hardwareState(id) {
         chips: deviceMetricChips(device),
       };
     }
-    case 'cliff':
+    case 'cliff': {
+      const cliff = (body && body.cliff) || {};
+      const device = rosDevice('cliff');
+      const available = cliff.available === true;
+      const triggered = cliff.triggered === true;
+      const stale = Boolean(body && body.stale);
+      let status = 'unknown';
+      if (triggered) status = 'error';
+      else if (available) status = stale ? 'degraded' : 'ok';
+      else if (device && device.status === 'ok') status = 'ok';
+      else if (device && (device.status === 'error' || device.status === 'degraded')) status = 'degraded';
+      const left = cliff.left === true;
+      const right = cliff.right === true;
+      const side = [left ? '左' : '', right ? '右' : ''].filter(Boolean).join('+');
+      const detail = available
+        ? (triggered
+          ? `悬崖触发：${side || '未知'} · 已封锁前进/横移，仅允许 STOP/BACK`
+          : `TCRT5000 ×2 · PB3/PB4 · 左右均未触发${stale ? ' · 数据超时' : ''}`)
+        : 'TCRT5000 ×2 · PB3/PB4 · 无悬崖遥测（需刷入带 cliff_mask 的 STM32 固件）';
       return {
-        status: 'unknown',
-        detail: 'TCRT5000 ×2 · PB3/PB4 · 固件已启用，无独立回传',
-        chips: ['2 路', 'STOP/BACK', '无遥测'],
+        status,
+        detail,
+        chips: available
+          ? [
+            `LEFT ${left ? 'CLIFF' : 'CLEAR'}`,
+            `RIGHT ${right ? 'CLIFF' : 'CLEAR'}`,
+            `MASK ${Number.isFinite(Number(cliff.mask)) ? Number(cliff.mask) : 0}`,
+          ]
+          : ['2 路', 'STOP/BACK', '无遥测'],
       };
+    }
     case 'chassis': {
       const live = Boolean(body.bodyLive);
       const serial = Boolean(p.serial_connected);

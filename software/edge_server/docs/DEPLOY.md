@@ -76,7 +76,7 @@
     A2DP 输出走本机 PipeWire（sink 名 `bluez_output.73_DB_39_F2_15_4B.a2dp-sink`）
   - 树莓派电源监控：`edge.power` 启用，读取 `vcgencmd get_throttled` 与
     `rpi_volt`，发布 `/body/power_status`；dashboard“电源及转换板”模块使用该状态
-  - 健康检查：监控 camera/lidar/imu/base/odom/speaker/microphone/power 8 个设备，
+  - 健康检查：监控 camera/depth_camera/lidar/cliff/imu/base/odom/speaker/microphone/power 10 个设备，
     `check_nodes=false`、`safety_required=false`；音箱/麦克风/电源 `online=false`
     或电源异常时对应设备显示 `degraded`
 - `/opt/edge_server/deploy/edge_server.launch.py`：只启动
@@ -131,6 +131,10 @@
 - Astra Pro：`ros-humble-orbbec-camera` + Orbbec udev 已安装；当前 `lsusb`
   没有 `2bc5` 设备，驱动未启动，`camera/depth_camera` 健康为 `unknown`；
   插上相机后按 §7.8 启动
+- 悬崖：STM32 固件源码已加 `cliff_mask`，本机已编译出
+  `software/body_control/build/src/body_control.bin`；**当前 STM32 仍运行
+  旧 8 字段固件，尚未烧录**，所以 `/body/cliff_status` 的 `available=false`，
+  dashboard 显示“无悬崖遥测”；烧录 §7.9 的固件后生效
 - ROS 健康整体为 `degraded`（缺相机/雷达/IMU/底盘数据），当前属预期
 
 ---
@@ -190,7 +194,7 @@ cd /mnt/f/CODE/rush-mog/software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest -q tests
 ```
 
-当前基线：`131 passed`。
+当前基线：`132 passed`。
 
 ### 3.3 同步源码到 Pi
 
@@ -657,3 +661,52 @@ ros2 run tf2_ros tf2_echo base_link camera_link
 - 手动调试仍推荐 `ros2 launch edge_server astra.launch.py`。
 如果 Orbbec 驱动无法识别老款 Astra Pro，先确认 `lsusb`/`ros2 topic list`；
 仍不行则换 Astra Pro Plus/Gemini 2/D435i，Edge 侧话题/深度分支不用改。
+
+### 7.9 悬崖传感器（STM32 PB3/PB4）
+
+悬崖传感器接在 STM32 的 PB3/PB4，由 `body_control` 固件本地做 10ms 采样、
+30ms 消抖，并在触发时封锁运动。Edge 侧要看到状态，STM32 必须上报悬崖掩码：
+
+```text
+$B,<seq>,<uptime_ms>,<fl>,<fr>,<rl>,<rr>,<distance_mm>,<cliff_mask>\n
+                                                        ^ bit0=左前 PB3
+                                                          bit1=右前 PB4
+```
+
+固件源码已更新（`encoder_sensor.c` 追加 `cliff_sensor_get_mask()`），需要重新编译/烧录：
+
+```bash
+cd software/body_control/build
+make -j2
+# ST-Link 接 STM32 后：
+sudo st-flash write src/body_control.bin 0x8000000
+```
+
+烧录后重启 Edge Server，验证：
+
+```bash
+# 直接看 STM32 原始遥测，应为 9 个字段
+ros2 topic echo /base/status --once
+ros2 topic echo /body/cliff_status --once
+curl -s http://127.0.0.1:8090/ros/health | python3 -m json.tool | grep -A8 '"id": "cliff"'
+```
+
+`/body/cliff_status` 示例：
+
+```json
+{"source":"stm32","online":true,"available":true,"triggered":false,
+ "left":false,"right":false,"mask":0,"state":"clear","seq":123,"age_ms":80,"stale":false}
+```
+
+Dashboard「悬崖传感器」卡片：
+
+- 左右均未触发：绿色 `CLEAR`；
+- 任一触发：红色 `CLIFF`，详情显示左/右，CHIP 为 `LEFT/RIGHT CLIFF`；
+- 旧固件/无遥测：显示“无悬崖遥测（需刷入带 cliff_mask 的 STM32 固件）”；
+- 触发/解除会写入 Edge 运行事件（最近事件面板）。
+
+health `cliff` 设备（`required: false`）在触发或遥测缺失时标红，不影响其它必需设备；
+如果要让整体健康因悬崖遥测缺失直接失败，可把 `required` 改为 `true`。
+
+> 先在桌面上确认左右都 `CLEAR`，再分别挡住/移到桌沿确认对应 `CLIFF`；
+> 触发期间固件只允许 STOP/BACK，这是安全策略，不是 Edge 软件限制。

@@ -5,6 +5,7 @@
 **/
 
 #include <encoder_sensor.h>
+#include "cliff_sensor.h"
 
 #define ENCODER_FL 0
 #define ENCODER_FR 1
@@ -230,6 +231,8 @@ static void encoder_telemetry_task(void *argument)
         position = encoder_append_int(line, position, wheel_mm_s[ENCODER_RR]);
         line[position++] = ',';
         position = encoder_append_int(line, position, distance_mm);
+        line[position++] = ',';
+        position = encoder_append_uint(line, position, cliff_sensor_get_mask());
         line[position++] = '\n';
         encoder_uart_write(line, position);
     }

@@ -13,7 +13,7 @@
 | 代码 | `software/edge_server`（ament_python，ROS2 Humble） |
 | 消息/动作 | `software/custom_msgs`（v0.2.0） |
 | 构建 | `colcon build --packages-select custom_msgs edge_server` 通过 |
-| 单元测试 | `pytest tests -q`：131 passed（新增 Edge 控制/HTTP 25 项） |
+| 单元测试 | `pytest tests -q`：132 passed（新增 Edge 控制/HTTP 25 项） |
 | 健康检查 | `test_health_monitor.py` + `test_health_http.py`：29 passed；ROS/HTTP 手工联调通过 |
 | VLA/安全端到端 | `end_to_end_check.py`：7/7 passed |
 | SLAM/导航/搜索联调 | `slam_nav_check.py` + `fake_slam_robot.py`：6/6 passed |
@@ -89,7 +89,7 @@ ESP32 与树莓派两个模块已合并为**一台树莓派 Edge Server**：
 
 - `edge_server_node` 在 Pi 上提供 80 端口网页/API、8080 MJPEG；
 - 直接通过 Pi UART 连接 STM32 USART3（115200 8N1），发送 ASCII 方向+PWM 命令，
-  解析 `$B,...` 编码器遥测；
+  解析 `$B,...` 编码器/悬崖遥测；
 - 网页手柄/摇杆手动控制与 ROS `/cmd_vel` 共用同一个串口出口：网页手动优先，
   松开/停止后 ROS 导航恢复；ROS raw 命令保留第二字节并带 1s 租约；
 - ROS 侧仍由 `edge_server` 的 VLA/SLAM/导航/搜索节点组成，与 Edge Server
@@ -217,7 +217,7 @@ software/
 | 10 | `navigation_node` | `/center/navigate_to`，Nav2/直航后端 | → `/nav/cmd_vel`、`/center/nav_status` |
 | 11 | `target_detector_node` | 颜色/YOLO 检测、测距、map 投影、跟踪 | → `/center/target_detections` |
 | 12 | `object_search_node` | 前沿探索、目标确认、接近 | → `/center/search_status` |
-| 13 | `edge_server_node` | Pi Edge Server：80 网页/API、8080 MJPEG、STM32 ASCII 串口、运动仲裁 | ↔ `/cmd_vel`、`/odom`、`/joint_states`、`/base/status`、`/center/safety_state` |
+| 13 | `edge_server_node` | Pi Edge Server：80 网页/API、8080 MJPEG、STM32 ASCII 串口、运动仲裁、悬崖遥测 | ↔ `/cmd_vel`、`/odom`、`/joint_states`、`/base/status`、`/body/cliff_status`、`/center/safety_state` |
 | 13a | `lidar_node` | LD19/D6 UART 驱动，47 字节帧解析/分箱 | → `/scan`、`/lidar/status`、`base_link→laser_link` TF |
 | 13b | `base_bridge_node` | 旧版二进制串口桥（legacy） | ↔ `/odom`、`/imu/data`、`/battery_state` |
 | 14 | `imu_node` | Pi I2C 直连 ICM-20948 | → `/imu/data` |
@@ -536,7 +536,7 @@ FAILED
 |---|---|---|
 | Pi→STM32 | `1`..`9` / `A`..`C` / `D`..`J` | 方向/转向/变速/微调/测试/复位，`\n` 结束 |
 | Pi→STM32 | 两位命令，如 `15` / `95` | 方向/转向 + PWM 档位 1~9 |
-| STM32→Pi | `$B,<seq>,<uptime_ms>,<fl>,<fr>,<rl>,<rr>,<distance_mm>` | 四轮 mm/s、总里程 mm，约 10Hz |
+| STM32→Pi | `$B,<seq>,<uptime_ms>,<fl>,<fr>,<rl>,<rr>,<distance_mm>,<cliff_mask>` | 四轮 mm/s、总里程 mm、悬崖掩码，约 10Hz |
 
 主机侧逻辑在 `edge_server/edge_control.py`（纯逻辑，可单测）：
 
@@ -700,7 +700,8 @@ edge/Pi sensors → bridge_node → /center/synced_data
 | `/center/search_status` | `custom_msgs/SearchStatus` | 发布 | 搜索状态 |
 | `/center/velocity_status` | `custom_msgs/VelocityMuxStatus` | 发布 | 速度源 |
 | `/center/health` | `custom_msgs/HealthStatus` | 发布 | 系统/设备健康（1 Hz，TRANSIENT_LOCAL） |
-| `/base/status` | `std_msgs/String` | 发布/订阅 | STM32 遥测 JSON（底盘/健康） |
+| `/base/status` | `std_msgs/String` | 发布/订阅 | STM32 遥测 JSON（底盘/健康，含 cliff） |
+| `/body/cliff_status` | `std_msgs/String` | 发布 | 悬崖左右/触发状态 JSON（1 Hz） |
 | `/arm/joint_states` | `sensor_msgs/JointState` | 订阅 | 机械臂回读（待接入） |
 | `/body/say` | `std_msgs/String` | 订阅 | 文本 -> TTS -> 蓝牙音箱 |
 | `/body/audio_status` | `std_msgs/String` | 发布 | 音箱状态 JSON（1 Hz） |
@@ -933,7 +934,7 @@ python3 tests/slam_nav_check.py          # 6/6
 ```bash
 cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 131 passed
+# 132 passed
 ```
 
 健康检查专项：
@@ -1011,6 +1012,6 @@ python3 tests/slam_nav_check.py
 
 `edge_server` v2 在 v1 的 VLA 推理、安全、反向操作之上，补齐了 **SLAM 建图、ICM-20948 定位、
 Nav2/直航导航、目标检测/搜索/接近、速度仲裁、底盘串口桥、健康检查**。软件链路已通过
-131 项单元测试（含 29 项健康检查）、7 项 VLA/安全端到端、6 项 SLAM/导航/搜索联调；
+132 项单元测试（含 29 项健康检查）、7 项 VLA/安全端到端、6 项 SLAM/导航/搜索联调；
 实车落地还差 STM32 固件升级、硬件选型（见 `hardware/SLAM_NAV.md`）、现场标定，以及
 机械臂反馈话题接入。

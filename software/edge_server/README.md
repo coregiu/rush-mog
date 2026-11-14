@@ -31,7 +31,7 @@
 | 项目 | 结果 |
 |---|---|
 | `colcon build --packages-select custom_msgs edge_server` | 通过 |
-| `pytest tests -q` | 131 passed |
+| `pytest tests -q` | 132 passed |
 | `tests/end_to_end_check.py` | 7/7 passed |
 | `tests/slam_nav_check.py` + `fake_slam_robot.py` | 6/6 passed |
 
@@ -239,7 +239,7 @@ ros2 run robot_localization ekf_node --ros-args \
 | `target_detector_node` | 颜色/YOLO 检测、深度/激光/bbox 测距、map 投影、跟踪 |
 | `object_search_node` | `/center/explore`、`/center/search_object` |
 | `lidar_node` | LD19/D6 串口驱动：UART4 → `/scan`，可选 `base_link→laser_link` TF、`/lidar/status` |
-| `edge_server_node` | Pi Edge Server：80 网页/API、8080 MJPEG、STM32 串口、蓝牙音箱/语音播报、HFP 录音与 `/edge/audio`、树莓派电源监控、`/odom`、`/joint_states`、`/base/status`、`/body/audio_status`、`/body/mic_status`、`/body/power_status` |
+| `edge_server_node` | Pi Edge Server：80 网页/API、8080 MJPEG、STM32 串口、悬崖状态、蓝牙音箱/语音播报、HFP 录音与 `/edge/audio`、树莓派电源监控、`/odom`、`/joint_states`、`/base/status`、`/body/cliff_status`、`/body/audio_status`、`/body/mic_status`、`/body/power_status` |
 | `base_bridge_node` | 旧版 Pi ↔ STM32 二进制串口桥（legacy） |
 | `imu_node` | Pi I2C 直连 ICM-20948 → `/imu/data` |
 | `health_monitor_node` | 节点/设备健康、`/center/health`、`/center/healthcheck`、HTTP `:8090` |
@@ -258,6 +258,7 @@ ros2 run robot_localization ekf_node --ros-args \
 | `/scan` | `sensor_msgs/LaserScan` | 发布（lidar_node）/订阅 |
 | `/edge/radar` | `sensor_msgs/LaserScan` | 订阅（仿真兼容） |
 | `/lidar/status` | `std_msgs/String` | 发布（雷达串口/CRC/扫描状态，1 Hz） |
+| `/body/cliff_status` | `std_msgs/String` | 发布（STM32 悬崖掩码/左右状态，1 Hz） |
 | `/camera/color/image_raw`、`/edge/video` | `sensor_msgs/Image` | 订阅 |
 | `/edge/audio` | `custom_msgs/AudioData` | 发布（录音时 10 Hz PCM）/订阅（bridge） |
 | `/odom`、`/robot/odometry` | `nav_msgs/Odometry` | 订阅 |
@@ -662,7 +663,7 @@ curl -s http://192.168.3.26/api/modules/ros/health | python3 -m json.tool | grep
 ```bash
 cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 131 passed
+# 132 passed
 ```
 
 单独跑健康检查（不依赖 ROS 图）：

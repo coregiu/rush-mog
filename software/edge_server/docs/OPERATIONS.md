@@ -431,6 +431,8 @@ sudo chsh -s /bin/bash ubuntu
 | `/lidar/status` 的 `crc_errors` 持续增加 | 波特率不对、线缆干扰或协议不是 LD19 | 确认 D6 说明书波特率（230400/921600）、共地、TX/RX 交叉、缩短线缆 |
 | 没有 `/camera/color/image_raw` 或 `/camera/depth/image_raw` | Astra 未插好、USB 供电/带宽不足、驱动未启动 | `lsusb \| grep 2bc5`；`ros2 launch edge_server astra.launch.py`；插 USB3 口、不经 Hub、降分辨率/帧率 |
 | `/camera/depth/image_raw` 有图但目标测距明显偏 | 深度未对齐到彩色/外参不对 | `depth_registration:=true`；检查 `base_link→camera_link` TF；必要时 `prefer_depth:=false` |
+| dashboard 悬崖卡片一直“无遥测” | STM32 固件还是 8 字段 `$B`，没有 cliff_mask | 重新编译/烧录 `body_control`；`ros2 topic echo /base/status --once` 应看到 9 个字段 |
+| 悬崖卡片左右状态反了/一直 CLIFF | 模块 DO 空闲电平与 `CLIFF_*_TRIGGER_LEVEL` 相反，或 PB3/PB4 悬空 | 调模块电位器；按实际改 `cliff_sensor.h` 触发宏；确认共地 |
 | `/status` 里 `serial_connected:false` | 串口设备没打开：没启用 `uart3`、设备名不对或被占用 | 查 `ls -l /dev/ttyAMA1`、`grep uart3 /boot/firmware/config.txt`、`journalctl -u edge_server`；确认 `ubuntu` 在 `dialout` 组 |
 | 网页按钮无反应、`/cmd` 返回 `ok` | 命令被接受但串口没写出去，或 STM32 没收到 | 按 CODE_MAP.md §10 从 `/status`→`strace`→LED 逐层查 |
 | 按住按钮时 STM32 LED 连闪 | 服务端在周期性重发（旧行为），每条命令都会翻转 LED | 新版默认已关闭；确认 `edge.motion.resend_manual` 为 `false` 并重启服务 |
@@ -472,6 +474,7 @@ sudo chsh -s /bin/bash ubuntu
 | 电源状态 | `http://192.168.3.26/api/power` |
 | 雷达设备 | `/dev/rush_lidar`（UART4 GPIO8/9） |
 | 雷达状态 | `ros2 topic echo /lidar/status --once` |
+| 悬崖状态 | `ros2 topic echo /body/cliff_status --once` |
 | Astra USB 规则 | `/etc/udev/rules.d/99-obsensor-libusb.rules` |
 | Astra 启动 | `ros2 launch edge_server astra.launch.py` |
 | WirePlumber 音频规则 | `/home/ubuntu/.config/wireplumber/bluetooth.lua.d/51-rush-mog.lua` |

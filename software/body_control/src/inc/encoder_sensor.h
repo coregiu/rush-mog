@@ -20,8 +20,9 @@
   * - 编码器接口使用内部上拉，若编码器为开漏输出且线缆较长，建议外部再加
   *   4.7k~10k 上拉到 3.3V；
   * - 通过 USART3(PB10 TX / PB11 RX) 向 ESP32 上报 ASCII 遥测，帧格式：
-  *       $B,<seq>,<uptime_ms>,<fl>,<fr>,<rl>,<rr>,<distance_mm>\n
-  *   其中四个轮速单位为 mm/s（有符号），distance_mm 为四轮平均绝对里程。
+  *       $B,<seq>,<uptime_ms>,<fl>,<fr>,<rl>,<rr>,<distance_mm>,<cliff_mask>\n
+  *   其中四个轮速单位为 mm/s（有符号），distance_mm 为四轮平均绝对里程；
+  *   cliff_mask bit0=左前 PB3、bit1=右前 PB4，1=悬崖触发。
   ******************************************************************************
 **/
 
