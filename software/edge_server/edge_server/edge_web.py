@@ -383,6 +383,31 @@ class EdgeHttpApp:
             raise RuntimeError("音箱功能未启用")
         return handler(str(action or ""), fields)
 
+    # ------------------------------------------------------------- microphone
+    def microphone_payload(self) -> dict:
+        handler = getattr(self.runtime, "microphone_status", None)
+        if handler is None:
+            raise RuntimeError("麦克风功能未启用")
+        return handler()
+
+    def microphone_action(self, action: str, fields: Mapping[str, Any]) -> dict:
+        handler = getattr(self.runtime, "handle_microphone", None)
+        if handler is None:
+            raise RuntimeError("麦克风功能未启用")
+        return handler(str(action or ""), fields)
+
+    def microphone_recordings(self) -> dict:
+        handler = getattr(self.runtime, "handle_microphone", None)
+        if handler is None:
+            raise RuntimeError("麦克风功能未启用")
+        return handler("list", {})
+
+    def microphone_recording(self, name: str) -> str:
+        handler = getattr(self.runtime, "microphone_recording", None)
+        if handler is None:
+            raise RuntimeError("麦克风功能未启用")
+        return str(handler(str(name or "")))
+
     # ------------------------------------------------------------- static
     def _safe_path(self, root: str, request_path: str) -> Optional[str]:
         if not root:
@@ -606,6 +631,39 @@ class _EdgeRequestHandler(BaseHTTPRequestHandler):
             self._send_json(200, payload)
             return
 
+        if path.startswith("/api/microphone"):
+            action = path[len("/api/microphone") :].strip("/")
+            if action not in {"start", "stop", "play", "volume", "list"}:
+                self._send_json(
+                    404,
+                    app.error_payload("not_found", "未知麦克风操作"),
+                )
+                return
+            body = self._read_body()
+            if body is None:
+                return
+            fields = self._parse_fields(body)
+            try:
+                payload = app.microphone_action(action, fields)
+            except ValueError as exc:
+                self._send_json(
+                    400, app.error_payload("invalid_microphone_request", str(exc))
+                )
+                return
+            except RuntimeError as exc:
+                self._send_json(
+                    503, app.error_payload("microphone_unavailable", str(exc))
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("microphone action failed")
+                self._send_json(
+                    500, app.error_payload("microphone_failed", f"麦克风操作失败: {exc}")
+                )
+                return
+            self._send_json(200, payload)
+            return
+
         if path == "/api/modules/report":
             body = self._read_body()
             if body is None:
@@ -749,6 +807,68 @@ class _EdgeRequestHandler(BaseHTTPRequestHandler):
                 )
                 return
             self._send_json(200, payload, head_only=head_only)
+            return
+
+        if path == "/api/microphone":
+            try:
+                payload = app.microphone_payload()
+            except RuntimeError as exc:
+                self._send_json(
+                    503,
+                    app.error_payload("microphone_unavailable", str(exc)),
+                    head_only=head_only,
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("microphone status failed")
+                self._send_json(
+                    500,
+                    app.error_payload(
+                        "microphone_failed", f"麦克风状态不可用: {exc}"
+                    ),
+                    head_only=head_only,
+                )
+                return
+            self._send_json(200, payload, head_only=head_only)
+            return
+
+        if path == "/api/microphone/recordings":
+            try:
+                payload = app.microphone_recordings()
+            except RuntimeError as exc:
+                self._send_json(
+                    503,
+                    app.error_payload("microphone_unavailable", str(exc)),
+                    head_only=head_only,
+                )
+                return
+            self._send_json(200, payload, head_only=head_only)
+            return
+
+        if path.startswith("/api/microphone/recordings/"):
+            name = urllib.parse.unquote(path[len("/api/microphone/recordings/") :])
+            try:
+                filename = app.microphone_recording(name)
+            except ValueError as exc:
+                self._send_json(
+                    404,
+                    app.error_payload("recording_not_found", str(exc)),
+                    head_only=head_only,
+                )
+                return
+            except RuntimeError as exc:
+                self._send_json(
+                    503,
+                    app.error_payload("microphone_unavailable", str(exc)),
+                    head_only=head_only,
+                )
+                return
+            self._send_file(
+                filename,
+                "audio/wav",
+                filename=os.path.basename(filename),
+                head_only=head_only,
+            )
             return
 
         if path == "/api/modules":
@@ -943,6 +1063,39 @@ class _EdgeRequestHandler(BaseHTTPRequestHandler):
         self, status: int, body: bytes, content_type: str
     ) -> None:
         self._send_bytes(status, body, content_type)
+
+    def _send_file(
+        self,
+        path: str,
+        content_type: str,
+        *,
+        filename: str = "",
+        head_only: bool = False,
+    ) -> None:
+        try:
+            with open(path, "rb") as handle:
+                body = handle.read()
+        except OSError:
+            self._send_text(500, "Failed to open file", head_only=head_only)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        if filename:
+            quoted = urllib.parse.quote(filename)
+            self.send_header(
+                "Content-Disposition",
+                f"attachment; filename={quoted}; filename*=UTF-8''{quoted}",
+            )
+        self.end_headers()
+        if body and not head_only:
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
     def _send_bytes(
         self,

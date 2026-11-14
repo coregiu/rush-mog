@@ -39,7 +39,10 @@
     `pipewire-pulse`、`wireplumber`；
   - BlueZ 已配对/信任 `newmine`（`73:DB:39:F2:15:4B`）；
   - 首次配对：`bluetoothctl pair/trust/connect`，之后由 `edge_server_node`
-    按 `edge.speaker.connect_interval_sec` 自动重连。
+    按 `edge.speaker.connect_interval_sec` 自动重连；
+  - 麦克风走 HFP：`pulseaudio-utils` 提供 `parec`，录音前切
+    `headset-head-unit`，停止后恢复 `a2dp-sink`；部署配置启用
+    `edge.speaker.microphone`，录音目录 `/var/lib/edge_server/audio/mic`。
 
 ### 1.2 代码与构建
 
@@ -67,9 +70,9 @@
   - 蓝牙音箱：`edge.speaker` 启用，`device_name=newmine`、
     `device_mac=73:DB:39:F2:15:4B`，音频目录 `/var/lib/edge_server/audio`，
     A2DP 输出走本机 PipeWire（sink 名 `bluez_output.73_DB_39_F2_15_4B.a2dp-sink`）
-  - 健康检查：监控 camera/lidar/imu/base/odom/speaker 6 个设备，
-    `check_nodes=false`、`safety_required=false`；音箱未连接时
-    `/body/audio_status` 的 `online=false` 会让 speaker 显示 `degraded`
+  - 健康检查：监控 camera/lidar/imu/base/odom/speaker/microphone 7 个设备，
+    `check_nodes=false`、`safety_required=false`；音箱/麦克风未连接时
+    `/body/audio_status`、`/body/mic_status` 的 `online=false` 会让对应设备显示 `degraded`
 - `/opt/edge_server/deploy/edge_server.launch.py`：只启动
   `edge_server_node` + `health_monitor_node`，不启动 SLAM/Nav2/感知全栈。
 
@@ -106,10 +109,13 @@
   - `127.0.0.1:8090`
 - STM32：`serial_connected=true`（`/dev/ttyAMA1@115200`）
 - 未启动 ROS 相机驱动：`camera=0`，`/stream` 返回 503
-- 蓝牙音箱：`newmine` 已连接，A2DP sink
+- 蓝牙耳机：`newmine` 已连接，A2DP sink
   `bluez_output.73_DB_39_F2_15_4B.a2dp-sink`，`online=true`；
   手动断开后 20s 内自动重连成功，`/api/speaker/say` 实测可播报
   （中文 `espeak-ng`），health monitor 的 speaker 为 `ok`
+- 蓝牙麦克风：HFP profile 可用，`/api/microphone/start|stop` 录音实测成功
+  （8 kHz mono WAV，`/edge/audio` 10 Hz AudioData），停止后 A2DP 自动恢复，
+  health monitor 的 microphone 为 `ok`
 - ROS 健康整体为 `degraded`（缺相机/雷达/IMU/底盘数据），当前属预期
 
 ---
@@ -169,7 +175,7 @@ cd /mnt/f/CODE/rush-mog/software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest -q tests
 ```
 
-当前基线：`107 passed`。
+当前基线：`115 passed`。
 
 ### 3.3 同步源码到 Pi
 
@@ -322,6 +328,8 @@ ssh ubuntu@192.168.3.26 '
 - 蓝牙/音频栈是系统级配置（apt 包、`loginctl enable-linger`、用户级
   PipeWire/WirePlumber、systemd 的 `XDG_RUNTIME_DIR`），不在仓库里；
   重装系统后需按 §1.1/§1.4 重建，再重启 `edge_server`。
+- 麦克风录音会临时把输出切到 HFP（8 kHz mono），停止录音后自动恢复 A2DP；
+  录音文件在 `/var/lib/edge_server/audio/mic`，只允许通过 API 下载。
 
 ---
 
@@ -331,7 +339,7 @@ ssh ubuntu@192.168.3.26 '
 
 1. 音箱开机，且不要被手机/其他主机占用；
 2. `edge_server_node` 启动后立即尝试连接，之后每 20s 重试；
-3. 连接成功后 PipeWire 创建 `bluez_output.<MAC>.1` sink，节点将其设为默认
+3. 连接成功后 PipeWire 创建 `bluez_output.<MAC>.a2dp-sink` sink，节点将其设为默认
    输出并应用 `edge.speaker.volume`；
 4. 状态：
    ```bash
@@ -379,3 +387,43 @@ ros2 topic pub --once /body/say std_msgs/msg/String "{data: 请注意避让}"
   `wpctl status` 中该 sink 未静音；必要时 `pactl set-sink-mute <name> 0`。
 - **服务里 `pactl` 报连接失败**：systemd 单元缺少 §1.4 的
   `XDG_RUNTIME_DIR`/`PULSE_SERVER`，`daemon-reload` 后重启。
+
+### 7.4 麦克风录音（HFP）
+
+`newmine` 的麦克风只在 HFP/HSP profile 下可用；录音模块会自动：
+
+1. 停掉当前 A2DP 播放；
+2. `pactl set-card-profile bluez_card.<MAC> headset-head-unit`；
+3. 等待 `bluez_input.<MAC>.headset-head-unit` 输入源；
+4. `parec` 采集 8 kHz mono s16le，写 WAV 并按 100ms 发布 `/edge/audio`；
+5. 停止后恢复原 A2DP profile 和播放 sink。
+
+```bash
+# 开始 10 秒录音
+curl -X POST http://192.168.3.26/api/microphone/start \
+  -H 'Content-Type: application/json' -d '{"duration":10}'
+
+# 查看状态 / 停止
+curl -s http://192.168.3.26/api/microphone | python3 -m json.tool
+curl -X POST http://192.168.3.26/api/microphone/stop
+
+# 列表 / 下载 / 回放
+curl -s http://192.168.3.26/api/microphone/recordings
+curl -OJ http://192.168.3.26/api/microphone/recordings/<file>.wav
+curl -X POST http://192.168.3.26/api/microphone/play \
+  -H 'Content-Type: application/json' -d '{"file":"<file>.wav"}'
+```
+
+录音期间：
+- `GET /api/microphone` 的 `recording=true`，`source=bluez_input...`；
+- `ros2 topic hz /edge/audio` 约 10 Hz；
+- 输出 sink 变为 `...headset-head-unit`，属正常；
+- 停止后 `GET /api/speaker` 的 sink 恢复 `...a2dp-sink`。
+
+排查：
+- `supported=false`：card 没有 `headset-head-unit` profile，检查
+  `pactl list cards`；确认不是只支持 A2DP 的音箱。
+- `未找到蓝牙麦克风输入源`：HFP profile 切换失败/被手机占用；
+  先 `bluetoothctl disconnect/connect`，再重试。
+- 录音文件很小或 RMS 接近 0：麦克风静音/距离远；检查
+  `pactl list sources` 的 `Mute`/`Volume`，用 `/api/microphone/volume` 调大。

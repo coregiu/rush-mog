@@ -11,7 +11,7 @@ edge_server:
   sensor_topics:
     image: "/camera/image_raw"     # 树莓派 USB/CSI 相机（Edge Server 订阅后转 MJPEG）
     laser: "/scan"                  # LD19/LD06/RPLidar 驱动输出
-    audio: "/audio/raw"             # 无麦克风时该话题可不存在
+    audio: "/edge/audio"             # newmine HFP 录音时发布的 AudioData
     odom: "/odom"                   # edge_server_node（STM32 遥测）或底盘驱动输出
     joint_states: "/joint_states"
     imu: "/imu/data"                # imu_node（Pi I2C）或旧 base_bridge（STM32 转发）
@@ -95,6 +95,18 @@ edge_server:
       say_topic: "/body/say"
       status_topic: "/body/audio_status"
       status_rate_hz: 1.0
+      # 同一台 newmine 的 HFP 麦克风；录音时临时切 HFP，停止后恢复 A2DP
+      microphone:
+        enabled: true
+        record_dir: ""            # 空 = <audio_dir>/mic
+        sample_rate: 8000
+        channels: 1
+        chunk_ms: 100
+        max_duration_sec: 60
+        volume: 100
+        topic: "/edge/audio"
+        status_topic: "/body/mic_status"
+        status_rate_hz: 1.0
       tts:
         backend: "auto"
         voice: "cmn"
@@ -329,10 +341,10 @@ edge_server:
   #   ROS  /center/health + /center/healthcheck
   # 接口契约与字段语义见 software/edge_server/HEALTHCHECK.md。
   #
-  # 设备反馈缺口（当前代码未发布，状态会显示 unknown，不影响整体 ok）：
-  #   - speaker: /body/audio_status（建议 STM32 桥接后发布 JSON）
-  #   - arm:     /arm/joint_states（机械臂驱动/回读节点发布）
-  # 这两个话题接入后无需改 health_monitor_node，只改配置即可。
+  # 已实现：speaker -> /body/audio_status，microphone -> /body/mic_status
+  # 仍在缺口（状态 unknown，不影响整体 ok）：
+  #   - arm: /arm/joint_states（机械臂驱动/回读节点发布）
+  # 接入后无需改 health_monitor_node，只改配置即可。
   # ======================================================================
   health:
     enabled: true
@@ -389,11 +401,12 @@ edge_server:
         required: true
       microphone:
         type: microphone
-        topic: "/audio/raw"       # 无麦克风时该话题可不存在
-        message_type: "custom_msgs/msg/AudioData"
-        expected_rate_hz: 10.0
-        timeout_sec: 2.0
+        topic: "/body/mic_status"
+        message_type: "std_msgs/msg/String"
+        expected_rate_hz: 1.0
+        timeout_sec: 3.0
         required: false
+        description: "newmine Bluetooth HFP microphone status"
       speaker:
         type: speaker
         topic: "/body/audio_status"

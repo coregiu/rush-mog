@@ -16,6 +16,8 @@ const API = {
   body: '/api/body',
   speaker: '/api/speaker',
   speakerAction: (action) => `/api/speaker/${encodeURIComponent(action)}`,
+  microphone: '/api/microphone',
+  microphoneAction: (action) => `/api/microphone/${encodeURIComponent(action)}`,
   module: (id) => `/api/modules/${encodeURIComponent(id)}`,
   health: (id) => `/api/modules/${encodeURIComponent(id)}/health`,
   params: (id) => `/api/modules/${encodeURIComponent(id)}/params`,
@@ -122,6 +124,10 @@ const state = {
   speakerTimer: null,
   speakerVolumeEditing: false,
   speakerError: '',
+  microphone: null,
+  microphonePolling: false,
+  microphoneTimer: null,
+  microphoneError: '',
   body: {
     lastOdom: null,
     sessionDistance: 0,
@@ -1124,10 +1130,32 @@ function hardwareState(id) {
       };
     }
     case 'mic': {
+      const mic = state.microphone;
+      if (mic) {
+        const status = mic.enabled === false
+          ? 'disabled'
+          : (mic.recording || mic.available
+            ? 'ok'
+            : (mic.error ? 'error' : 'degraded'));
+        const detail = mic.recording
+          ? `HFP 录音中 · ${fmtDuration((mic.duration_ms || 0) / 1000)}`
+          : (mic.available
+            ? 'newmine HFP 麦克风就绪（录音时自动切 HFP）'
+            : (mic.error || '音箱未连接或不支持 HFP 麦克风'));
+        return {
+          status,
+          detail,
+          chips: [
+            mic.recording ? 'REC' : (mic.available ? 'HFP READY' : 'HFP --'),
+            `${mic.sample_rate || '--'} Hz`,
+            mic.last_file_name ? `FILE ${mic.last_file_name}` : '无录音',
+          ],
+        };
+      }
       const device = rosDevice('microphone');
       return {
         status: device ? device.status : 'unknown',
-        detail: deviceDetail(device, '未接入 · USB 全向麦克风'),
+        detail: deviceDetail(device, '未接入 · newmine HFP 麦克风'),
         chips: deviceMetricChips(device),
       };
     }
@@ -1934,6 +1962,150 @@ function bindSpeakerEvents() {
   }
 }
 
+function microphonePanelStatus(mic) {
+  if (!mic) return 'unknown';
+  if (mic.enabled === false) return 'disabled';
+  if (mic.recording) return 'ok';
+  if (mic.available) return 'ok';
+  if (mic.error) return 'error';
+  return 'degraded';
+}
+
+function renderMicrophone() {
+  const block = $('#mic-block');
+  if (!block) return;
+  const mic = state.microphone;
+  const status = microphonePanelStatus(mic);
+  block.dataset.status = status;
+
+  const chip = $('#mic-state');
+  let label = '未知';
+  if (!mic) label = '未知';
+  else if (mic.enabled === false) label = '禁用';
+  else if (mic.recording) label = '录音中';
+  else if (mic.available) label = '就绪';
+  else if (mic.error) label = '不可用';
+  else label = '未就绪';
+  if (chip) {
+    chip.textContent = label;
+    chip.className = `status-chip status-${status}`;
+  }
+
+  const duration = mic ? Number(mic.duration_ms || 0) : 0;
+  const durationEl = $('#mic-duration');
+  if (durationEl) durationEl.textContent = fmtDuration(duration / 1000);
+  const maxEl = $('#mic-hint');
+
+  const start = $('#mic-start');
+  if (start) start.disabled = !mic || mic.enabled === false || !mic.available || Boolean(mic.recording);
+  const stop = $('#mic-stop');
+  if (stop) stop.disabled = !mic || !mic.recording;
+
+  const play = $('#mic-play');
+  if (play) play.disabled = !mic || !mic.last_file_name || Boolean(mic.recording);
+  const download = $('#mic-download');
+  if (download) {
+    if (mic && mic.last_file_name) {
+      download.hidden = false;
+      download.href = `${API.microphone}/recordings/${encodeURIComponent(mic.last_file_name)}`;
+      download.setAttribute('download', mic.last_file_name);
+      download.textContent = `下载 ${mic.last_file_name}`;
+    } else {
+      download.hidden = true;
+      download.removeAttribute('href');
+    }
+  }
+
+  if (maxEl) {
+    if (!mic) {
+      maxEl.textContent = state.microphoneError
+        ? `麦克风接口不可用：${state.microphoneError}`
+        : '等待麦克风状态…';
+    } else if (mic.enabled === false) {
+      maxEl.textContent = '麦克风功能未启用（edge.speaker.microphone.enabled=false）';
+    } else if (mic.recording) {
+      maxEl.textContent = `HFP 录音中 · ${mic.source || '--'} · 最长 ${fmtNumber(mic.max_duration_sec, 0)}s · 停止后自动恢复 A2DP`;
+    } else if (mic.available) {
+      maxEl.textContent = `newmine HFP 麦克风就绪 · ${mic.sample_rate || '--'} Hz / ${mic.channels || 1}ch`
+        + (mic.last_file_name ? ` · 最近 ${mic.last_file_name}` : '');
+    } else {
+      maxEl.textContent = mic.error || '音箱未连接或不支持 HFP 麦克风';
+    }
+  }
+}
+
+async function pollMicrophone() {
+  if (state.microphonePolling) return;
+  state.microphonePolling = true;
+  try {
+    state.microphone = await fetchJson(API.microphone, {}, 3000);
+    state.microphoneError = '';
+  } catch (error) {
+    state.microphone = null;
+    state.microphoneError = error && error.message ? error.message : String(error);
+  } finally {
+    state.microphonePolling = false;
+    renderMicrophone();
+    renderHardware();
+  }
+}
+
+async function microphoneAction(action, payload = {}) {
+  const data = await fetchJson(
+    API.microphoneAction(action),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+    15000
+  );
+  if (data && data.microphone) {
+    state.microphone = data.microphone;
+    state.microphoneError = '';
+    renderMicrophone();
+    renderHardware();
+  }
+  toast((data && data.message) || '操作成功', 'ok');
+  await pollMicrophone();
+  return data;
+}
+
+function bindMicrophoneEvents() {
+  const start = $('#mic-start');
+  if (start) {
+    start.addEventListener('click', async () => {
+      try {
+        await microphoneAction('start');
+      } catch (error) {
+        toast(`开始录音失败：${error.message}`, 'error');
+      }
+    });
+  }
+  const stop = $('#mic-stop');
+  if (stop) {
+    stop.addEventListener('click', async () => {
+      try {
+        await microphoneAction('stop');
+      } catch (error) {
+        toast(`停止录音失败：${error.message}`, 'error');
+      }
+    });
+  }
+  const play = $('#mic-play');
+  if (play) {
+    play.addEventListener('click', async () => {
+      const name = state.microphone && state.microphone.last_file_name;
+      if (!name) return;
+      try {
+        await microphoneAction('play', { file: name });
+      } catch (error) {
+        toast(`播放录音失败：${error.message}`, 'error');
+      }
+    });
+  }
+}
+
 function startPolling() {
   stopPolling();
   state.bodyFailures = 0;
@@ -1949,9 +2121,13 @@ function startPolling() {
   state.speakerTimer = setInterval(() => {
     if (!document.hidden) pollSpeaker();
   }, 3000);
+  state.microphoneTimer = setInterval(() => {
+    if (!document.hidden) pollMicrophone();
+  }, 3000);
   pollBody();
   pollEvents();
   pollSpeaker();
+  pollMicrophone();
   poll();
 }
 
@@ -1964,12 +2140,15 @@ function stopPolling() {
   state.eventsTimer = null;
   if (state.speakerTimer) clearInterval(state.speakerTimer);
   state.speakerTimer = null;
+  if (state.microphoneTimer) clearInterval(state.microphoneTimer);
+  state.microphoneTimer = null;
 }
 
 function bindEvents() {
   const refresh = $('#refresh-btn');
-  if (refresh) refresh.addEventListener('click', () => { pollBody(); pollEvents(); pollSpeaker(); poll(); });
+  if (refresh) refresh.addEventListener('click', () => { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); poll(); });
   bindSpeakerEvents();
+  bindMicrophoneEvents();
 
   const auto = $('#auto-refresh');
   if (auto) {
@@ -2007,10 +2186,10 @@ function bindEvents() {
   });
 
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) { pollBody(); pollEvents(); pollSpeaker(); poll(); }
+    if (!document.hidden) { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); poll(); }
   });
 
-  window.addEventListener('online', () => { pollBody(); pollEvents(); pollSpeaker(); poll(); });
+  window.addEventListener('online', () => { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); poll(); });
 }
 
 function init() {

@@ -56,6 +56,7 @@ software/
 │   │   ├── edge_control.py      命令映射/MotionState/遥测解析（重点）
 │   │   ├── edge_web.py          HTTP 服务器/路由/静态文件/模块代理
 │   │   ├── core/speaker.py      蓝牙音箱自动连接 + TTS/音频播放队列
+│   │   ├── core/microphone.py   HFP 麦克风录音 + WAV/ROS AudioData
 │   │   ├── http_health.py       健康接口数据组装
 │   │   ├── core/                业务核心：body_drive、odometry、velocity_mux、
 │   │   │                        safety_checker、vla_engine、navigation、object_search…
@@ -98,7 +99,7 @@ software/
 
 | 进程 | 入口 | 作用 | 端口 |
 |---|---|---|---|
-| `edge_server_node` | `ros_nodes/edge_server_node.py:main` | 网页/API、串口、`/cmd_vel`→STM32、STM32→`/odom`、蓝牙音箱/语音播报 | 80、8080 |
+| `edge_server_node` | `ros_nodes/edge_server_node.py:main` | 网页/API、串口、`/cmd_vel`→STM32、STM32→`/odom`、蓝牙音箱/语音播报、HFP 麦克风录音 | 80、8080 |
 | `health_monitor_node` | `ros_nodes/health_monitor_node.py:main` | 话题/设备健康检查 | 127.0.0.1:8090 |
 
 ### 3.2 全栈（可选）
@@ -231,6 +232,9 @@ Twist 量化规则（`core/body_drive.py`）：
 | GET | `/api/events?limit=N` | 最近 N 条运行事件（命令/串口/急停/超时） |
 | GET | `/api/speaker` | 蓝牙音箱/TTS/播放状态 |
 | POST | `/api/speaker/{connect,say,play,volume,stop}` | 连接/TTS/播放文件/音量/停止 |
+| GET | `/api/microphone` | HFP 麦克风/录音状态 |
+| POST | `/api/microphone/{start,stop,play,volume,list}` | 录音/回放/音量/列表 |
+| GET | `/api/microphone/recordings[/{name}]` | 录音列表/WAV 下载 |
 | GET | `/api/modules` | 模块注册表 |
 | GET | `/api/modules/edge` | Edge 模块详情 |
 | GET | `/api/modules/edge/params` | 可调参数（含 `speaker_volume`） |
@@ -245,7 +249,7 @@ Twist 量化规则（`core/body_drive.py`）：
 |---|---|
 | `web/index.html` | 手柄页；按钮/摇杆事件、`/cmd` 发送、stop beacon |
 | `web/ps2.js` / `ps2.css` | 手柄视觉与交互 |
-| `web/dashboard.html` / `dashboard.js` | 数字孪生：EDGE + ROS 2 合并节点、BOM 硬件矩阵、蓝牙音箱/语音播报面板 |
+| `web/dashboard.html` / `dashboard.js` | 数字孪生：EDGE + ROS 2 合并节点、BOM 硬件矩阵、蓝牙音箱/语音播报/麦克风录音面板 |
 | `web/audio.js` | 音频控制（与运动链路独立） |
 | `web/yolo.js` | 视觉检测展示 |
 

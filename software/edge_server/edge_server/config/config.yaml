@@ -293,6 +293,18 @@ edge_server:
       say_topic: "/body/say"
       status_topic: "/body/audio_status"
       status_rate_hz: 1.0
+      # 同一台 newmine 的 HFP 麦克风；录音时临时切 HFP，停止后恢复 A2DP
+      microphone:
+        enabled: false
+        record_dir: ""            # 空 = <audio_dir>/mic
+        sample_rate: 8000
+        channels: 1
+        chunk_ms: 100
+        max_duration_sec: 60
+        volume: 100
+        topic: "/edge/audio"
+        status_topic: "/body/mic_status"
+        status_rate_hz: 1.0
       tts:
         backend: "auto"           # auto/espeak-ng/edge-tts/none
         voice: "cmn"              # espeak-ng 中文；英文可用 en-us
@@ -359,11 +371,12 @@ edge_server:
         required: false
       microphone:
         type: microphone
-        topic: "/edge/audio"
-        message_type: "custom_msgs/msg/AudioData"
-        expected_rate_hz: 10.0
-        timeout_sec: 2.0
+        topic: "/body/mic_status"
+        message_type: "std_msgs/msg/String"
+        expected_rate_hz: 1.0
+        timeout_sec: 3.0
         required: false
+        description: "newmine Bluetooth HFP microphone status"
       speaker:
         type: speaker
         topic: "/body/audio_status"

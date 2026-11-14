@@ -51,6 +51,27 @@ class FakeRuntime:
             },
             "last_error": "",
         }
+        self.microphone_actions = []
+        self.microphone_payload = {
+            "ok": True,
+            "enabled": True,
+            "supported": True,
+            "available": True,
+            "online": True,
+            "recording": False,
+            "source": "bluez_input.73_DB_39_F2_15_4B.headset-head-unit",
+            "sample_rate": 8000,
+            "channels": 1,
+            "duration_ms": 0,
+            "file": "",
+            "file_name": "",
+            "last_file": "",
+            "last_file_name": "",
+            "last_duration_ms": 1200,
+            "volume": 100,
+            "error": "",
+        }
+        self.mic_file = ""
         self.body_payload = {
             "valid": True,
             "stale": False,
@@ -178,6 +199,59 @@ class FakeRuntime:
             "message": f"{action} ok",
             "speaker": self.speaker_payload,
         }
+
+    def microphone_status(self):
+        return dict(self.microphone_payload)
+
+    def handle_microphone(self, action, fields):
+        self.microphone_actions.append((action, dict(fields)))
+        if action == "start":
+            self.microphone_payload["recording"] = True
+            return {
+                "ok": True,
+                "message": "录音已开始",
+                "microphone": self.microphone_payload,
+            }
+        if action == "stop":
+            self.microphone_payload["recording"] = False
+            return {
+                "ok": True,
+                "message": "录音已停止",
+                "microphone": self.microphone_payload,
+            }
+        if action == "list":
+            return {
+                "ok": True,
+                "count": 1,
+                "recordings": [
+                    {
+                        "name": "mic-test.wav",
+                        "size": 4,
+                        "duration_ms": 1200,
+                        "modified_ms": 1700000000000,
+                    }
+                ],
+            }
+        if action == "volume":
+            value = int(str(fields.get("volume", "")))
+            if value < 0 or value > 100:
+                raise ValueError("volume 必须在 0..100")
+            self.microphone_payload["volume"] = value
+            return {
+                "ok": True,
+                "message": "麦克风音量已更新",
+                "microphone": self.microphone_payload,
+            }
+        return {
+            "ok": True,
+            "message": f"{action} ok",
+            "microphone": self.microphone_payload,
+        }
+
+    def microphone_recording(self, name):
+        if name != "mic-test.wav" or not self.mic_file:
+            raise ValueError("录音文件不存在")
+        return self.mic_file
 
     def local_modules(self):
         return [
@@ -466,6 +540,62 @@ def test_stream_redirect(web_server):
         assert response.getheader("Location") == "http://127.0.0.1:18080/stream"
     finally:
         connection.close()
+
+
+def test_microphone_api(web_server, tmp_path):
+    port, runtime = web_server
+    status, _, body = request(port, "/api/microphone")
+    payload = json.loads(body)
+    assert status == 200
+    assert payload["sample_rate"] == 8000
+    assert payload["available"] is True
+
+    status, _, body = request(
+        port,
+        "/api/microphone/start",
+        method="POST",
+        data=json.dumps({"duration": 5}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert status == 200
+    assert json.loads(body)["microphone"]["recording"] is True
+    assert runtime.microphone_actions[-1] == ("start", {"duration": "5"})
+
+    status, _, body = request(port, "/api/microphone/stop", method="POST")
+    assert status == 200
+    assert json.loads(body)["microphone"]["recording"] is False
+
+    status, _, body = request(
+        port,
+        "/api/microphone/volume",
+        method="POST",
+        data=json.dumps({"volume": 80}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert status == 200
+    assert json.loads(body)["microphone"]["volume"] == 80
+
+    status, _, body = request(port, "/api/microphone/recordings")
+    payload = json.loads(body)
+    assert status == 200
+    assert payload["recordings"][0]["name"] == "mic-test.wav"
+
+    recording = tmp_path / "mic-test.wav"
+    recording.write_bytes(b"RIFFtest")
+    runtime.mic_file = str(recording)
+    status, headers, body = request(
+        port, "/api/microphone/recordings/mic-test.wav"
+    )
+    assert status == 200
+    assert body == b"RIFFtest"
+    assert "audio/wav" in headers["Content-Type"]
+    assert "attachment" in headers["Content-Disposition"]
+
+    status, _, _ = request(port, "/api/microphone/recordings/missing.wav")
+    assert status == 404
+
+    status, _, _ = request(port, "/api/microphone/unknown", method="POST")
+    assert status == 404
 
 
 def test_speaker_api(web_server):

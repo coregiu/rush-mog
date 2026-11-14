@@ -943,6 +943,8 @@ paths:
                 speaker_state: connected
                 speaker_device: newmine
                 audio_playing: false
+                mic_available: true
+                mic_recording: false
                 ip: "192.168.4.1"
                 hostname: "rush-mog"
 
@@ -1071,6 +1073,134 @@ paths:
                 $ref: '#/components/schemas/CenterErrorResponse'
         '503':
           description: 音箱功能未启用或当前不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /api/microphone:
+    get:
+      tags: [Edge Server]
+      summary: newmine HFP 麦克风状态
+      description: |
+        返回蓝牙耳机麦克风的 HFP 能力、输入源、录音状态、最近录音和音量。
+        `available=true` 表示音箱已连接且 card 提供 `headset-head-unit` profile；
+        录音时临时切到 HFP，`recording=true`；停止后自动恢复 A2DP。
+      operationId: edgeMicrophoneStatus
+      responses:
+        '200':
+          description: 麦克风状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgeMicrophoneStatus'
+        '503':
+          description: 麦克风功能未启用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /api/microphone/{action}:
+    post:
+      tags: [Edge Server]
+      summary: 麦克风操作（开始/停止录音、回放、音量、列表）
+      description: |
+        - `start`：`{"duration":10}` 开始录音；省略 duration 用 `max_duration_sec`；
+        - `stop`：停止录音并恢复 A2DP；
+        - `play`：`{"file":"mic-....wav"}` 回放录音；
+        - `volume`：`{"volume":100}` 麦克风音量 0..100；
+        - `list`：返回录音文件列表。
+      operationId: edgeMicrophoneAction
+      parameters:
+        - name: action
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [start, stop, play, volume, list]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 操作已接受（`microphone` 为最新状态）
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          description: 参数非法（时长/音量/文件名等）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '404':
+          description: 未知麦克风动作
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '503':
+          description: 麦克风未启用或音箱不支持 HFP
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /api/microphone/recordings:
+    get:
+      tags: [Edge Server]
+      summary: 录音文件列表
+      operationId: edgeMicrophoneRecordings
+      responses:
+        '200':
+          description: '`{ok,count,recordings,dir}`，按修改时间倒序'
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '503':
+          description: 麦克风功能未启用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /api/microphone/recordings/{name}:
+    get:
+      tags: [Edge Server]
+      summary: 下载 WAV 录音
+      operationId: edgeMicrophoneRecordingDownload
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}\.wav$'
+      responses:
+        '200':
+          description: WAV 文件
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: 录音不存在或文件名非法
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '503':
+          description: 麦克风功能未启用
           content:
             application/json:
               schema:
@@ -2107,6 +2237,36 @@ components:
         hostname:
           type: string
           description: 主机名
+
+    EdgeMicrophoneStatus:
+      type: object
+      description: newmine 蓝牙 HFP 麦克风状态
+      required: [ok, enabled, available, recording]
+      properties:
+        ok: {type: boolean, enum: [true]}
+        enabled: {type: boolean}
+        supported: {type: boolean}
+        available: {type: boolean}
+        online: {type: boolean}
+        recording: {type: boolean}
+        source: {type: string, example: "bluez_input.73_DB_39_F2_15_4B.headset-head-unit"}
+        sample_rate: {type: integer, example: 8000}
+        channels: {type: integer, example: 1}
+        chunk_ms: {type: integer, example: 100}
+        duration_ms: {type: integer}
+        started_ms: {type: integer, format: int64}
+        file: {type: string}
+        file_name: {type: string}
+        last_file: {type: string}
+        last_file_name: {type: string}
+        last_duration_ms: {type: integer}
+        bytes: {type: integer}
+        volume: {type: integer, minimum: 0, maximum: 100}
+        max_duration_sec: {type: number}
+        record_dir: {type: string}
+        topic: {type: string, example: "/edge/audio"}
+        status_topic: {type: string, example: "/body/mic_status"}
+        error: {type: string}
 
     EdgeSpeakerStatus:
       type: object

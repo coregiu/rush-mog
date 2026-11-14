@@ -412,6 +412,82 @@ class SpeakerManager:
             f"{',playing' if status['playback']['playing'] else ''}"
         )
 
+    # ------------------------------------------------------------- bluetooth card
+    def card_name(self) -> str:
+        mac = normalize_mac(self.device_mac)
+        return "bluez_card." + mac.replace(":", "_") if mac else ""
+
+    def _pactl_cards(self) -> Dict[str, Dict[str, Any]]:
+        result = self._run(["pactl", "list", "cards"], timeout=5.0)
+        cards: Dict[str, Dict[str, Any]] = {}
+        if not result.ok:
+            return cards
+        current = ""
+        for line in result.stdout.splitlines():
+            text = line.strip()
+            if text.startswith("Name: "):
+                current = text[len("Name: "):].strip()
+                cards[current] = {"profiles": [], "active_profile": ""}
+                continue
+            if not current:
+                continue
+            if text.startswith("Active Profile:"):
+                cards[current]["active_profile"] = text.split(":", 1)[1].strip()
+                continue
+            match = re.match(
+                r"^([A-Za-z0-9_.+-]+):\s+.*\(sinks:\s*\d+,\s*sources:\s*\d+",
+                text,
+            )
+            if match:
+                cards[current]["profiles"].append(match.group(1))
+        return cards
+
+    def card_profiles(self) -> List[str]:
+        card = self.card_name()
+        if not card:
+            return []
+        return list((self._pactl_cards().get(card) or {}).get("profiles") or [])
+
+    def active_card_profile(self) -> str:
+        card = self.card_name()
+        if not card:
+            return ""
+        return str((self._pactl_cards().get(card) or {}).get("active_profile") or "")
+
+    def set_card_profile(self, profile: str) -> bool:
+        card = self.card_name()
+        name = str(profile or "").strip()
+        if not card or not re.match(r"^[A-Za-z0-9_.+-]{1,64}$", name):
+            return False
+        result = self._run(
+            ["pactl", "set-card-profile", card, name], timeout=8.0
+        )
+        return bool(result.ok)
+
+    def refresh_sink(self) -> bool:
+        with self._lock:
+            mac = str(self.device_mac)
+        if not mac:
+            return False
+        return self._refresh_sink(mac, initial=False)
+
+    def play_audio_path(self, path: Any) -> Dict[str, Any]:
+        """播放任意已存在音频文件（用于麦克风录音回放）。"""
+        text = str(path or "").strip()
+        if not text:
+            raise ValueError("缺少音频文件")
+        resolved = os.path.realpath(os.path.expanduser(text))
+        if not os.path.isfile(resolved):
+            raise ValueError("音频文件不存在")
+        if os.path.splitext(resolved)[1].lower() not in _AUDIO_EXTENSIONS:
+            raise ValueError("不支持的音频格式")
+        self._require_audio_ready()
+        self._enqueue("file", {"path": resolved})
+        with self._lock:
+            self._last_text = os.path.basename(resolved)
+            self._play_error = ""
+        return self.status()
+
     # ------------------------------------------------------------- commands
     def reconnect(self) -> Dict[str, Any]:
         """立即触发一次连接检查（不阻塞 HTTP 线程）。"""

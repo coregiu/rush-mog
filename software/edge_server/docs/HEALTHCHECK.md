@@ -41,7 +41,7 @@ Edge Server 需要用一个接口回答三个问题：
                               ▼                            ▼                            ▼
                         /camera/image_raw            /scan, /imu/data            /base/status
                         /edge/video                  /odom                       /battery_state
-                        /audio/raw                   /arm/joint_states           /body/audio_status
+                        /body/mic_status             /arm/joint_states           /body/audio_status
 ```
 
 - 代码与 `robot.yaml` 默认监听 `127.0.0.1:8090`；Edge Server 与 ROS 同机，直接走回环代理。
@@ -524,7 +524,7 @@ string metrics_json
 | `camera` | camera | `/camera/image_raw` | 是 | 15 Hz | 空图/宽高为 0 判非法 |
 | `lidar` | lidar | `/scan` | 是 | 10 Hz | 空 ranges 判非法 |
 | `imu` | imu | `/imu/data` | 是 | 100 Hz | 全零/非有限值判非法 |
-| `microphone` | microphone | `/audio/raw` | 否 | 10 Hz | 空音频帧判非法 |
+| `microphone` | microphone | `/body/mic_status` | 否 | 1 Hz | JSON；`online=false` 判非法（HFP 不可用/未连接） |
 | `speaker` | speaker | `/body/audio_status` | 否 | 1 Hz | JSON；`online=false` 判非法（蓝牙断开/sink 未就绪） |
 | `arm` | arm | `/arm/joint_states` | 否 | 10 Hz | **当前无反馈，unknown**；接入后校验 j1..j5 |
 | `base` | base | `/base/status` | 是 | 1 Hz | JSON；`encoder_ok=false` 判非法 |
@@ -544,7 +544,7 @@ string metrics_json
  "connected": true, "audio_ready": true, "online": true,
  "device": {"name": "newmine", "mac": "73:DB:39:F2:15:4B",
             "paired": true, "trusted": true},
- "sink": {"name": "bluez_output.73_DB_39_F2_15_4B.1", "id": 42,
+ "sink": {"name": "bluez_output.73_DB_39_F2_15_4B.a2dp-sink", "id": 42,
           "ready": true, "volume": 70},
  "playback": {"playing": false, "queue": 0, "last_error": ""}}
 ```
@@ -552,6 +552,24 @@ string metrics_json
 - `online = connected && audio_ready`；`online=false` 判设备 `degraded`（可选设备）；
 - 未启用 `edge.speaker.enabled=false` 时不发布，健康检查保持 `unknown`；
 - 无发布者/从未收到：`unknown`，不影响整体 `ok`。
+
+#### 麦克风 `/body/mic_status`（已实现）
+
+`edge_server_node` 以 1 Hz 发布 `std_msgs/msg/String`，内容是
+`MicrophoneManager` 的状态快照：
+
+```json
+{"ok": true, "enabled": true, "supported": true, "available": true,
+ "online": true, "recording": false, "source": "",
+ "sample_rate": 8000, "channels": 1, "duration_ms": 0,
+ "last_file_name": "mic-20261114-123901-694.wav",
+ "last_duration_ms": 3273, "volume": 100, "error": ""}
+```
+
+- `supported`：card 提供 `headset-head-unit` profile；
+- `available = 已连接 && supported`，即 `online`；
+- 录音时 `recording=true` 且 `/edge/audio` 以 10 Hz 发布 `AudioData`；
+- 未启用 `edge.speaker.microphone.enabled=false` 时不发布，健康检查保持 `unknown`。
 
 #### 机械臂 `/arm/joint_states`（待接入）
 
@@ -781,7 +799,7 @@ cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests/test_health_monitor.py tests/test_health_http.py -q
 # 29 passed
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 107 passed（含音箱/API 新增用例）
+# 115 passed（含音箱/API 新增用例）
 ```
 
 覆盖：
@@ -837,10 +855,11 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck "{}"
 **Q：`/ros/healthz` 200、`/ros/readyz` 503，正常吗？**
 正常。前者只表示进程活着；后者表示系统还没就绪（`starting`/`error`/急停）。
 
-**Q：音箱/机械臂为什么是 `unknown`？**
-机械臂仍无回读话题，所以 `unknown`。音箱已接入：`edge_server_node` 发布 `/body/audio_status`，
-`online=false`（蓝牙未连接或 A2DP sink 未就绪）时显示 `degraded`，连接并出 sink 后自动恢复 `ok`。
-接入 `/arm/joint_states` 后机械臂也会自动变成 `ok`/`degraded`/`error`。
+**Q：音箱/麦克风/机械臂为什么是 `unknown`？**
+机械臂仍无回读话题，所以 `unknown`。音箱/麦克风已接入：`edge_server_node` 发布
+`/body/audio_status`、`/body/mic_status`，`online=false` 时显示 `degraded`，
+连接并可用后自动恢复 `ok`。接入 `/arm/joint_states` 后机械臂也会自动变成
+`ok`/`degraded`/`error`。
 
 **Q：端口 8090 被占用怎么办？**
 节点会记录 `health HTTP bind failed`，ROS 话题/服务仍可用，`http.bound=false`；改 `health.http.port` 或释放端口后重启。

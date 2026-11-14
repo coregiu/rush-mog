@@ -404,7 +404,7 @@ class HealthMonitorNode(Node):
                 error = "non-finite odometry"
         elif isinstance(msg, String):
             metrics["bytes"] = len(msg.data)
-            if spec.kind in {"base", "speaker"}:
+            if spec.kind in {"base", "speaker", "microphone"}:
                 try:
                     data = json.loads(msg.data)
                 except Exception:  # noqa: BLE001
@@ -422,6 +422,9 @@ class HealthMonitorNode(Node):
                         if spec.kind == "speaker" and data.get("online") is False:
                             invalid = True
                             error = "speaker offline"
+                        if spec.kind == "microphone" and data.get("online") is False:
+                            invalid = True
+                            error = "microphone offline"
         else:
             metrics["message_class"] = type(msg).__name__
 

@@ -40,6 +40,7 @@ from std_msgs.msg import String
 from tf2_ros import TransformBroadcaster
 
 from edge_server.core.body_drive import BodyDriveConfig, twist_to_body_command
+from edge_server.core.microphone import MicrophoneManager
 from edge_server.core.odometry import MecanumGeometry, WheelOdometry, wheel_names
 from edge_server.core.speaker import SpeakerError, SpeakerManager
 from edge_server.edge_control import (
@@ -51,7 +52,7 @@ from edge_server.edge_control import (
 from edge_server.edge_web import EdgeHttpApp, EdgeHttpServer, MjpegServer
 from edge_server.utils.clock import create_steady_clock
 from edge_server.utils.config import load_config
-from custom_msgs.msg import SafetyState
+from custom_msgs.msg import AudioData, SafetyState
 
 try:  # 相机/图传是可降级能力，缺失时网页仍可用
     import cv2  # type: ignore
@@ -214,6 +215,7 @@ class EdgeServerNode(Node):
         camera_cfg = dict(edge_cfg.get("camera") or {})
         motion_cfg = dict(edge_cfg.get("motion") or {})
         speaker_cfg = dict(edge_cfg.get("speaker") or {})
+        mic_cfg = dict(speaker_cfg.get("microphone") or {})
 
         self.started_monotonic = time.monotonic()
         self.hostname = socket.gethostname()
@@ -258,6 +260,8 @@ class EdgeServerNode(Node):
         )
         if "speaker_volume" in saved:
             speaker_cfg["volume"] = saved.get("speaker_volume")
+        if "microphone_volume" in saved:
+            mic_cfg["volume"] = saved.get("microphone_volume")
         keepalive_ms = _int_or(
             saved.get("motion_keepalive_ms"),
             _int_or(motion_cfg.get("keepalive_ms"), 200),
@@ -293,6 +297,28 @@ class EdgeServerNode(Node):
         self.pub_audio_status = self.create_publisher(
             String,
             self.speaker.status_topic,
+            10,
+        )
+        try:
+            self.microphone = MicrophoneManager(
+                mic_cfg,
+                speaker=self.speaker,
+                on_event=self._on_speaker_event,
+                on_audio_chunk=self._on_mic_chunk,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().error(f"初始化麦克风服务失败，已禁用: {exc}")
+            self.microphone = MicrophoneManager(
+                {"enabled": False}, speaker=self.speaker
+            )
+        self.pub_microphone = self.create_publisher(
+            AudioData,
+            self.microphone.topic,
+            qos_profile_sensor_data,
+        )
+        self.pub_mic_status = self.create_publisher(
+            String,
+            self.microphone.status_topic,
             10,
         )
 
@@ -466,6 +492,7 @@ class EdgeServerNode(Node):
             "motion_keepalive_ms": self.motion.keepalive_ms,
             "stream_fps": self.stream_fps,
             "speaker_volume": self.speaker.volume,
+            "microphone_volume": self.microphone.volume,
         }
         try:
             directory = os.path.dirname(self._state_file)
@@ -567,6 +594,18 @@ class EdgeServerNode(Node):
             status=str(status or "info"),
         )
 
+    def _on_mic_chunk(self, pcm: bytes, sample_rate: int, channels: int) -> None:
+        """麦克风采集线程回调：发布 ``custom_msgs/AudioData``。"""
+        try:
+            msg = AudioData()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.format = "pcm_s16le"
+            msg.sample_rate = int(sample_rate)
+            msg.data = bytes(pcm)
+            self.pub_microphone.publish(msg)
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().warn(f"publish microphone frame failed: {exc}")
+
     def on_say(self, msg: String) -> None:
         """ROS ``/body/say``：文本 -> TTS -> 蓝牙音箱。"""
         text = str(msg.data or "").strip()
@@ -592,12 +631,62 @@ class EdgeServerNode(Node):
         if not self.speaker.enabled:
             return
         payload = self.speaker.status()
+        if payload.get("connected") and not self.microphone.supported:
+            self.microphone.refresh_capabilities()
+        mic_payload = self.microphone.status()
+        payload["microphone"] = mic_payload
         self.pub_audio_status.publish(
             String(data=json.dumps(payload, ensure_ascii=False))
         )
+        if self.microphone.enabled:
+            self.pub_mic_status.publish(
+                String(data=json.dumps(mic_payload, ensure_ascii=False))
+            )
 
     def speaker_status(self) -> dict:
         return self.speaker.status()
+
+    def microphone_status(self) -> dict:
+        return self.microphone.status()
+
+    def microphone_recording(self, name: str) -> str:
+        return self.microphone.recording_path(name)
+
+    def handle_microphone(self, action: str, fields: Mapping[str, Any]) -> dict:
+        """``/api/microphone/*`` 的动作分发。"""
+        name = str(action or "").strip().lower()
+        if name == "start":
+            status = self.microphone.start(fields.get("duration", ""))
+            self._record_event(
+                "microphone",
+                f"开始录音 {status.get('file_name', '')}",
+                source="api",
+                status="ok",
+            )
+            return {"ok": True, "message": "录音已开始", "microphone": status}
+        if name == "stop":
+            status = self.microphone.stop()
+            self._record_event(
+                "microphone", "停止录音", source="api", status="info"
+            )
+            return {"ok": True, "message": "录音已停止", "microphone": status}
+        if name == "play":
+            file_name = fields.get("file", fields.get("name", ""))
+            status = self.microphone.play_recording(file_name)
+            self._record_event(
+                "microphone",
+                f"回放录音: {str(file_name)[:60]}",
+                source="api",
+                status="ok",
+            )
+            return {"ok": True, "message": "录音已加入播放队列", "speaker": status}
+        if name == "volume":
+            value = fields.get("volume", fields.get("value", ""))
+            status = self.microphone.set_volume(value)
+            return {"ok": True, "message": "麦克风音量已更新", "microphone": status}
+        if name == "list":
+            return self.microphone.recordings()
+        raise ValueError(f"未知麦克风动作: {name}")
 
     def handle_speaker(self, action: str, fields: Mapping[str, Any]) -> dict:
         """``/api/speaker/*`` 的动作分发；异常由 HTTP 层转成 4xx/5xx。"""
@@ -917,6 +1006,7 @@ class EdgeServerNode(Node):
             )
         health = self._ros_health()
         speaker = self.speaker.status()
+        microphone = self.microphone.status()
         return {
             "uptime_ms": int((now - self.started_monotonic) * 1000.0),
             "free_heap": int(_free_memory_bytes()),
@@ -934,6 +1024,10 @@ class EdgeServerNode(Node):
             "speaker_state": str(speaker["state"]),
             "speaker_device": str((speaker.get("device") or {}).get("name", "")),
             "audio_playing": bool((speaker.get("playback") or {}).get("playing", False)),
+            "microphone": microphone,
+            "mic_available": bool(microphone["available"]),
+            "mic_recording": bool(microphone["recording"]),
+            "mic_source": str(microphone["source"]),
             "ip": self.ip_address,
             "hostname": self.hostname,
         }
@@ -1027,6 +1121,7 @@ class EdgeServerNode(Node):
         motion = self.motion.snapshot(now)
         health = self._ros_health() or {}
         speaker = self.speaker.status()
+        microphone = self.microphone.status()
         return {
             "motion_keepalive_ms": int(motion["keepalive_ms"]),
             "stream_fps": self.stream_fps,
@@ -1053,6 +1148,12 @@ class EdgeServerNode(Node):
             "speaker_volume": int((speaker.get("sink") or {}).get("volume", 0)),
             "speaker_sink": str((speaker.get("sink") or {}).get("name", "")),
             "audio_playing": bool((speaker.get("playback") or {}).get("playing", False)),
+            "mic_enabled": bool(microphone["enabled"]),
+            "mic_available": bool(microphone["available"]),
+            "mic_recording": bool(microphone["recording"]),
+            "mic_source": str(microphone["source"]),
+            "mic_last_file": str(microphone["last_file_name"]),
+            "mic_volume": int(microphone["volume"]),
             "hostname": self.hostname,
             "ip": self.ip_address,
             "platform": self.platform_name,
@@ -1142,6 +1243,18 @@ class EdgeServerNode(Node):
                    "int", "音频", True, "%", "0", "100", "5"),
             _param("audio_playing", "语音播放中", _bool_literal(values["audio_playing"]),
                    "bool", "音频", False, "", "", "", ""),
+            _param("mic_enabled", "麦克风启用", _bool_literal(values["mic_enabled"]),
+                   "bool", "音频", False, "", "", "", ""),
+            _param("mic_available", "麦克风可用", _bool_literal(values["mic_available"]),
+                   "bool", "音频", False, "", "", "", ""),
+            _param("mic_recording", "录音中", _bool_literal(values["mic_recording"]),
+                   "bool", "音频", False, "", "", "", ""),
+            _param("mic_source", "麦克风输入", json.dumps(values["mic_source"]),
+                   "string", "音频", False, "", "", "", ""),
+            _param("mic_last_file", "最近录音", json.dumps(values["mic_last_file"]),
+                   "string", "音频", False, "", "", "", ""),
+            _param("mic_volume", "麦克风音量", values["mic_volume"],
+                   "int", "音频", True, "%", "0", "100", "5"),
         ]
         return {
             "ok": True,
@@ -1179,6 +1292,12 @@ class EdgeServerNode(Node):
                 except SpeakerError as exc:
                     raise ValueError(str(exc))
                 changed[name] = value
+            elif name == "mic_volume":
+                value = _int_or(raw, -1)
+                if value < 0 or value > 100:
+                    raise ValueError("mic_volume 必须在 0..100")
+                self.microphone.set_volume(value)
+                changed[name] = value
             else:
                 raise ValueError(f"参数不可修改: {name}")
         if not changed:
@@ -1207,6 +1326,10 @@ class EdgeServerNode(Node):
     def destroy_node(self) -> None:
         try:
             self._send_command("0", force=True)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self.microphone.stop()
         except Exception:  # noqa: BLE001
             pass
         try:

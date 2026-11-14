@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#050914">
   <title>RUSH-MOG · 数字孪生</title>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
-  <link rel="stylesheet" href="dashboard.css?v=20261114h">
+  <link rel="stylesheet" href="dashboard.css?v=20261114i">
 </head>
 <body>
   <div class="ambient ambient-a"></div>
@@ -674,6 +674,21 @@
             <button type="button" class="speaker-chip" data-text="任务完成">任务完成</button>
           </div>
 
+          <div class="mic-block" id="mic-block" data-status="unknown">
+            <div class="mic-head">
+              <span class="eyebrow">HFP MICROPHONE · newmine</span>
+              <span class="status-chip status-unknown" id="mic-state">未知</span>
+            </div>
+            <div class="mic-actions">
+              <button id="mic-start" class="btn btn-ghost" type="button">开始录音</button>
+              <button id="mic-stop" class="btn btn-ghost" type="button">停止录音</button>
+              <span class="mic-duration" id="mic-duration">00:00</span>
+              <a id="mic-download" class="btn btn-ghost" href="#" hidden>下载录音</a>
+              <button id="mic-play" class="btn btn-ghost" type="button" disabled>播放最近录音</button>
+            </div>
+            <p class="speaker-hint" id="mic-hint">等待麦克风状态…</p>
+          </div>
+
           <p class="speaker-hint" id="speaker-hint">等待音箱状态…</p>
         </div>
       </div>
@@ -733,6 +748,6 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="dashboard.js?v=20261114h"></script>
+  <script src="dashboard.js?v=20261114i"></script>
 </body>
 </html>

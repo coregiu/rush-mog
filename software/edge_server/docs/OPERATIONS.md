@@ -433,6 +433,9 @@ sudo chsh -s /bin/bash ubuntu
 | `/api/speaker` 为 `error` / `br-connection-page-timeout` | 音箱休眠、被手机占用或超出距离 | 音箱开机并断开手机；节点每 20s 自动重连，或 `curl -X POST .../api/speaker/connect` |
 | `/api/speaker` 已连接但 `audio_ready=false` | PipeWire/WirePlumber 用户服务没起，或 sink 未创建 | `systemctl --user status pipewire wireplumber`；`pactl list short sinks | grep bluez_output`；见 DEPLOY.md §7.3 |
 | 语音播报入队但没声音 | 默认 sink 不是蓝牙，或音箱静音/音量 0 | `pactl get-default-sink`、`pactl set-sink-mute <name> 0`、`POST /api/speaker/volume` |
+| `/api/microphone` 的 `supported=false` | 耳机 card 没有 HFP/HSP profile，或音箱未连接 | `pactl list cards \| grep -A12 bluez_card`；确认 `headset-head-unit` 存在 |
+| 录音报“未找到蓝牙麦克风输入源” | HFP profile 切换失败/被手机占用 | `bluetoothctl disconnect/connect`；`pactl list short sources \| grep bluez_input`；再重试 |
+| 录音没声音/文件很小 | 麦克风静音、音量低或距离远 | `pactl list sources` 看 `Mute`/`Volume`；`POST /api/microphone/volume` 调大 |
 | 网页 200 但还是旧界面 | 没 build/restart，或浏览器缓存 | 重新 build + restart，浏览器 Ctrl-F5 |
 | 服务反复重启 | 配置 YAML 写错/端口被占 | `journalctl -u edge_server -n 100` |
 | 日志时间比北京时间慢 8 小时 | Pi 时区是 UTC | `sudo timedatectl set-timezone Asia/Shanghai`（可选） |
@@ -454,9 +457,11 @@ sudo chsh -s /bin/bash ubuntu
 | ROS home | `/var/lib/edge_server/ros/` |
 | 状态文件 | `/var/lib/edge_server/edge_params.json` |
 | 音频目录 | `/var/lib/edge_server/audio`（`/api/speaker/play` 只允许此目录） |
+| 录音目录 | `/var/lib/edge_server/audio/mic` |
 | Web / 手柄 | `http://192.168.3.26/`（:80） |
 | Dashboard | `http://192.168.3.26/dashboard.html` |
 | 音箱状态 | `http://192.168.3.26/api/speaker` |
+| 麦克风状态 | `http://192.168.3.26/api/microphone` |
 | MJPEG | `http://192.168.3.26:8080/stream` |
 | 健康网关 | `http://127.0.0.1:8090/ros/health`（仅本机） |
 | 串口 | `/dev/ttyAMA1`（GPIO4/5，UART3），115200 8N1 |

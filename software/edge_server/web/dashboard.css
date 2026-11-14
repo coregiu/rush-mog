@@ -354,6 +354,17 @@ body {
 .speaker-hint { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; word-break: break-word; }
 .speaker-panel[data-status="error"] .speaker-hint { color: #fca5a5; }
 .speaker-panel[data-status="degraded"] .speaker-hint { color: #fcd34d; }
+.mic-block {
+  margin-top: 2px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(125, 211, 252, 0.14);
+}
+.mic-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mic-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 7px; }
+.mic-duration { color: var(--cyan); font-family: var(--mono); font-size: 11px; min-width: 42px; }
+.mic-block[data-status="ok"] .mic-duration { color: var(--ok); }
+.mic-block[data-status="error"] #mic-hint { color: #fca5a5; }
+.mic-block[data-status="degraded"] #mic-hint { color: #fcd34d; }
 
 .devices-panel { grid-column: 1 / -1; }
 .device-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 9px; padding: 14px; }.device-card {
