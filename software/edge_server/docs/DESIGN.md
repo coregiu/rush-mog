@@ -13,7 +13,7 @@
 | 代码 | `software/edge_server`（ament_python，ROS2 Humble） |
 | 消息/动作 | `software/custom_msgs`（v0.2.0） |
 | 构建 | `colcon build --packages-select custom_msgs edge_server` 通过 |
-| 单元测试 | `pytest tests -q`：132 passed（新增 Edge 控制/HTTP 25 项） |
+| 单元测试 | `pytest tests -q`：133 passed（新增 Edge 控制/HTTP 25 项） |
 | 健康检查 | `test_health_monitor.py` + `test_health_http.py`：29 passed；ROS/HTTP 手工联调通过 |
 | VLA/安全端到端 | `end_to_end_check.py`：7/7 passed |
 | SLAM/导航/搜索联调 | `slam_nav_check.py` + `fake_slam_robot.py`：6/6 passed |
@@ -934,7 +934,7 @@ python3 tests/slam_nav_check.py          # 6/6
 ```bash
 cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 132 passed
+# 133 passed
 ```
 
 健康检查专项：
@@ -1012,6 +1012,6 @@ python3 tests/slam_nav_check.py
 
 `edge_server` v2 在 v1 的 VLA 推理、安全、反向操作之上，补齐了 **SLAM 建图、ICM-20948 定位、
 Nav2/直航导航、目标检测/搜索/接近、速度仲裁、底盘串口桥、健康检查**。软件链路已通过
-132 项单元测试（含 29 项健康检查）、7 项 VLA/安全端到端、6 项 SLAM/导航/搜索联调；
+133 项单元测试（含 29 项健康检查）、7 项 VLA/安全端到端、6 项 SLAM/导航/搜索联调；
 实车落地还差 STM32 固件升级、硬件选型（见 `hardware/SLAM_NAV.md`）、现场标定，以及
 机械臂反馈话题接入。

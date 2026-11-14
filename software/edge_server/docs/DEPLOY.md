@@ -131,6 +131,9 @@
 - Astra Pro：`ros-humble-orbbec-camera` + Orbbec udev 已安装；当前 `lsusb`
   没有 `2bc5` 设备，驱动未启动，`camera/depth_camera` 健康为 `unknown`；
   插上相机后按 §7.8 启动
+- ICM-20948：`i2c-tools`/`python3-smbus2` 已安装，`imu.enabled=true`，
+  `imu_node` 已随 edge_server 服务启动；当前 I2C1 扫描为空（无 0x68/0x69），
+  节点每 2s 重试，health `imu` 为 `unknown`；接好线即自动出数据
 - 悬崖：STM32 固件源码已加 `cliff_mask`，本机已编译出
   `software/body_control/build/src/body_control.bin`；**当前 STM32 仍运行
   旧 8 字段固件，尚未烧录**，所以 `/body/cliff_status` 的 `available=false`，
@@ -194,7 +197,7 @@ cd /mnt/f/CODE/rush-mog/software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest -q tests
 ```
 
-当前基线：`132 passed`。
+当前基线：`133 passed`。
 
 ### 3.3 同步源码到 Pi
 
@@ -710,3 +713,60 @@ health `cliff` 设备（`required: false`）在触发或遥测缺失时标红，
 
 > 先在桌面上确认左右都 `CLEAR`，再分别挡住/移到桌沿确认对应 `CLIFF`；
 > 触发期间固件只允许 STOP/BACK，这是安全策略，不是 Edge 软件限制。
+
+### 7.10 ICM-20948（Pi I2C1）
+
+依赖与接线：
+
+```bash
+sudo apt install i2c-tools python3-smbus2
+ls -l /dev/i2c-1
+sudo i2cdetect -y 1        # 应看到 68（SA0 接地）或 69（SA0 接 3.3V）
+```
+
+接线：ICM-20948 `VCC=3.3V`、`GND`、`SDA=GPIO2`、`SCL=GPIO3`；I2C 上拉
+4.7k 到 3.3V。不要接 5V 信号。
+
+配置（`robot.yaml` / `deploy.yaml`）：
+
+```yaml
+imu:
+  enabled: true
+  i2c_bus: 1
+  address: "0x68"
+  frame_id: "imu_link"
+  rate_hz: 100.0
+  retry_sec: 2.0       # 未接/未上电时自动重试
+```
+
+单独启动/验证：
+
+```bash
+ros2 launch edge_server imu.launch.py
+# 或随实车 bringup（现在默认 start_imu:=true）
+ros2 launch edge_server robot_bringup.launch.py
+
+ros2 topic hz /imu/data        # ≈100 Hz
+ros2 topic echo /imu/data --once
+ros2 run tf2_ros tf2_echo base_link imu_link
+```
+
+`imu_node` 启动失败不会退出，会按 `retry_sec` 重试；传感器接好后无需重启节点。
+想临时关闭：`robot.yaml` 的 `imu.enabled=false` 或
+`ros2 launch ... start_imu:=false`。
+
+标定：
+
+- 静止采集陀螺零偏，填 `imu.calibration.gyro_bias`；
+- 加速度计六面校准填 `accel_bias`；
+- 磁力计做 8 字校准填 `mag_bias/mag_scale`，并设置 `mag_declination_rad`；
+- 磁场受电机干扰时 `imu_node` 只慢速融合，不会硬切航向。
+
+当前这台 Pi 的 I2C1 总线扫描为空（没有 0x68/0x69），说明 ICM-20948 还没接好
+或未上电；`imu_node` 已部署并会每 2s 重试。接好后看：
+
+```bash
+sudo i2cdetect -y 1
+ros2 topic hz /imu/data
+curl -s http://127.0.0.1:8090/ros/health | python3 -m json.tool | grep -A5 '"id": "imu"'
+```

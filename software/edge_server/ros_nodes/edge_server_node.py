@@ -1091,8 +1091,6 @@ class EdgeServerNode(Node):
         speaker = self.speaker.status()
         microphone = self.microphone.status()
         power = self.power.status()
-        body = self.body()
-        cliff = body.get("cliff") or {}
         return {
             "uptime_ms": int((now - self.started_monotonic) * 1000.0),
             "free_heap": int(_free_memory_bytes()),
@@ -1215,6 +1213,8 @@ class EdgeServerNode(Node):
         speaker = self.speaker.status()
         microphone = self.microphone.status()
         power = self.power.status()
+        body = self.body()
+        cliff = body.get("cliff") or {}
         return {
             "motion_keepalive_ms": int(motion["keepalive_ms"]),
             "stream_fps": self.stream_fps,

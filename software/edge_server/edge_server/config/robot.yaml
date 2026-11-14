@@ -158,7 +158,7 @@ edge_server:
   # 方案 A（推荐）：IMU 接树莓派 I2C，enabled: true，启动 start_imu:=true
   # 方案 B：IMU 接 STM32，由旧 base_bridge 转发 /imu/data，enabled: false
   imu:
-    enabled: false
+    enabled: true
     i2c_bus: 1
     address: "0x68"                 # SA0 接地 0x68，接 3.3V 为 0x69
     frame_id: "imu_link"
@@ -166,6 +166,7 @@ edge_server:
     accel_fs: 1                     # ±4g
     gyro_fs: 2                      # ±1000dps
     dlpf: 3
+    retry_sec: 2.0                  # 未接/未上电时自动重试初始化
     expected_rate_hz: 100.0
     max_gap_sec: 0.2
     mag_norm_min_ut: 10.0

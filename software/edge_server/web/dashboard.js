@@ -1100,10 +1100,18 @@ function hardwareState(id) {
     }
     case 'imu': {
       const device = rosDevice('imu');
+      const chips = deviceMetricChips(device);
+      const metrics = (device && device.metrics) || {};
+      if (metrics.accel_norm != null) chips.push(`ACC ${fmtNumber(metrics.accel_norm, 2)}`);
+      if (metrics.gyro_norm != null) chips.push(`GYRO ${fmtNumber(metrics.gyro_norm, 2)}`);
+      if (metrics.has_mag === true) chips.push('MAG OK');
+      else if (device) chips.push('MAG --');
       return {
         status: device ? device.status : 'unknown',
-        detail: deviceDetail(device, '未接入 · 等待 /imu/data'),
-        chips: deviceMetricChips(device),
+        detail: device
+          ? `${deviceDetail(device, 'ok')} · I2C1 0x68 · /imu/data`
+          : '未接入 · 等待 /imu/data（I2C1 0x68/0x69）',
+        chips,
       };
     }
     case 'cliff': {

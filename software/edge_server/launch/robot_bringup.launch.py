@@ -75,7 +75,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "start_imu",
-                default_value="false",
+                default_value="true",
                 description="true if ICM-20948 is wired to the companion computer I2C",
             ),
             DeclareLaunchArgument(

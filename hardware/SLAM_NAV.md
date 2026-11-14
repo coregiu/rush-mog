@@ -179,12 +179,12 @@ KERNEL=="ttyAMA3", SYMLINK+="rush_lidar"
 |---|---|---|
 | `edge_server/config/robot.yaml` → `base.port` | `/dev/ttyUSB0` | `/dev/rush_base`（UART3） |
 | `base.baud` | `9600` | `115200` ✅（固件 `BODY_UART_BAUD_RATE` 已同步） |
-| `imu.enabled` | `false` | `true`（IMU 接 Pi I2C1） |
+| `imu.enabled` | `true`（已启用） | 接 Pi I2C1；未接时节点每 2s 重试 |
 | `imu.i2c_bus` / `address` | `1` / `0x68` | 实物 SA0 接地为 `0x68`，接 3.3V 为 `0x69` |
 | `perception.camera.fx/fy/cx/cy` | `0` | 棋盘格标定后填入 |
 | `navigation.direct.holonomic` | `true` | 换 4 路独立驱动前先设 `false`（L298N 2 路使能做不了真全向） |
 
-启动：`ros2 launch edge_server robot_bringup.launch.py start_imu:=true`。
+启动：`ros2 launch edge_server robot_bringup.launch.py`（`start_imu` 默认 true）。
 
 ---
 

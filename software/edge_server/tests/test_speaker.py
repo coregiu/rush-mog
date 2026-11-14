@@ -133,6 +133,26 @@ def test_connect_selects_bluez_sink(tmp_path):
     assert runner.called("pactl", "set-sink-volume")
 
 
+def test_connected_without_sink_reconnects_profile(tmp_path):
+    runner = FakeRunner(sinks=[])
+    manager = SpeakerManager(
+        {
+            "enabled": True,
+            "device_mac": "73:DB:39:F2:15:4B",
+            "audio_dir": str(tmp_path),
+            "connect_timeout_sec": 5.0,
+        },
+        runner=runner,
+        which=fake_which,
+        temp_dir=str(tmp_path / "tmp"),
+    )
+    manager._connected = True
+    manager._sink_ready = False
+    manager._refresh_sink = lambda *args, **kwargs: False
+    manager._ensure_connected()
+    assert runner.called("bluetoothctl", "connect")
+
+
 def test_queue_say_and_stop_without_threads(tmp_path):
     runner = FakeRunner()
     manager = SpeakerManager(

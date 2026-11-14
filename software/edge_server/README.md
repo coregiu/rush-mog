@@ -31,7 +31,7 @@
 | 项目 | 结果 |
 |---|---|
 | `colcon build --packages-select custom_msgs edge_server` | 通过 |
-| `pytest tests -q` | 132 passed |
+| `pytest tests -q` | 133 passed |
 | `tests/end_to_end_check.py` | 7/7 passed |
 | `tests/slam_nav_check.py` + `fake_slam_robot.py` | 6/6 passed |
 
@@ -137,8 +137,8 @@ ros2 launch edge_server edge_server.launch.py \
 
 ```bash
 ros2 launch edge_server robot_bringup.launch.py
-# IMU 直连 Pi I2C 时：
-ros2 launch edge_server robot_bringup.launch.py start_imu:=true
+# IMU 已默认启动（imu.enabled=true）；走 STM32/base_bridge 时关闭：
+ros2 launch edge_server robot_bringup.launch.py start_imu:=false
 # 指定配置：
 ros2 launch edge_server robot_bringup.launch.py config_file:=/path/to/robot.yaml
 ```
@@ -663,7 +663,7 @@ curl -s http://192.168.3.26/api/modules/ros/health | python3 -m json.tool | grep
 ```bash
 cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 132 passed
+# 133 passed
 ```
 
 单独跑健康检查（不依赖 ROS 图）：

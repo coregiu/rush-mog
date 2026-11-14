@@ -643,7 +643,23 @@ class SpeakerManager:
 
         if connected and info.get("connected"):
             if not sink_ready:
+                # BlueZ 有时显示 connected，但 A2DP sink 没起来（常见于
+                # br-connection-profile-unavailable 之后）。只等 sink 不会自愈，
+                # 再发一次 connect 让 BlueZ 重新协商 A2DP profile。
                 self._refresh_sink(mac)
+                with self._lock:
+                    sink_ready = bool(self._sink_ready)
+                if not sink_ready:
+                    self._emit(
+                        "speaker",
+                        "蓝牙已连接但 A2DP sink 未就绪，重新协商 profile",
+                        "warn",
+                    )
+                    self._run(
+                        ["bluetoothctl", "connect", mac],
+                        timeout=self.connect_timeout_sec,
+                    )
+                    self._refresh_sink(mac, initial=True)
             return
         if connected and info and not info.get("connected"):
             self._mark_disconnected("蓝牙连接已断开")

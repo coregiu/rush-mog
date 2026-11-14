@@ -172,7 +172,7 @@ Edge Server 需要用一个接口回答三个问题：
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `id` | string | 设备 ID，如 `camera` |
-| `type` | string | `camera`/`lidar`/`imu`/`microphone`/`speaker`/`arm`/`base`/`battery`/`odometry`/`other` |
+| `type` | string | `camera`/`lidar`/`imu`/`microphone`/`speaker`/`arm`/`base`/`battery`/`odometry`/`cliff`/`other` |
 | `status` | string | `ok`/`degraded`/`error`/`unknown`/`disabled` |
 | `healthy` | bool | `status == ok` |
 | `ready` | bool | `status in {ok, degraded}` |
@@ -777,7 +777,7 @@ edge_server:
       min_rate_ratio: 0.5
     devices:
       <id>:
-        type: camera|lidar|imu|microphone|speaker|arm|base|battery|odometry|other
+        type: camera|lidar|imu|microphone|speaker|arm|base|battery|odometry|cliff|other
         enabled: true
         required: true
         topic: "/..."
@@ -822,7 +822,7 @@ cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests/test_health_monitor.py tests/test_health_http.py -q
 # 29 passed
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 132 passed（含音箱/API 新增用例）
+# 133 passed（含音箱/API 新增用例）
 ```
 
 覆盖：
