@@ -292,7 +292,7 @@ body {
 .ops-log { display: flex; flex-direction: column; min-height: 0; border: 1px solid rgba(125, 211, 252, 0.12); border-radius: 14px; background: rgba(8, 19, 33, 0.6); padding: 11px 12px; }
 .ops-log-head { display: flex; align-items: center; justify-content: space-between; color: #9fb8cf; font-size: 10px; letter-spacing: 0.06em; }
 .ops-events { list-style: none; margin: 9px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 236px; overflow: auto; }
-.ops-event { display: grid; grid-template-columns: 56px 38px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 8px; border: 1px solid rgba(125, 211, 252, 0.08); border-radius: 8px; background: rgba(5, 12, 22, 0.45); }
+.ops-event { display: grid; grid-template-columns: 66px 44px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 8px; border: 1px solid rgba(125, 211, 252, 0.08); border-radius: 8px; background: rgba(5, 12, 22, 0.45); }
 .ops-event-time { color: var(--dim); font-family: var(--mono); font-size: 9px; }
 .ops-event-badge { padding: 2px 4px; border: 1px solid rgba(125, 211, 252, 0.16); border-radius: 4px; color: #9fb8cf; font-family: var(--mono); font-size: 7px; letter-spacing: 0.08em; text-align: center; }
 .ops-event-text { color: #b9cbe0; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -868,6 +868,105 @@ body {
 }
 @keyframes dataFlow { to { stroke-dashoffset: -220; } }
 
+/* =====================================================================
+   面板内容字号：正文累计 +2 号；最小号辅助文字再 +2 号
+   （面板标题/eyebrow/panel-meta 保持不变）
+   ===================================================================== */
+.panel > :not(.panel-head) .status-chip { font-size: 13px; }
+
+/* 最小号辅助文字：在上一版基础上再 +2 */
+.chip-label { font-size: 9px; }
+.vehicle-sub,
+.hw-tag { font-size: 10px; }
+.gauge-label,
+.motor-read span,
+.body-stat span,
+.module-node .node-sub,
+.hw-node .hw-sub,
+.hw-node .hw-state,
+.ops-event-badge { font-size: 11px; }
+.device-metrics .metric-chip,
+.ops-facts span,
+.param-label small,
+.param-badge { font-size: 12px; }
+.speed-kicker,
+.speed-state,
+.speed-foot,
+.motor-dir,
+.odo-kicker,
+.odo-note,
+.body-flag,
+.spark-label,
+.spark-note,
+.module-node .node-kicker { font-size: 12px; }
+.twin-caption text,
+.telemetry .t-label,
+.telemetry .t-sub,
+.topology-line,
+.ops-event-time,
+.ops-event-code,
+.ops-live span,
+.speaker-fact span,
+.mic-block .eyebrow,
+.metric-chip,
+.module-stale,
+.param-unit,
+.param-help,
+.param-group-title,
+.raw-block pre,
+.drawer-foot .muted,
+.device-name span,
+.vehicle-label { font-size: 13px; }
+
+/* 正文/说明（保持上一版大小） */
+.twin-legend,
+.module-title p,
+.topology-note,
+.ops-copy span,
+.ops-log-head,
+.ops-event-text,
+.ops-empty,
+.speaker-volume strong,
+.speaker-chip,
+.speaker-hint,
+.hw-node .hw-name,
+.device-detail,
+.speed-sub,
+.motor-name,
+.raw-block h4 { font-size: 12px; }
+
+.module-summary,
+.module-node .node-name,
+.speaker-fact strong,
+.speaker-volume,
+.mic-duration,
+.device-name strong,
+.ops-facts strong,
+.body-stat strong,
+.module-icon,
+.odo-read span,
+.param-label strong,
+.param-control input[type="number"],
+.param-control input[type="text"],
+.param-control select { font-size: 13px; }
+
+.device-glyph,
+.speed-unit,
+.speaker-say input { font-size: 14px; }
+.motor-read strong { font-size: 15px; }
+.telemetry .t-value { font-size: 16px; }
+
+.ops-copy strong { font-size: 20px; }
+.ops-code { font-size: 32px; }
+.odo-read strong { font-size: 34px; }
+.speed-read strong { font-size: 48px; }
+
+.module-actions .btn { font-size: 12px; }
+.speaker-actions .btn,
+.speaker-say .btn,
+.mic-actions .btn { font-size: 14px; }
+.empty-state { font-size: 13px; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
 }
@@ -920,13 +1019,13 @@ body {
   .speaker-say .btn { width: 100%; }
   .speaker-volume input[type="range"] { width: 100px; }
   .ops-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .ops-event { grid-template-columns: 50px 34px minmax(0, 1fr); }
+  .ops-event { grid-template-columns: 60px 40px minmax(0, 1fr); }
   .ops-event-code { display: none; }
   .modules-panel .module-list { grid-template-columns: 1fr; }
   .body-side { display: flex; flex-direction: column; }
   .body-stats { grid-template-columns: 1fr 1fr; }
   .body-flags { flex-direction: row; justify-content: flex-start; margin-top: 0; }
-  .speed-read strong { font-size: 38px; }
+  .speed-read strong { font-size: 42px; }
   .motor-grid { gap: 8px; }
   .spark-row { grid-template-columns: 1fr; gap: 6px; padding: 8px 10px 12px; }
   .spark-note { text-align: left; }

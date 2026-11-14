@@ -38,7 +38,7 @@ const HARDWARE_MODULES = [
   { id: 'camera', name: '相机', model: 'Astra Pro', glyph: 'CAM' },
   { id: 'imu', name: '陀螺仪', model: 'ICM-20948', glyph: 'IMU' },
   { id: 'cliff', name: '悬崖传感器', model: 'TCRT5000 ×2', glyph: 'CLF' },
-  { id: 'chassis', name: '麦轮底盘 / 电机驱动', model: 'JGB37-520 ×4 · L298N', glyph: 'CHS' },
+  { id: 'chassis', name: '电机驱动+编码器', model: 'JGB37-520 ×4 · L298N', glyph: 'CHS' },
   { id: 'power', name: '电源及转换板', model: '12V → 5V / 3.3V', glyph: 'PWR' },
   { id: 'mic', name: '麦克风', model: 'USB 全向', glyph: 'MIC' },
   { id: 'speaker', name: '音箱', model: 'Bluetooth', glyph: 'SPK' },
