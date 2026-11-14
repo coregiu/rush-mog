@@ -24,7 +24,7 @@ edge_server:
   base:
     enabled: true
     transport: "edge_serial"         # edge_serial | serial_binary | esp32_http(legacy)
-    port: "/dev/ttyUSB0"             # 推荐 udev 固定为 /dev/rush_base
+    port: "/dev/ttyUSB0"             # GPIO4/5(UART3) 时为 /dev/ttyAMA1，需 dtoverlay=uart3；USB 串口可 udev 固定为 /dev/rush_base
     baud: 115200                     # 与 body_control 的 BODY_UART_BAUD_RATE 保持一致
     odom_rate_hz: 20.0
     watchdog_sec: 0.5

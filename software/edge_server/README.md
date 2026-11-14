@@ -1,8 +1,10 @@
 # edge_server（ROS2：Pi Edge Server + VLA + SLAM + 导航 + 目标搜索 + 健康检查）
 
-设计文档：[`DESIGN.md`](DESIGN.md)。
-健康检查接口契约：[`HEALTHCHECK.md`](HEALTHCHECK.md)。
-部署与发布说明：[`DEPLOY.md`](DEPLOY.md)。
+设计文档：[`docs/DESIGN.md`](docs/DESIGN.md)。
+代码结构与调用链：[`docs/CODE_MAP.md`](docs/CODE_MAP.md)。
+健康检查接口契约：[`docs/HEALTHCHECK.md`](docs/HEALTHCHECK.md)。
+部署与发布说明：[`docs/DEPLOY.md`](docs/DEPLOY.md)。
+**实机启停/日志/排障：[`docs/OPERATIONS.md`](docs/OPERATIONS.md)。**
 硬件方案与缺口分析：[`hardware/SLAM_NAV.md`](../../hardware/SLAM_NAV.md)。
 
 本包在 v1 的 VLA 推理/安全/反向操作之上，补齐：

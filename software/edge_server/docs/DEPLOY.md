@@ -3,6 +3,41 @@
 > 目标机：`ubuntu@192.168.3.26`（Raspberry Pi 4B，Ubuntu 22.04 arm64）
 > 部署目录：`/opt/edge_server`
 > 本文只描述当前这台机器的部署方式，不包含密码/密钥。
+>
+> **日常启停、日志、整机开关机、故障排查见 [OPERATIONS.md](OPERATIONS.md)。**
+
+---
+
+## 0. 先看：两个高频坑
+
+### 0.1 在 zsh 里 `source setup.bash` 会报“找不到文件”
+
+这台机器的登录 shell 是 **zsh**，而 ROS 的 `setup.bash` 依赖 bash 专有变量
+`BASH_SOURCE`。在 zsh 下会报：
+
+```text
+/opt/ros/humble/setup.bash:.:11: no such file or directory: /opt/edge_server/setup.sh
+```
+
+不是 ROS 装坏了，处理方法（详见 OPERATIONS.md §7.1）：
+
+```zsh
+# zsh 里用 zsh 版本
+source /opt/ros/humble/setup.zsh
+source /opt/edge_server/install/setup.zsh
+
+# 或者切回 bash（推荐，本文所有命令都按 bash 写）
+sudo chsh -s /bin/bash ubuntu   # 重新登录后生效
+```
+
+因此本文里所有 `ssh ... 'source ...'` 都要写成 `ssh ... 'bash -lc "source ..."'`，
+否则远端会用 zsh 执行。
+
+### 0.2 命令到底在哪台机器上跑
+
+- `source /opt/ros/...`、`colcon build`、`ros2 launch`：**在 Pi 上**；
+- `rsync`、`scp`、`curl http://192.168.3.26/...`：在本地 WSL；
+- 本地 WSL 和 Windows 上没有 `/opt/edge_server`，在本地执行必然“找不到文件”。
 
 ---
 
@@ -26,6 +61,10 @@
   - `python3-colcon-common-extensions`、`python3-pytest`；
   - `python3-opencv`、`python3-numpy`、`python3-yaml`、`python3-serial`；
   - `build-essential`、`cmake`。
+- 启用 GPIO4/5 的 UART3（2026-11-14）：
+  - `/boot/firmware/config.txt` 末尾追加 `dtoverlay=uart3`；
+  - 重启后生成 `/dev/ttyAMA1`，供 `edge_server_node` 直连 STM32 USART3；
+  - `enable_uart=1` 只启用 GPIO14/15 的 UART0，不能代替 `uart3`。
 
 ### 1.2 代码与构建
 
@@ -45,7 +84,10 @@
   - Web：`0.0.0.0:80`
   - MJPEG：`0.0.0.0:8080`
   - ROS 健康网关：`127.0.0.1:8090`
-  - STM32 串口：`/dev/ttyUSB0`，115200 8N1
+  - STM32 串口：`/dev/ttyAMA1`（GPIO4/5 → UART3），115200 8N1
+    - 2026-11-14 从 USB 串口（`/dev/ttyUSB0@9600`）改为 GPIO UART；
+      `dtoverlay=uart3` 已写入 `/boot/firmware/config.txt`；
+    - 接线：Pi GPIO4(TXD3)→STM32 PB11(RX)，GPIO5(RXD3)→PB10(TX)，必须共地
   - 状态文件：`/var/lib/edge_server/edge_params.json`
   - 健康检查：只监控当前 5 个设备，`check_nodes=false`、
     `safety_required=false`，缺设备按 `degraded` 而不是 `error` 上报
@@ -166,23 +208,24 @@ rsync -avz --delete \
 ### 3.4 远端重新构建并重启
 
 ```bash
-ssh ubuntu@192.168.3.26 '
+# 注意：远端登录 shell 是 zsh，必须显式用 bash -lc 包一层
+ssh ubuntu@192.168.3.26 'bash -lc "
   source /opt/ros/humble/setup.bash &&
   cd /opt/edge_server &&
   colcon build --packages-select custom_msgs edge_server &&
   sudo systemctl restart edge_server
-'
+"'
 ```
 
 只改了 `edge_server` 的 Python/网页、没有改消息时，可以只构建 `edge_server`：
 
 ```bash
-ssh ubuntu@192.168.3.26 '
+ssh ubuntu@192.168.3.26 'bash -lc "
   source /opt/ros/humble/setup.bash &&
   cd /opt/edge_server &&
   colcon build --packages-select edge_server &&
   sudo systemctl restart edge_server
-'
+"'
 ```
 
 构建耗时参考：
@@ -246,16 +289,18 @@ ssh ubuntu@192.168.3.26 '
 
 ### 4.4 回滚
 
-发布前建议保留上一版源码：
+发布前建议保留上一版源码（放在 colcon 工作区之外，否则会被当成重名包）：
 
 ```bash
 ssh ubuntu@192.168.3.26 '
-  rm -rf /opt/edge_server/src/edge_server.bak &&
-  cp -a /opt/edge_server/src/edge_server /opt/edge_server/src/edge_server.bak
+  mkdir -p /opt/edge_server/backup &&
+  rm -rf /opt/edge_server/backup/edge_server.bak &&
+  cp -a /opt/edge_server/src/edge_server /opt/edge_server/backup/edge_server.bak
 '
 ```
 
-回滚时把 `.bak` 换回 `edge_server`，重新 build 并 restart 即可。
+回滚时用 `rsync -a --delete` 把备份写回 `src/edge_server`，重新 build 并 restart
+即可（见 OPERATIONS.md §6.5）。
 
 ---
 
@@ -272,7 +317,8 @@ ssh ubuntu@192.168.3.26 '
 
 ## 6. 注意事项
 
-- 当前没有接 STM32，`/dev/ttyUSB0` 不存在，串口会持续重连；接上后确认 udev 名称。
+- STM32 已通过 GPIO4/5（UART3，`/dev/ttyAMA1`）接入，115200 遥测正常；
+  接线/排障见 [OPERATIONS.md](OPERATIONS.md) §8。
 - 当前没有启动 ROS 相机驱动，`/stream` 返回 503；相机驱动发布
   `/camera/image_raw` 后会自动出图。
 - 服务只启动 Edge + 健康网关，不启动 SLAM/Nav2/感知全栈；
