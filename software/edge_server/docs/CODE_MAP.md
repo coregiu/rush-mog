@@ -66,6 +66,7 @@ software/
 │   │   └── config/              robot.yaml（实车）、config.yaml（仿真）
 │   ├── ros_nodes/               ROS2 节点入口（setup.py 的 console_scripts）
 │   │   ├── edge_server_node.py  核心：网页+串口+ROS 桥（重点）
+│   │   ├── lidar_node.py        LD19/D6 串口 -> /scan
 │   │   ├── health_monitor_node.py 健康检查 + 8090 HTTP
 │   │   ├── base_bridge_node.py  旧串口桥（legacy）
 │   │   ├── esp32_bridge_node.py 旧 ESP32 HTTP 桥（legacy）
@@ -101,6 +102,7 @@ software/
 | 进程 | 入口 | 作用 | 端口 |
 |---|---|---|---|
 | `edge_server_node` | `ros_nodes/edge_server_node.py:main` | 网页/API、串口、`/cmd_vel`→STM32、STM32→`/odom`、蓝牙音箱/语音播报、HFP 麦克风录音、树莓派电源监控 | 80、8080 |
+| `lidar_node` | `ros_nodes/lidar_node.py:main` | LD19/D6 UART → `/scan`、静态 TF、`/lidar/status` | 无 |
 | `health_monitor_node` | `ros_nodes/health_monitor_node.py:main` | 话题/设备健康检查 | 127.0.0.1:8090 |
 
 ### 3.2 全栈（可选）

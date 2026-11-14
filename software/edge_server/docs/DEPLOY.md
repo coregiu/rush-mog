@@ -28,6 +28,10 @@
   - `python3-colcon-common-extensions`、`python3-pytest`；
   - `python3-opencv`、`python3-numpy`、`python3-yaml`、`python3-serial`；
   - `build-essential`、`cmake`。
+- SLAM/导航依赖（2026-11-14）：
+  - 已安装 `ros-humble-slam-toolbox`，可直接 `ros2 launch edge_server slam_stack.launch.py`；
+  - `ros-humble-navigation2`、`ros-humble-robot-localization` 尚未安装；
+    没有 Nav2 时 `navigation_node` 的 `backend: auto` 会回退到内置直航。
 - 启用 GPIO4/5 的 UART3（2026-11-14）：
   - `/boot/firmware/config.txt` 末尾追加 `dtoverlay=uart3`；
   - 重启后生成 `/dev/ttyAMA1`，供 `edge_server_node` 直连 STM32 USART3；
@@ -121,6 +125,9 @@
 - 电源监控：`/api/power` 返回 `status=ok`，`throttled_raw=0x50000`
   （历史欠压/降频已恢复，`warning=true`）；当前 `in0_lcrit_alarm=0`，
   health monitor 的 power 为 `ok`
+- 激光雷达：代码/`lidar_node`/`rush-mog-lidar.service` 已安装并 enable；
+  当前未接 D6、未启用 `dtoverlay=uart4`，所以 `/dev/rush_lidar` 不存在，
+  service 因 `ConditionPathExists` 静默跳过；接好线并重启后自动启动
 - ROS 健康整体为 `degraded`（缺相机/雷达/IMU/底盘数据），当前属预期
 
 ---
@@ -180,7 +187,7 @@ cd /mnt/f/CODE/rush-mog/software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest -q tests
 ```
 
-当前基线：`126 passed`。
+当前基线：`130 passed`。
 
 ### 3.3 同步源码到 Pi
 
@@ -504,3 +511,91 @@ curl -s http://192.168.3.26/api/microphone | python3 -m json.tool
 如果仍卡顿，优先把 Pi 的 WiFi 切到 **5GHz**（当前 `wlan0` 在 2.4GHz
 channel 1，与蓝牙共用天线），或靠近路由器/音箱；这是无线共存问题，
 软件缓冲只能缓解，不能完全消除 2.4GHz 干扰。
+
+### 7.7 激光雷达（D6/LD19）
+
+代码已内置 `lidar_node`（`edge_server/core/lidar.py` + `ros_nodes/lidar_node.py`），
+支持 LD19/LD06/D6 的 47 字节协议（`0x54 0x2C`，CRC-8 0x4D）。
+
+接线与系统配置：
+
+```ini
+# /boot/firmware/config.txt
+dtoverlay=uart4          # GPIO8/9，D6 激光；不要同时启用 spi0
+```
+
+```bash
+# /etc/udev/rules.d/99-rush-mog.rules（设备名以 ls /dev/ttyAMA* 为准）
+KERNEL=="ttyAMA3", SYMLINK+="rush_lidar"
+sudo udevadm control --reload-rules && sudo udevadm trigger
+# 断电重启后确认
+ls -l /dev/rush_lidar /dev/ttyAMA*
+```
+
+配置 `robot.yaml`：
+
+```yaml
+lidar:
+  enabled: true
+  port: "/dev/rush_lidar"
+  baud: 230400             # 按 D6 说明书；有些批次是 921600
+  protocol: "ld19"
+  topic: "/scan"
+  frame_id: "laser_link"
+  bins: 360
+  range_min: 0.02
+  range_max: 12.0
+  publish_tf: true
+  tf_parent: "base_link"
+  tf_x: 0.0
+  tf_y: 0.0
+  tf_z: 0.18               # 按实测安装高度改
+  tf_yaw_deg: 0.0
+```
+
+单独启动（不启动全栈）：
+
+```bash
+ros2 run edge_server lidar_node --ros-args \
+  -p config_file:=/opt/edge_server/config/deploy.yaml
+```
+
+或随实车 bringup：
+
+```bash
+ros2 launch edge_server robot_bringup.launch.py start_lidar:=true
+```
+
+验收：
+
+```bash
+ros2 topic hz /scan             # ≈10 Hz
+ros2 topic echo /scan --once    # ranges 长度 360，frame_id=laser_link
+ros2 topic echo /lidar/status --once
+ros2 run tf2_ros tf2_echo base_link laser_link
+```
+
+当前这台 Pi 还没有接 D6、也没有启用 `dtoverlay=uart4`，所以 `/dev/rush_lidar`
+暂时不存在；`ros-humble-slam-toolbox` 已安装。已安装并 enable 了可选的
+`rush-mog-lidar.service`：
+
+- 单元文件：`/etc/systemd/system/rush-mog-lidar.service`（仓库模板
+  `software/tools/systemd/rush-mog-lidar.service`）；
+- `ConditionPathExists=/dev/rush_lidar`：设备不存在时静默跳过；
+- 接好线、创建 udev symlink 并重启后，服务会自动启动 `lidar_node`。
+
+接好硬件后：
+
+```bash
+# 1) 确认 /boot/firmware/config.txt 有 dtoverlay=uart4
+# 2) 按实际 ttyAMA* 建 udev symlink
+sudo tee /etc/udev/rules.d/99-rush-mog.rules >/dev/null <<'RULE'
+KERNEL=="ttyAMA3", SYMLINK+="rush_lidar"
+RULE
+sudo udevadm control --reload-rules && sudo udevadm trigger
+# 3) 重启（或手动 systemctl start rush-mog-lidar）
+sudo reboot
+```
+
+若波特率或协议不同，改 `lidar.baud`/`lidar.protocol`；若设备名不同，改 udev
+规则或 `lidar.port`。

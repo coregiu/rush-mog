@@ -13,7 +13,7 @@
 | 代码 | `software/edge_server`（ament_python，ROS2 Humble） |
 | 消息/动作 | `software/custom_msgs`（v0.2.0） |
 | 构建 | `colcon build --packages-select custom_msgs edge_server` 通过 |
-| 单元测试 | `pytest tests -q`：126 passed（新增 Edge 控制/HTTP 25 项） |
+| 单元测试 | `pytest tests -q`：130 passed（新增 Edge 控制/HTTP 25 项） |
 | 健康检查 | `test_health_monitor.py` + `test_health_http.py`：29 passed；ROS/HTTP 手工联调通过 |
 | VLA/安全端到端 | `end_to_end_check.py`：7/7 passed |
 | SLAM/导航/搜索联调 | `slam_nav_check.py` + `fake_slam_robot.py`：6/6 passed |
@@ -178,7 +178,7 @@ software/
     │   ├── drivers/
     │   │   └── icm20948.py           # 寄存器级 I2C 驱动
     │   └── utils/
-    ├── ros_nodes/                    # 16 个节点（含 edge_server_node）
+    ├── ros_nodes/                    # 18 个节点（含 edge_server_node、lidar_node）
     ├── web/                          # 手柄页/dashboard/静态资源
     ├── launch/
     │   ├── edge_server.launch.py
@@ -218,6 +218,7 @@ software/
 | 11 | `target_detector_node` | 颜色/YOLO 检测、测距、map 投影、跟踪 | → `/center/target_detections` |
 | 12 | `object_search_node` | 前沿探索、目标确认、接近 | → `/center/search_status` |
 | 13 | `edge_server_node` | Pi Edge Server：80 网页/API、8080 MJPEG、STM32 ASCII 串口、运动仲裁 | ↔ `/cmd_vel`、`/odom`、`/joint_states`、`/base/status`、`/center/safety_state` |
+| 13a | `lidar_node` | LD19/D6 UART 驱动，47 字节帧解析/分箱 | → `/scan`、`/lidar/status`、`base_link→laser_link` TF |
 | 13b | `base_bridge_node` | 旧版二进制串口桥（legacy） | ↔ `/odom`、`/imu/data`、`/battery_state` |
 | 14 | `imu_node` | Pi I2C 直连 ICM-20948 | → `/imu/data` |
 | 15 | `health_monitor_node` | 节点/设备健康、HTTP 网关 | → `/center/health`、`/center/healthcheck`、:8090 |
@@ -670,7 +671,8 @@ edge/Pi sensors → bridge_node → /center/synced_data
 
 | 话题 | 类型 | 方向 | 说明 |
 |---|---|---|---|
-| `/scan`、`/edge/radar` | `sensor_msgs/LaserScan` | 订阅 | 激光 |
+| `/scan`、`/edge/radar` | `sensor_msgs/LaserScan` | 发布/订阅 | 激光；实车由 `lidar_node` 发布 |
+| `/lidar/status` | `std_msgs/String` | 发布 | LD19/D6 串口、CRC、扫描状态（1 Hz） |
 | `/camera/image_raw`、`/edge/video` | `sensor_msgs/Image` | 订阅 | 图像 |
 | `/edge/audio` | `custom_msgs/AudioData` | 发布/订阅 | HFP 录音时 10 Hz PCM（s16le/8k/mono） |
 | `/odom`、`/robot/odometry` | `nav_msgs/Odometry` | 订阅 | 里程计 |
@@ -929,7 +931,7 @@ python3 tests/slam_nav_check.py          # 6/6
 ```bash
 cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 126 passed
+# 130 passed
 ```
 
 健康检查专项：
@@ -1007,6 +1009,6 @@ python3 tests/slam_nav_check.py
 
 `edge_server` v2 在 v1 的 VLA 推理、安全、反向操作之上，补齐了 **SLAM 建图、ICM-20948 定位、
 Nav2/直航导航、目标检测/搜索/接近、速度仲裁、底盘串口桥、健康检查**。软件链路已通过
-126 项单元测试（含 29 项健康检查）、7 项 VLA/安全端到端、6 项 SLAM/导航/搜索联调；
+130 项单元测试（含 29 项健康检查）、7 项 VLA/安全端到端、6 项 SLAM/导航/搜索联调；
 实车落地还差 STM32 固件升级、硬件选型（见 `hardware/SLAM_NAV.md`）、现场标定，以及
 机械臂反馈话题接入。

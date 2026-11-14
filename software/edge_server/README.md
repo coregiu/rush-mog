@@ -31,7 +31,7 @@
 | 项目 | 结果 |
 |---|---|
 | `colcon build --packages-select custom_msgs edge_server` | 通过 |
-| `pytest tests -q` | 126 passed |
+| `pytest tests -q` | 130 passed |
 | `tests/end_to_end_check.py` | 7/7 passed |
 | `tests/slam_nav_check.py` + `fake_slam_robot.py` | 6/6 passed |
 
@@ -161,6 +161,26 @@ SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="r
 ```
 `robot.yaml` 的 `base.port` 可改为 `/dev/rush_base`；并确认 `python3-serial` 已安装。
 
+激光雷达（D6/LD19，UART4 GPIO8/9）：
+```ini
+# /boot/firmware/config.txt
+dtoverlay=uart4
+```
+```bash
+# /etc/udev/rules.d/99-rush-mog.rules；设备名以 `ls /dev/ttyAMA*` 为准
+KERNEL=="ttyAMA3", SYMLINK+="rush_lidar"
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+`robot.yaml` 默认 `lidar.port: /dev/rush_lidar`、`baud: 230400`，
+`frame_id: laser_link`，并发布 `base_link → laser_link` 静态 TF（按实际安装位置改
+`tf_x/tf_y/tf_z/tf_yaw_deg`）。单独验证：
+```bash
+ros2 launch edge_server lidar.launch.py \
+  config_file:=$HOME/rush_mog_ws/src/edge_server/edge_server/config/robot.yaml
+ros2 topic hz /scan        # ≈10 Hz
+ros2 topic echo /lidar/status --once
+```
+
 80 端口绑定权限二选一：
 ```bash
 # 使用 systemd 时由 root 启动，或：
@@ -172,7 +192,7 @@ sudo setcap cap_net_bind_service=+ep /usr/bin/python3
 `http://<pi-ip>:8080/stream`。
 
 其他启动前确认：
-- 激光驱动已发布 `/scan`；
+- 激光驱动已发布 `/scan`（`robot_bringup` 默认启动 `lidar_node`；未接雷达可 `start_lidar:=false`）；
 - 相机驱动已发布 `/camera/image_raw`（Edge Server 订阅并转成 MJPEG）；
 - 12V/5V/6V 共地，急停释放。
 
@@ -218,6 +238,7 @@ ros2 run robot_localization ekf_node --ros-args \
 | `navigation_node` | `/center/navigate_to`，Nav2/直航后端 |
 | `target_detector_node` | 颜色/YOLO 检测、激光/bbox 测距、map 投影、跟踪 |
 | `object_search_node` | `/center/explore`、`/center/search_object` |
+| `lidar_node` | LD19/D6 串口驱动：UART4 → `/scan`，可选 `base_link→laser_link` TF、`/lidar/status` |
 | `edge_server_node` | Pi Edge Server：80 网页/API、8080 MJPEG、STM32 串口、蓝牙音箱/语音播报、HFP 录音与 `/edge/audio`、树莓派电源监控、`/odom`、`/joint_states`、`/base/status`、`/body/audio_status`、`/body/mic_status`、`/body/power_status` |
 | `base_bridge_node` | 旧版 Pi ↔ STM32 二进制串口桥（legacy） |
 | `imu_node` | Pi I2C 直连 ICM-20948 → `/imu/data` |
@@ -231,7 +252,9 @@ ros2 run robot_localization ekf_node --ros-args \
 
 | 话题 | 类型 | 方向 |
 |---|---|---|
-| `/scan`、`/edge/radar` | `sensor_msgs/LaserScan` | 订阅 |
+| `/scan` | `sensor_msgs/LaserScan` | 发布（lidar_node）/订阅 |
+| `/edge/radar` | `sensor_msgs/LaserScan` | 订阅（仿真兼容） |
+| `/lidar/status` | `std_msgs/String` | 发布（雷达串口/CRC/扫描状态，1 Hz） |
 | `/camera/image_raw`、`/edge/video` | `sensor_msgs/Image` | 订阅 |
 | `/edge/audio` | `custom_msgs/AudioData` | 发布（录音时 10 Hz PCM）/订阅（bridge） |
 | `/odom`、`/robot/odometry` | `nav_msgs/Odometry` | 订阅 |
@@ -551,6 +574,8 @@ dashboard 的 BOM「电源及转换板」卡片使用该状态；health monitor 
 - `health.publish_rate` / `startup_grace_sec` / `strict_unknown`
 - `health.http.host` / `port` / `api_key`
 - `base.transport` / `port` / `baud` / `body_command.*`
+- `lidar.enabled` / `port` / `baud` / `topic` / `frame_id` / `bins` /
+  `range_min` / `range_max` / `publish_tf` / `tf_*`
 - `edge.web.port` / `stream_port` / `edge.camera.fps` / `edge.motion.keepalive_ms`
 - `edge.speaker.*`：`enabled` / `device_name` / `device_mac` / `auto_connect` /
   `volume` / `audio_dir` / `tts.*`（见 §5.6）
@@ -580,7 +605,7 @@ dashboard 的 BOM「电源及转换板」卡片使用该状态；health monitor 
 ```bash
 cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 126 passed
+# 130 passed
 ```
 
 单独跑健康检查（不依赖 ROS 图）：
@@ -709,6 +734,7 @@ software/edge_server/          # ROS 包根目录
 │   ├── core/speaker.py        # 蓝牙音箱自动连接 + TTS/音频排队播放
 │   ├── core/microphone.py     # HFP 麦克风录音 + WAV/ROS AudioData
 │   ├── core/power.py          # 树莓派 vcgencmd/rpi_volt 电源监控
+│   ├── core/lidar.py          # LD19/D6 47 字节协议解析/360° 分箱
 │   ├── edge_web.py            # Edge 网页/API/MJPEG（stdlib）
 │   ├── http_health.py         # 健康检查 HTTP 网关（stdlib）
 │   └── utils/

@@ -44,6 +44,7 @@ setup(
             "base_bridge_node = ros_nodes.base_bridge_node:main",
             "esp32_bridge_node = ros_nodes.esp32_bridge_node:main",
             "edge_server_node = ros_nodes.edge_server_node:main",
+            "lidar_node = ros_nodes.lidar_node:main",
             "imu_node = ros_nodes.imu_node:main",
             # 健康检查：ROS 话题/服务 + 供同机 Edge Server 调用的 HTTP 网关
             "health_monitor_node = ros_nodes.health_monitor_node:main",

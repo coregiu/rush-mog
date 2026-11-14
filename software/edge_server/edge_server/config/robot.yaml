@@ -21,6 +21,30 @@ edge_server:
   #   STM32 编码器 -> USART3 -> edge_server_node -> /odom、/base/status
   #   /cmd_vel -> edge_server_node -> UART -> STM32
   # 旧版 ESP32 HTTP 桥（esp32_bridge_node）仅作为历史兼容保留，不再默认启动。
+  # ---------------------------------------------------------------- 2D 激光雷达
+  # D6/LD19（LD06 兼容）47 字节协议；UART4 GPIO8/9，5V 独立供电
+  lidar:
+    enabled: true
+    port: "/dev/rush_lidar"
+    baud: 230400
+    protocol: "ld19"
+    topic: "/scan"
+    status_topic: "/lidar/status"
+    frame_id: "laser_link"
+    bins: 360
+    angle_min_deg: -180.0
+    angle_max_deg: 180.0
+    range_min: 0.02
+    range_max: 12.0
+    min_points: 30
+    reconnect_sec: 2.0
+    status_rate_hz: 1.0
+    publish_tf: true
+    tf_parent: "base_link"
+    tf_x: 0.0
+    tf_y: 0.0
+    tf_z: 0.18
+    tf_yaw_deg: 0.0
   base:
     enabled: true
     transport: "edge_serial"         # edge_serial | serial_binary | esp32_http(legacy)
@@ -60,7 +84,7 @@ edge_server:
       max_level: 9
       twist_mode: "priority"        # priority | time_share
       arc_period_sec: 0.5
-    publish_tf: false               # robot_localization EKF 已发布 odom->base_link
+    publish_tf: true                # 未运行 EKF 时由 edge_server_node 发布 odom->base_link；EKF 运行时改回 false
 
   # ---------------------------------------------------------------- Edge Server
   # 网页/API 与底盘串口同进程：手机/PC 直接访问树莓派 80 端口，8080 为 MJPEG。

@@ -112,6 +112,29 @@ edge_server:
     imu: "/imu/data"
 
   # 仿真默认不连串口；实车 robot.yaml 中 enabled: true
+  # ---------------------------------------------------------------- 2D 激光雷达
+  lidar:
+    enabled: false
+    port: "/dev/rush_lidar"
+    baud: 230400
+    protocol: "ld19"
+    topic: "/scan"
+    status_topic: "/lidar/status"
+    frame_id: "laser_link"
+    bins: 360
+    angle_min_deg: -180.0
+    angle_max_deg: 180.0
+    range_min: 0.02
+    range_max: 12.0
+    min_points: 30
+    reconnect_sec: 2.0
+    status_rate_hz: 1.0
+    publish_tf: false
+    tf_parent: "base_link"
+    tf_x: 0.0
+    tf_y: 0.0
+    tf_z: 0.18
+    tf_yaw_deg: 0.0
   base:
     enabled: false
     port: "/dev/ttyUSB0"

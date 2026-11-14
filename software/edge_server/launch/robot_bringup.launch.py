@@ -7,21 +7,32 @@
 启动前请确认：
 - 树莓派/Orin 已装 ROS2 Humble；
 - STM32 已烧录 body_control 固件，串口 115200 8N1，建议 udev 固定为 /dev/rush_base；
-- 激光雷达驱动、相机驱动、robot_localization EKF、slam_toolbox/Nav2 另行启动；
+- 激光雷达默认启动（`start_lidar:=true`，`lidar.enabled=true`），UART4 接 D6/LD19；
 - 80 端口需要 root 或 CAP_NET_BIND_SERVICE（systemd 示例见 software/edge_server/README.md）。
 """
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
     config_file = LaunchConfiguration("config_file")
     start_imu = LaunchConfiguration("start_imu")
+    start_lidar = LaunchConfiguration("start_lidar")
     base_transport = LaunchConfiguration("base_transport")
+
+    lidar = Node(
+        package="edge_server",
+        executable="lidar_node",
+        output="screen",
+        parameters=[{"config_file": config_file}],
+        condition=IfCondition(start_lidar),
+    )
 
     center = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -58,6 +69,11 @@ def generate_launch_description():
                 description="true if ICM-20948 is wired to the companion computer I2C",
             ),
             DeclareLaunchArgument(
+                "start_lidar",
+                default_value="true",
+                description="start the LD19/D6 /scan driver (lidar.enabled must also be true)",
+            ),
+            DeclareLaunchArgument(
                 "base_transport",
                 default_value="edge_serial",
                 description=(
@@ -65,6 +81,7 @@ def generate_launch_description():
                     "serial_binary = legacy binary; esp32_http = legacy ESP32 bridge"
                 ),
             ),
+            lidar,
             center,
         ]
     )

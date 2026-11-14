@@ -329,10 +329,15 @@ ICM-20948 已进入 NRND/替代周期。新设计可评估 ICM-42688-P + 磁力�
 
 ### 8.2 驱动与 `/scan`
 
-- 仓库里**没有**激光驱动，需另装 ROS2 驱动（如 `ldlidar_stl_ros2`，或厂家提供的 D6 ROS2 包），
-  输出 `/scan`、frame_id `laser_link`。
-- 若 D6 是自定义协议，需要写一个解析节点：串口读帧 → `sensor_msgs/LaserScan`。
-- `edge_server` 已默认订阅 `/scan`（`sensor_topics.laser`），无需改代码。
+- 仓库已内置 `edge_server/ros_nodes/lidar_node.py`：
+  - LD19/LD06/D6 47 字节协议（`0x54 0x2C`、CRC-8 0x4D）；
+  - 串口读取 → 360° 分箱 → `/scan`，frame_id `laser_link`；
+  - 可选发布 `base_link → laser_link` 静态 TF（`lidar.publish_tf`）；
+  - 串口断线自动重连，`/lidar/status` 1 Hz 输出包数/CRC/扫描状态；
+  - `robot_bringup.launch.py` 默认 `start_lidar:=true`，配置见 `edge_server/config/robot.yaml` 的 `lidar.*`。
+- 若 D6 使用厂家自定义协议而不是 LD19，请按实际帧格式改
+  `edge_server/core/lidar.py` 的 `parse_packet()`。
+- `edge_server` 其它节点已订阅 `/scan`（`sensor_topics.laser`），无需改代码。
 
 ### 8.3 安装与 TF
 
