@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#050914">
   <title>RUSH-MOG · 数字孪生监控</title>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
-  <link rel="stylesheet" href="dashboard.css?v=20261114e">
+  <link rel="stylesheet" href="dashboard.css?v=20261114f">
 </head>
 <body>
   <div class="ambient ambient-a"></div>
@@ -206,16 +206,16 @@
             <rect class="hw-shell" width="150" height="58" rx="10"/>
             <circle class="hw-dot" cx="14" cy="16" r="4"/>
             <text class="hw-name" x="26" y="20">电源及转换板</text>
-            <text class="hw-sub" x="14" y="37">12V → 5V / 3.3V</text>
+            <text class="hw-sub" x="14" y="37">12V → 5V 3A / 3.3V 1A</text>
             <text class="hw-state" x="14" y="51">未知</text>
-            <title>电源及转换板 · 12V → 5V / 3.3V</title>
+            <title>电源及转换板 · 12V → 5V 3A / 3.3V 1A</title>
           </g>
 
           <g class="hw-node" data-hw="lidar" transform="translate(700,170)">
             <rect class="hw-shell" width="150" height="58" rx="10"/>
             <circle class="hw-dot" cx="14" cy="16" r="4"/>
             <text class="hw-name" x="26" y="20">雷达</text>
-            <text class="hw-sub" x="14" y="37">D6 · /scan</text>
+            <text class="hw-sub" x="14" y="37">D6 / LD19</text>
             <text class="hw-state" x="14" y="51">未知</text>
             <title>2D 激光雷达 · D6 /scan</title>
           </g>
@@ -246,8 +246,8 @@
           <g class="hw-node" data-hw="chassis" transform="translate(700,450)">
             <rect class="hw-shell" width="150" height="58" rx="10"/>
             <circle class="hw-dot" cx="14" cy="16" r="4"/>
-            <text class="hw-name" x="26" y="20">电机·驱动·编码器</text>
-            <text class="hw-sub" x="14" y="37">L298N · JGB37 ×4</text>
+            <text class="hw-name" x="26" y="20">麦轮底盘 / 电机驱动</text>
+            <text class="hw-sub" x="14" y="37">JGB37-520 ×4 · L298N</text>
             <text class="hw-state" x="14" y="51">未知</text>
             <title>电机 / L298N / JGB37-520 / 编码器 PA0~PA7</title>
           </g>
@@ -433,35 +433,31 @@
             <!-- hotspots: hardware BOM modules -->
             <g class="hotspot" data-device="lidar" transform="translate(380,188)" tabindex="0">
               <circle class="hotspot-halo" r="22"/><circle class="hotspot-dot" r="3.5"/>
-              <title>2D 激光雷达 · D6 /scan</title>
+              <title>雷达 · D6 / LD19 · /scan</title>
             </g>
             <g class="hotspot" data-device="camera" transform="translate(572,267)" tabindex="0">
               <circle class="hotspot-halo" r="14"/><circle class="hotspot-dot" r="3"/>
-              <title>深度相机 · Astra Pro /camera/image_raw</title>
+              <title>相机 · Astra Pro · /camera/image_raw</title>
             </g>
             <g class="hotspot" data-device="mic" transform="translate(306,322)" tabindex="0">
               <circle class="hotspot-halo" r="13"/><circle class="hotspot-dot" r="3"/>
-              <title>全向麦克风 · USB /audio/raw</title>
+              <title>麦克风 · USB 全向 · /audio/raw</title>
             </g>
             <g class="hotspot" data-device="imu" transform="translate(446,330)" tabindex="0">
               <circle class="hotspot-halo" r="15"/><circle class="hotspot-dot" r="3"/>
-              <title>9 轴 IMU · ICM-20948 /imu/data</title>
+              <title>陀螺仪 · ICM-20948 · /imu/data</title>
             </g>
             <g class="hotspot" data-device="speaker" transform="translate(226,330)" tabindex="0">
               <circle class="hotspot-halo" r="18"/><circle class="hotspot-dot" r="3"/>
-              <title>蓝牙音箱 · /body/audio_status</title>
+              <title>音箱 · Bluetooth · /body/audio_status</title>
             </g>
             <g class="hotspot" data-device="pi" transform="translate(367,355)" tabindex="0">
               <circle class="hotspot-halo" r="14"/><circle class="hotspot-dot" r="3"/>
-              <title>机载计算机 · Raspberry Pi 4B（EDGE + ROS 2）</title>
+              <title>板载计算机 · Raspberry Pi 4B（EDGE + ROS 2）</title>
             </g>
             <g class="hotspot" data-device="stm32" transform="translate(407,355)" tabindex="0">
               <circle class="hotspot-halo" r="14"/><circle class="hotspot-dot" r="3"/>
-              <title>控制单板 · STM32F103C8T6（USART3）</title>
-            </g>
-            <g class="hotspot" data-device="motor" transform="translate(410,374)" tabindex="0">
-              <circle class="hotspot-halo" r="9"/><circle class="hotspot-dot" r="2.5"/>
-              <title>电机驱动 · L298N 四驱</title>
+              <title>STM 控制板 · STM32F103C8T6（USART3）</title>
             </g>
             <g class="hotspot" data-device="cliff" transform="translate(592,370)" tabindex="0">
               <circle class="hotspot-halo" r="10"/><circle class="hotspot-dot" r="2.5"/>
@@ -469,11 +465,11 @@
             </g>
             <g class="hotspot" data-device="power" transform="translate(472,354)" tabindex="0">
               <circle class="hotspot-halo" r="14"/><circle class="hotspot-dot" r="3"/>
-              <title>电源转换 · 12V → 5V / 3.3V</title>
+              <title>电源及转换板 · 12V → 5V 3A / 3.3V 1A</title>
             </g>
             <g class="hotspot" data-device="chassis" transform="translate(272,386)" tabindex="0">
               <circle class="hotspot-halo" r="20"/><circle class="hotspot-dot" r="3"/>
-              <title>麦轮底盘 · JGB37-520 ×4 / 编码器 PA0~PA7</title>
+              <title>麦轮底盘 / 电机驱动 · JGB37-520 ×4 · L298N · 编码器 PA0~PA7</title>
             </g>
           </g>
 
@@ -642,12 +638,6 @@
         <span class="muted" id="module-count">0 / 2</span>
       </div>
       <div id="module-list" class="module-list"></div>
-
-      <div class="topology-note">
-        <div class="topology-line"><span class="topo-node">PHONE</span><span class="topo-arrow">→</span><span class="topo-node">EDGE + ROS 2</span></div>
-        <div class="topology-line"><span class="topo-node">ROS 2</span><span class="topo-arrow">→</span><span class="topo-node">EDGE API</span></div>
-        <p>ROS 2 与 Edge Server 同机合并显示；CENTER 为可选推理节点。页面只访问 Edge Server。</p>
-      </div>
     </aside>
 
     <section class="panel devices-panel">
@@ -656,7 +646,7 @@
           <span class="eyebrow">HARDWARE BOM MATRIX · hardware/README.md</span>
           <h2>硬件模块状态</h2>
         </div>
-        <span class="muted" id="device-count">0 / 11 正常</span>
+        <span class="muted" id="device-count">0 / 10 正常</span>
       </div>
       <div id="device-grid" class="device-grid"></div>
     </section>
@@ -693,6 +683,6 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="dashboard.js?v=20261114e"></script>
+  <script src="dashboard.js?v=20261114f"></script>
 </body>
 </html>

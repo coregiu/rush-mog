@@ -25,19 +25,18 @@ const MODULE_META = {
   center: { name: 'CENTER SERVER', subtitle: 'SmolVLA · 推理中心', glyph: 'C', order: 2 },
 };
 
-// hardware/README.md 的 BOM 清单（11 项）
+// hardware/README.md 的 BOM 清单（10 项；麦轮底盘与电机驱动合并）
 const HARDWARE_MODULES = [
-  { id: 'pi', name: '机载计算机', model: 'Raspberry Pi 4B', glyph: 'PI' },
-  { id: 'stm32', name: '控制单板', model: 'STM32F103C8T6', glyph: 'MCU' },
-  { id: 'lidar', name: '2D 激光雷达', model: 'D6 / LD19', glyph: 'LID' },
-  { id: 'camera', name: '深度相机', model: 'Astra Pro', glyph: 'CAM' },
-  { id: 'imu', name: '9 轴 IMU', model: 'ICM-20948', glyph: 'IMU' },
+  { id: 'pi', name: '板载计算机', model: 'Raspberry Pi 4B', glyph: 'PI' },
+  { id: 'stm32', name: 'STM 控制板', model: 'STM32F103C8T6', glyph: 'MCU' },
+  { id: 'lidar', name: '雷达', model: 'D6 / LD19', glyph: 'LID' },
+  { id: 'camera', name: '相机', model: 'Astra Pro', glyph: 'CAM' },
+  { id: 'imu', name: '陀螺仪', model: 'ICM-20948', glyph: 'IMU' },
   { id: 'cliff', name: '悬崖传感器', model: 'TCRT5000 ×2', glyph: 'CLF' },
-  { id: 'chassis', name: '麦轮底盘', model: 'JGB37-520 ×4', glyph: 'CHS' },
-  { id: 'motor', name: '电机驱动', model: 'L298N 四驱', glyph: 'DRV' },
-  { id: 'power', name: '电源转换', model: '12V → 5V / 3.3V', glyph: 'PWR' },
-  { id: 'mic', name: '全向麦克风', model: 'USB', glyph: 'MIC' },
-  { id: 'speaker', name: '蓝牙音箱', model: 'Bluetooth', glyph: 'SPK' },
+  { id: 'chassis', name: '麦轮底盘 / 电机驱动', model: 'JGB37-520 ×4 · L298N', glyph: 'CHS' },
+  { id: 'power', name: '电源及转换板', model: '12V → 5V / 3.3V', glyph: 'PWR' },
+  { id: 'mic', name: '麦克风', model: 'USB 全向', glyph: 'MIC' },
+  { id: 'speaker', name: '音箱', model: 'Bluetooth', glyph: 'SPK' },
 ];
 
 const COMMAND_LABELS = {
@@ -1015,7 +1014,7 @@ function deviceDetail(device, fallback) {
   return detail;
 }
 
-// hardware/README.md 的 11 个 BOM 模块 -> 状态 / 描述 / 指标
+// hardware/README.md 的 10 个 BOM 模块（底盘+电机驱动已合并）-> 状态 / 描述 / 指标
 function hardwareState(id) {
   const p = (state.edge && state.edge.params) || {};
   const body = state.body.latest || {};
@@ -1087,25 +1086,18 @@ function hardwareState(id) {
       };
     case 'chassis': {
       const live = Boolean(body.bodyLive);
+      const serial = Boolean(p.serial_connected);
       const wheels = Array.isArray(body.wheelSpeeds)
         ? body.wheelSpeeds.map((value) => fmtNumber(value, 2)).join(' / ')
         : '--';
       return {
-        status: live ? 'ok' : (body.encoderOk ? 'degraded' : 'unknown'),
-        detail: 'JGB37-520 ×4 · 麦克纳姆轮 · 编码器 PA0~PA7',
+        status: live ? 'ok' : (state.edge ? (serial ? 'degraded' : 'error') : 'unknown'),
+        detail: 'JGB37-520 ×4 · L298N 四驱 · 编码器 PA0~PA7',
         chips: [
           `ENC ${body.encoderOk ? 'OK' : (live ? 'LIVE' : '--')}`,
-          `WHEEL ${wheels}`,
-          `DIST ${fmtNumber(body.distance)} m`,
+          'L298N',
+          wheels !== '--' ? `WHEEL ${wheels}` : `DIST ${fmtNumber(body.distance)} m`,
         ],
-      };
-    }
-    case 'motor': {
-      const serial = Boolean(p.serial_connected);
-      return {
-        status: serial ? (body.bodyLive ? 'ok' : 'degraded') : 'error',
-        detail: 'L298N 四驱 · 8 路 IN · TIM3 PWM',
-        chips: ['L298N', '8 IN', '1 kHz'],
       };
     }
     case 'power': {
@@ -1188,10 +1180,14 @@ function renderTwin() {
     node.dataset.status = info.status;
     const state = node.querySelector('.hw-state');
     if (state) state.textContent = statusLabel(info.status);
+    // 名称/型号统一取自 HARDWARE_MODULES，避免孪生图与硬件矩阵文案漂移
     const name = node.querySelector('.hw-name');
+    if (name) name.textContent = info.name;
+    const sub = node.querySelector('.hw-sub');
+    if (sub) sub.textContent = info.model;
     const title = node.querySelector('title');
     if (title) {
-      title.textContent = `${name ? name.textContent : info.name} · ${statusLabel(info.status)} · ${info.detail}`;
+      title.textContent = `${info.name} · ${statusLabel(info.status)} · ${info.detail}`;
     }
     for (const link of $$(`.hw-link[data-hw="${id}"]`)) {
       link.dataset.status = info.status;
