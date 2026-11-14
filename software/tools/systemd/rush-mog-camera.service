@@ -1,0 +1,23 @@
+[Unit]
+Description=RUSH-MOG Astra Pro RGB/depth camera
+After=network-online.target
+Wants=network-online.target
+# Orbbec udev 规则为 Astra Pro 创建 /dev/astra_pro；没有相机时静默跳过
+ConditionPathExists=/dev/astra_pro
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/edge_server
+Environment=ROS_HOME=/var/lib/edge_server/ros
+Environment=ROS_LOG_DIR=/var/log/edge_server/ros
+Environment=PYTHONUNBUFFERED=1
+Environment=EDGE_SERVER_CONFIG=/opt/edge_server/config/deploy.yaml
+ExecStart=/bin/bash -lc 'source /opt/ros/humble/setup.bash && source /opt/edge_server/install/setup.bash && exec ros2 launch edge_server astra.launch.py'
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

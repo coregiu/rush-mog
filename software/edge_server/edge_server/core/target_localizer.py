@@ -1,8 +1,8 @@
 """目标检测结果 -> 距离/方位 -> map 系坐标 -> 接近点。
 
-不依赖深度相机：优先用 2D 雷达在目标方位附近的距离；雷达不可用时用目标
-类别先验高度 + bbox 像素高度估距。两者都不可用时仍输出方位，但位置不可信。
-后续接深度相机时，只需在 estimate() 里增加 depth 分支。
+距离来源优先级：深度图（Astra Pro 等）→ 2D 雷达目标方位窗口 → 类别先验
+高度 + bbox 像素高度。都不可用时仍输出方位，但位置不可信；深度图默认取
+bbox 中心区域的中值，需与彩色图对齐（depth_registration=true）。
 """
 
 from __future__ import annotations
@@ -128,6 +128,47 @@ def lidar_distance(
     return float(np.median(valid)), int(valid.size)
 
 
+def depth_distance(
+    depth,
+    bbox_norm: Sequence[float],
+    *,
+    depth_scale: float = 0.001,
+    roi_ratio: float = 0.6,
+    depth_min_m: float = 0.15,
+    depth_max_m: float = 8.0,
+    min_pixels: int = 5,
+) -> float:
+    """从深度图 bbox 中心区域取有效深度中值（米）。
+
+    ``depth_scale``：16UC1 通常 0.001（mm→m），32FC1 用 1.0。
+    ``bbox_norm`` 与深度图分辨率对齐；若驱动做了 depth_registration，
+    彩色 bbox 可直接用于深度图。
+    """
+    arr = np.asarray(depth)
+    if arr.ndim != 2 or arr.size == 0:
+        return 0.0
+    x0, y0, x1, y1 = (float(v) for v in bbox_norm)
+    x0, x1 = sorted((max(0.0, min(1.0, x0)), max(0.0, min(1.0, x1))))
+    y0, y1 = sorted((max(0.0, min(1.0, y0)), max(0.0, min(1.0, y1))))
+    height, width = arr.shape[:2]
+    cx = (x0 + x1) * 0.5 * width
+    cy = (y0 + y1) * 0.5 * height
+    half_w = max(2.0, (x1 - x0) * width * float(roi_ratio) * 0.5)
+    half_h = max(2.0, (y1 - y0) * height * float(roi_ratio) * 0.5)
+    u0 = max(0, int(cx - half_w))
+    u1 = min(width, int(cx + half_w) + 1)
+    v0 = max(0, int(cy - half_h))
+    v1 = min(height, int(cy + half_h) + 1)
+    if u1 <= u0 or v1 <= v0:
+        return 0.0
+    patch = arr[v0:v1, u0:u1].astype(np.float64, copy=False)
+    values = patch[np.isfinite(patch) & (patch > 0.0)] * float(depth_scale)
+    values = values[(values >= depth_min_m) & (values <= depth_max_m)]
+    if values.size < max(1, int(min_pixels)):
+        return 0.0
+    return float(np.median(values))
+
+
 class TargetLocalizer:
     def __init__(
         self,
@@ -135,11 +176,39 @@ class TargetLocalizer:
         targets_cfg: Optional[dict] = None,
         lidar_window_deg: float = 6.0,
         prefer_lidar: bool = True,
+        prefer_depth: bool = True,
+        depth_scale: float = 0.001,
+        depth_roi_ratio: float = 0.6,
+        depth_min_m: float = 0.15,
+        depth_max_m: float = 8.0,
+        depth_min_pixels: int = 5,
     ):
         self.camera = CameraModel.from_config(camera_cfg)
         self.targets = dict(targets_cfg or {})
         self.lidar_window_deg = float(lidar_window_deg)
         self.prefer_lidar = bool(prefer_lidar)
+        self.prefer_depth = bool(prefer_depth)
+        self.depth_scale = float(depth_scale)
+        self.depth_roi_ratio = float(depth_roi_ratio)
+        self.depth_min_m = float(depth_min_m)
+        self.depth_max_m = float(depth_max_m)
+        self.depth_min_pixels = int(depth_min_pixels)
+
+    def set_camera_info(
+        self, width: int, height: int, fx: float, fy: float, cx: float, cy: float
+    ) -> None:
+        """用 ROS CameraInfo 更新内参（优先于 YAML 的近似 hfov）。"""
+        if width <= 0 or height <= 0 or fx <= 0.0 or fy <= 0.0:
+            return
+        self.camera = CameraModel(
+            width=int(width),
+            height=int(height),
+            hfov_deg=0.0,
+            fx=float(fx),
+            fy=float(fy),
+            cx=float(cx),
+            cy=float(cy),
+        )
 
     def real_height(self, label: str) -> float:
         cfg = self.targets.get(label) or {}
@@ -152,8 +221,21 @@ class TargetLocalizer:
         bbox_norm: Sequence[float],
         scan: Optional[dict] = None,
         robot_pose: Optional[Pose2D] = None,
+        depth=None,
+        depth_scale: Optional[float] = None,
     ) -> TargetEstimate:
         bearing = self.camera.bearing_from_bbox(bbox_norm)
+        depth_d = 0.0
+        if depth is not None:
+            depth_d = depth_distance(
+                depth,
+                bbox_norm,
+                depth_scale=self.depth_scale if depth_scale is None else depth_scale,
+                roi_ratio=self.depth_roi_ratio,
+                depth_min_m=self.depth_min_m,
+                depth_max_m=self.depth_max_m,
+                min_pixels=self.depth_min_pixels,
+            )
         lidar_d = 0.0
         lidar_n = 0
         if scan is not None:
@@ -171,14 +253,20 @@ class TargetLocalizer:
 
         distance = 0.0
         source = "none"
-        if self.prefer_lidar and lidar_d > 0.0 and lidar_n >= 2:
+        if self.prefer_depth and depth_d > 0.0:
+            distance, source = depth_d, "depth"
+        elif self.prefer_lidar and lidar_d > 0.0 and lidar_n >= 2:
             distance, source = lidar_d, "lidar"
         elif height_d > 0.0:
             distance, source = height_d, "bbox_height"
+        elif depth_d > 0.0:
+            distance, source = depth_d, "depth"
         elif lidar_d > 0.0:
             distance, source = lidar_d, "lidar"
 
-        if source == "lidar":
+        if source == "depth":
+            source_factor, var = 1.0, 0.10 ** 2
+        elif source == "lidar":
             source_factor, var = 1.0, 0.05 ** 2
         elif source == "bbox_height":
             source_factor, var = 0.75, 0.20 ** 2

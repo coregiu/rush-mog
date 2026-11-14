@@ -232,6 +232,15 @@ edge_server:
   perception:
     enabled: false
     image_topic: "/camera/image_raw"
+    camera_info_topic: ""
+    depth_topic: ""                 # 仿真无深度图；实车 robot.yaml 用 Astra Pro
+    depth_timeout_sec: 1.0
+    depth_scale: 0.001
+    depth_roi_ratio: 0.6
+    depth_min_m: 0.15
+    depth_max_m: 8.0
+    depth_min_pixels: 5
+    prefer_depth: true
     detector: "color"      # color / yolo / none
     publish_rate: 10.0
     min_confidence: 0.5

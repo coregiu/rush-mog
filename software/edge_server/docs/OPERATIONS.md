@@ -137,7 +137,7 @@ curl -s http://192.168.3.26/api/modules/ros/health; echo
 预期（当前没接相机时）：
 
 - `web=200`、`dash=200`；
-- `stream=503`（没有 `/camera/image_raw`，正常）；
+- `stream=503`（没有 `/camera/color/image_raw`，正常）；
 - STM32 已接线时 `/status` 里 `"serial_connected":true`、`"encoder_ok":true`；
   没接或没上电时为 `false`；
 - `"ros_status":"degraded"`：缺相机/雷达/IMU，属预期；
@@ -426,9 +426,11 @@ sudo chsh -s /bin/bash ubuntu
 | `colcon: command not found` | PATH 异常，或 colcon 没装 | `command -v colcon` 确认；`sudo apt install python3-colcon-common-extensions` |
 | `ros2: command not found` | 同上，或 zsh 下 source 失败 | 按 §7.1 处理 |
 | 手动跑时报 `Permission denied`（80 端口） | 普通用户不能绑 <1024 | 用 `sudo`，或交给 systemd（unit 有 `CAP_NET_BIND_SERVICE`） |
-| `/stream` 一直 503 | 没有 `/camera/image_raw` | `ros2 topic hz /camera/image_raw`；先起相机驱动 |
+| `/stream` 一直 503 | 没有 `/camera/color/image_raw` | `ros2 topic hz /camera/color/image_raw`；先起 Astra 驱动 |
 | `ros2 topic hz /scan` 无数据 | `/dev/rush_lidar` 不存在、波特率/协议不对或节点未启动 | `ls -l /dev/rush_lidar`；`ros2 topic echo /lidar/status`；检查 `lidar.port/baud` 和 `dtoverlay=uart4` |
 | `/lidar/status` 的 `crc_errors` 持续增加 | 波特率不对、线缆干扰或协议不是 LD19 | 确认 D6 说明书波特率（230400/921600）、共地、TX/RX 交叉、缩短线缆 |
+| 没有 `/camera/color/image_raw` 或 `/camera/depth/image_raw` | Astra 未插好、USB 供电/带宽不足、驱动未启动 | `lsusb \| grep 2bc5`；`ros2 launch edge_server astra.launch.py`；插 USB3 口、不经 Hub、降分辨率/帧率 |
+| `/camera/depth/image_raw` 有图但目标测距明显偏 | 深度未对齐到彩色/外参不对 | `depth_registration:=true`；检查 `base_link→camera_link` TF；必要时 `prefer_depth:=false` |
 | `/status` 里 `serial_connected:false` | 串口设备没打开：没启用 `uart3`、设备名不对或被占用 | 查 `ls -l /dev/ttyAMA1`、`grep uart3 /boot/firmware/config.txt`、`journalctl -u edge_server`；确认 `ubuntu` 在 `dialout` 组 |
 | 网页按钮无反应、`/cmd` 返回 `ok` | 命令被接受但串口没写出去，或 STM32 没收到 | 按 CODE_MAP.md §10 从 `/status`→`strace`→LED 逐层查 |
 | 按住按钮时 STM32 LED 连闪 | 服务端在周期性重发（旧行为），每条命令都会翻转 LED | 新版默认已关闭；确认 `edge.motion.resend_manual` 为 `false` 并重启服务 |
@@ -470,6 +472,8 @@ sudo chsh -s /bin/bash ubuntu
 | 电源状态 | `http://192.168.3.26/api/power` |
 | 雷达设备 | `/dev/rush_lidar`（UART4 GPIO8/9） |
 | 雷达状态 | `ros2 topic echo /lidar/status --once` |
+| Astra USB 规则 | `/etc/udev/rules.d/99-obsensor-libusb.rules` |
+| Astra 启动 | `ros2 launch edge_server astra.launch.py` |
 | WirePlumber 音频规则 | `/home/ubuntu/.config/wireplumber/bluetooth.lua.d/51-rush-mog.lua` |
 | RTKit 授权 | `/etc/polkit-1/localauthority/50-local.d/50-rush-mog-rtkit.pkla` |
 | WiFi 省电关闭 | `/etc/systemd/system/wifi-powersave-off.service` |

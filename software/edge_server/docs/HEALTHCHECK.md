@@ -39,7 +39,7 @@ Edge Server 需要用一个接口回答三个问题：
                                                            │ ROS graph / 订阅
                               ┌────────────────────────────┼────────────────────────────┐
                               ▼                            ▼                            ▼
-                        /camera/image_raw            /scan, /imu/data            /base/status
+                        /camera/color/image_raw      /scan, /imu/data            /base/status
                         /edge/video                  /odom                       /battery_state
                         /body/mic_status             /arm/joint_states           /body/audio_status
 ```
@@ -283,7 +283,7 @@ Edge Server 需要用一个接口回答三个问题：
     {
       "id": "camera", "type": "camera", "status": "ok", "healthy": true,
       "ready": true, "enabled": true, "required": true, "connected": true,
-      "data_fresh": true, "topic": "/camera/image_raw",
+      "data_fresh": true, "topic": "/camera/color/image_raw",
       "message_type": "sensor_msgs/msg/Image", "publisher_count": 1,
       "age_sec": 0.05, "rate_hz": 14.9, "expected_rate_hz": 15.0,
       "detail": "ok", "metrics": {"width": 640, "height": 480, "encoding": "bgr8", "bytes": 921600}
@@ -521,7 +521,8 @@ string metrics_json
 
 | id | type | 反馈话题 | 必需 | 期望频率 | 说明 |
 |---|---|---|---|---|---|
-| `camera` | camera | `/camera/image_raw` | 是 | 15 Hz | 空图/宽高为 0 判非法 |
+| `camera` | camera | `/camera/color/image_raw` | 是 | 15 Hz | 空图/宽高为 0 判非法 |
+| `depth_camera` | camera | `/camera/depth/image_raw` | 否 | 10 Hz | Astra Pro 深度；空深度帧判非法 |
 | `lidar` | lidar | `/scan` | 是 | 10 Hz | 空 ranges 判非法 |
 | `imu` | imu | `/imu/data` | 是 | 100 Hz | 全零/非有限值判非法 |
 | `microphone` | microphone | `/body/mic_status` | 否 | 1 Hz | JSON；`online=false` 判非法（HFP 不可用/未连接） |
@@ -820,7 +821,7 @@ cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests/test_health_monitor.py tests/test_health_http.py -q
 # 29 passed
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 130 passed（含音箱/API 新增用例）
+# 131 passed（含音箱/API 新增用例）
 ```
 
 覆盖：

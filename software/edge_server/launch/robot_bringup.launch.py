@@ -24,6 +24,7 @@ def generate_launch_description():
     config_file = LaunchConfiguration("config_file")
     start_imu = LaunchConfiguration("start_imu")
     start_lidar = LaunchConfiguration("start_lidar")
+    start_camera = LaunchConfiguration("start_camera")
     base_transport = LaunchConfiguration("base_transport")
 
     lidar = Node(
@@ -32,6 +33,15 @@ def generate_launch_description():
         output="screen",
         parameters=[{"config_file": config_file}],
         condition=IfCondition(start_lidar),
+    )
+
+    camera = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            PathJoinSubstitution(
+                [FindPackageShare("edge_server"), "launch", "astra.launch.py"]
+            )
+        ),
+        condition=IfCondition(start_camera),
     )
 
     center = IncludeLaunchDescription(
@@ -74,6 +84,11 @@ def generate_launch_description():
                 description="start the LD19/D6 /scan driver (lidar.enabled must also be true)",
             ),
             DeclareLaunchArgument(
+                "start_camera",
+                default_value="false",
+                description="start the Astra Pro color/depth driver (ros-humble-orbbec-camera)",
+            ),
+            DeclareLaunchArgument(
                 "base_transport",
                 default_value="edge_serial",
                 description=(
@@ -82,6 +97,7 @@ def generate_launch_description():
                 ),
             ),
             lidar,
+            camera,
             center,
         ]
     )

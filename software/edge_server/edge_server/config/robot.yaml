@@ -9,7 +9,7 @@
 # ============================================================================
 edge_server:
   sensor_topics:
-    image: "/camera/image_raw"     # 树莓派 USB/CSI 相机（Edge Server 订阅后转 MJPEG）
+    image: "/camera/color/image_raw"  # Astra Pro 彩色（Edge Server 订阅后转 MJPEG）
     laser: "/scan"                  # LD19/LD06/RPLidar 驱动输出
     audio: "/edge/audio"             # newmine HFP 录音时发布的 AudioData
     odom: "/odom"                   # edge_server_node（STM32 遥测）或底盘驱动输出
@@ -97,7 +97,7 @@ edge_server:
       sdcard_dir: ""               # /sdcard/* 映射目录，空则 404
     camera:
       enabled: true
-      topic: "/camera/image_raw"
+      topic: "/camera/color/image_raw"
       fps: 10
       quality: 70
     motion:
@@ -231,7 +231,16 @@ edge_server:
   # ---------------------------------------------------------------- 目标检测
   perception:
     enabled: true
-    image_topic: "/camera/image_raw"
+    image_topic: "/camera/color/image_raw"
+    camera_info_topic: "/camera/color/camera_info"
+    depth_topic: "/camera/depth/image_raw"
+    depth_timeout_sec: 1.0
+    depth_scale: 0.001
+    depth_roi_ratio: 0.6
+    depth_min_m: 0.15
+    depth_max_m: 8.0
+    depth_min_pixels: 5
+    prefer_depth: true
     detector: "color"               # 接入 YOLO 后改为 yolo 并配置 model_path
     publish_rate: 10.0
     min_confidence: 0.5
@@ -417,11 +426,19 @@ edge_server:
     devices:
       camera:
         type: camera
-        topic: "/camera/image_raw"
+        topic: "/camera/color/image_raw"
         message_type: "sensor_msgs/msg/Image"
         expected_rate_hz: 15.0
         timeout_sec: 2.0
         required: true
+      depth_camera:
+        type: camera
+        topic: "/camera/depth/image_raw"
+        message_type: "sensor_msgs/msg/Image"
+        expected_rate_hz: 10.0
+        timeout_sec: 2.0
+        required: false
+        description: "Astra Pro depth stream"
       lidar:
         type: lidar
         topic: "/scan"

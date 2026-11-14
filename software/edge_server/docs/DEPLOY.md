@@ -128,6 +128,9 @@
 - 激光雷达：代码/`lidar_node`/`rush-mog-lidar.service` 已安装并 enable；
   当前未接 D6、未启用 `dtoverlay=uart4`，所以 `/dev/rush_lidar` 不存在，
   service 因 `ConditionPathExists` 静默跳过；接好线并重启后自动启动
+- Astra Pro：`ros-humble-orbbec-camera` + Orbbec udev 已安装；当前 `lsusb`
+  没有 `2bc5` 设备，驱动未启动，`camera/depth_camera` 健康为 `unknown`；
+  插上相机后按 §7.8 启动
 - ROS 健康整体为 `degraded`（缺相机/雷达/IMU/底盘数据），当前属预期
 
 ---
@@ -187,7 +190,7 @@ cd /mnt/f/CODE/rush-mog/software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest -q tests
 ```
 
-当前基线：`130 passed`。
+当前基线：`131 passed`。
 
 ### 3.3 同步源码到 Pi
 
@@ -332,7 +335,7 @@ ssh ubuntu@192.168.3.26 '
 - STM32 已通过 GPIO4/5（UART3，`/dev/ttyAMA1`）接入，115200 遥测正常；
   接线/排障见 [OPERATIONS.md](OPERATIONS.md) §8。
 - 当前没有启动 ROS 相机驱动，`/stream` 返回 503；相机驱动发布
-  `/camera/image_raw` 后会自动出图。
+  `/camera/color/image_raw` 后会自动出图。
 - 服务只启动 Edge + 健康网关，不启动 SLAM/Nav2/感知全栈；
   需要全栈时另行启动对应 launch/节点。
 - 不要直接修改 `/opt/edge_server/install/`，重新构建会覆盖。
@@ -599,3 +602,58 @@ sudo reboot
 
 若波特率或协议不同，改 `lidar.baud`/`lidar.protocol`；若设备名不同，改 udev
 规则或 `lidar.port`。
+
+### 7.8 Astra Pro 深度相机
+
+驱动：`ros-humble-orbbec-camera`（已安装），udev：
+`/etc/udev/rules.d/99-obsensor-libusb.rules`（已从
+`/opt/ros/humble/share/orbbec_camera/udev/` 复制）。
+
+```bash
+# 不建议经 Hub；插 Pi 4 USB3 口，Astra Pro 是 USB2.0 设备
+lsusb | grep -i 2bc5          # 应看到 Orbbec/Astra（2bc5:0403 等）
+
+ros2 launch edge_server astra.launch.py
+# 话题：
+#   /camera/color/image_raw
+#   /camera/depth/image_raw
+#   /camera/color/camera_info
+#   /camera/depth/camera_info
+```
+
+`astra.launch.py` 默认：
+
+- `depth_registration:=true`：深度对齐到彩色，bbox 可直接采深度；
+- `enable_point_cloud:=false`：Pi 4B 省 CPU/带宽；
+- 640×480@10Hz；
+- 发布 `base_link → camera_link` 静态 TF，默认 `x=0.08,y=0,z=0.22`。
+
+Edge 侧：
+
+- `edge.camera.topic` / `perception.image_topic` 已切到
+  `/camera/color/image_raw`；
+- `perception.depth_topic` 为 `/camera/depth/image_raw`，`prefer_depth: true`；
+- `target_detector_node` 用深度 bbox 中心区域中值优先测距，深度不可用时再回退
+  激光/bbox 高度；
+- health `depth_camera` 监控深度话题；dashboard 增加「深度相机」卡片；
+- `robot_bringup.launch.py start_camera:=true` 可随整车启动。
+
+验收：
+
+```bash
+ros2 topic hz /camera/color/image_raw   # ≈10 Hz
+ros2 topic hz /camera/depth/image_raw   # ≈10 Hz
+ros2 topic echo /camera/depth/image_raw --once --field encoding   # 16UC1/32FC1
+ros2 topic echo /camera/depth/camera_info --once
+ros2 run tf2_ros tf2_echo base_link camera_link
+```
+
+当前这台 Pi 尚未插 Astra Pro（`lsusb` 没有 2bc5 设备），因此驱动未启动。
+已安装并 enable 可选的 `rush-mog-camera.service`（`ConditionPathExists=/dev/astra_pro`）：
+
+- 相机插上且 Orbbec udev 规则生效后，重启或
+  `sudo systemctl start rush-mog-camera` 即启动；
+- 单元文件模板：`software/tools/systemd/rush-mog-camera.service`；
+- 手动调试仍推荐 `ros2 launch edge_server astra.launch.py`。
+如果 Orbbec 驱动无法识别老款 Astra Pro，先确认 `lsusb`/`ros2 topic list`；
+仍不行则换 Astra Pro Plus/Gemini 2/D435i，Edge 侧话题/深度分支不用改。

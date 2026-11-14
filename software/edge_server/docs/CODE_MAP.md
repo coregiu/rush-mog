@@ -71,7 +71,7 @@ software/
 │   │   ├── base_bridge_node.py  旧串口桥（legacy）
 │   │   ├── esp32_bridge_node.py 旧 ESP32 HTTP 桥（legacy）
 │   │   └── vla_/navigation_/object_search_…  全栈节点
-│   ├── launch/                  edge_server / robot_bringup / slam / nav2
+│   ├── launch/                  edge_server / lidar / astra / robot_bringup / slam / nav2
 │   ├── web/                     index.html（手柄）、dashboard、JS/CSS
 │   ├── tests/                   pytest / 端到端脚本
 │   └── setup.py                 entry_points + launch/config/web 安装清单

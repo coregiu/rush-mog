@@ -13,7 +13,7 @@
 | 代码 | `software/edge_server`（ament_python，ROS2 Humble） |
 | 消息/动作 | `software/custom_msgs`（v0.2.0） |
 | 构建 | `colcon build --packages-select custom_msgs edge_server` 通过 |
-| 单元测试 | `pytest tests -q`：130 passed（新增 Edge 控制/HTTP 25 项） |
+| 单元测试 | `pytest tests -q`：131 passed（新增 Edge 控制/HTTP 25 项） |
 | 健康检查 | `test_health_monitor.py` + `test_health_http.py`：29 passed；ROS/HTTP 手工联调通过 |
 | VLA/安全端到端 | `end_to_end_check.py`：7/7 passed |
 | SLAM/导航/搜索联调 | `slam_nav_check.py` + `fake_slam_robot.py`：6/6 passed |
@@ -109,7 +109,7 @@ ESP32 与树莓派两个模块已合并为**一台树莓派 Edge Server**：
 | 类型 | 话题 | 说明 |
 |---|---|---|
 | 激光 | `/scan` 或 `/edge/radar` | 2D LaserScan，10Hz+ |
-| 图像 | `/camera/image_raw` 或 `/edge/video` | bgr8，目标检测/VLA |
+| 图像 | `/camera/color/image_raw` 或 `/edge/video` | bgr8，目标检测/VLA；Astra RGB |
 | 音频 | `/edge/audio` 或 `/audio/raw` | 可选，缺失不阻塞 |
 | 里程计 | `/odom` 或 `/robot/odometry` | 轮式/EKF |
 | IMU | `/imu/data` | ICM-20948，100Hz |
@@ -561,7 +561,7 @@ HTTP 入口（80 端口，完整契约见 `software/api.yaml`）：
 | `GET/POST /api/modules/edge/params` | Edge 参数（运动保活、图传帧率） |
 | `GET /api/modules/{id}/health|params` | 代理 ROS/CENTER 接口 |
 
-MJPEG 在 8080 端口，订阅 ROS `/camera/image_raw`，由 `cv_bridge` 转 JPEG；
+MJPEG 在 8080 端口，订阅 ROS `/camera/color/image_raw`，由 `cv_bridge` 转 JPEG；
 相机未就绪返回 503。80 端口 `/stream` 返回 302 到 8080。
 
 #### 旧二进制协议（legacy）
@@ -645,7 +645,7 @@ edge/Pi sensors → bridge_node → /center/synced_data
 ### 7.3 目标搜索
 
 ```text
-/camera/image_raw + /scan + /center/pose
+/camera/color/image_raw + /camera/depth/image_raw + /scan + /center/pose
     → target_detector_node → /center/target_detections
     → object_search_node (SearchCoordinator)
         ├─ /center/frontiers + /center/map_info → 探索目标
@@ -673,7 +673,9 @@ edge/Pi sensors → bridge_node → /center/synced_data
 |---|---|---|---|
 | `/scan`、`/edge/radar` | `sensor_msgs/LaserScan` | 发布/订阅 | 激光；实车由 `lidar_node` 发布 |
 | `/lidar/status` | `std_msgs/String` | 发布 | LD19/D6 串口、CRC、扫描状态（1 Hz） |
-| `/camera/image_raw`、`/edge/video` | `sensor_msgs/Image` | 订阅 | 图像 |
+| `/camera/color/image_raw` | `sensor_msgs/Image` | 发布/订阅 | Astra RGB / MJPEG / 目标检测 |
+| `/camera/depth/image_raw` | `sensor_msgs/Image` | 发布/订阅 | Astra 深度 / 目标测距 |
+| `/camera/color/image_raw`、`/camera/depth/image_raw`、`/edge/video` | `sensor_msgs/Image` | 发布/订阅 | Astra RGB/深度 |
 | `/edge/audio` | `custom_msgs/AudioData` | 发布/订阅 | HFP 录音时 10 Hz PCM（s16le/8k/mono） |
 | `/odom`、`/robot/odometry` | `nav_msgs/Odometry` | 订阅 | 里程计 |
 | `/imu/data` | `sensor_msgs/Imu` | 订阅 | IMU |
@@ -769,7 +771,7 @@ edge/Pi sensors → bridge_node → /center/synced_data
 | 文件 | 用途 |
 |---|---|
 | `config/config.yaml` | 仿真/桌面默认；`/edge/*` 话题、`perception.enabled=false`、`base.enabled=false` |
-| `config/robot.yaml` | 实车覆盖；`/scan`、`/camera/image_raw`、`base.transport=edge_serial`、Edge Web 80/8080 |
+| `config/robot.yaml` | 实车覆盖；`/scan`、`/camera/color/image_raw`、`/camera/depth/image_raw`、Edge Web 80/8080 |
 | `config/ekf.yaml` | robot_localization |
 | `config/slam_toolbox.yaml` | slam_toolbox |
 | `config/nav2_params.yaml` | Nav2 Humble 起步配置 |
@@ -843,7 +845,7 @@ edge/Pi sensors → bridge_node → /center/synced_data
 
 1. 上电，确认 12V/5V/6V、共地、急停释放。
 2. 启动激光驱动：`ros2 run <lidar_driver> ...`，确认 `/scan` 10Hz。
-3. 启动相机：`/camera/image_raw`。
+3. 启动 Astra 深度相机：`ros2 launch edge_server astra.launch.py`，确认 `/camera/color/image_raw`、`/camera/depth/image_raw`。
 4. 启动 Pi Edge Server（网页/API/MJPEG + STM32 串口 + ROS 桥）：
    ```bash
    ros2 launch edge_server robot_bringup.launch.py
@@ -931,7 +933,7 @@ python3 tests/slam_nav_check.py          # 6/6
 ```bash
 cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 130 passed
+# 131 passed
 ```
 
 健康检查专项：
@@ -984,7 +986,7 @@ python3 tests/slam_nav_check.py
 1. **VLA 仍是规则桩**：无模型权重；接入真实 VLA 时替换 `_load_model/predict`。
 2. **STM32 固件未升级**：主机侧二进制协议已实现，固件仍 ASCII；需按 §6.13 实现编码器/IMU 回传。
 3. **Nav2 参数是起步值**：`robot_radius`、速度、膨胀半径、DWB critics 需实车调参。
-4. **无深度相机**：目标距离靠激光/bbox 高度；遮挡/高度变化时精度有限。
+4. **深度相机可选**：接入 Astra Pro 后优先深度测距，未接入/深度无效时回退激光/bbox 高度。
 5. **ICM-20948 磁力计需实测校准**：硬铁/软铁/安装偏航；电机干扰下只慢速校正。
 6. **单地图/单楼层**：未实现多地图切换/电梯/多层。
 7. **动态目标**：搜索假设目标基本静止；移动目标跟踪需扩展预测/重规划。
@@ -1000,7 +1002,7 @@ python3 tests/slam_nav_check.py
 1. STM32 固件：4 路编码器 + 4 路 PWM + 轮速 PID + 二进制协议；
 2. 实车 TF/标定：轮半径/CPR、IMU 安装、激光/相机外参；
 3. Nav2 调参 + 真实地图闭环；
-4. YOLO/深度相机接入；
+4. YOLO 接入；深度相机已接入 Astra Pro；
 5. 多地图/动态目标/远程 HMI。
 
 ---
@@ -1009,6 +1011,6 @@ python3 tests/slam_nav_check.py
 
 `edge_server` v2 在 v1 的 VLA 推理、安全、反向操作之上，补齐了 **SLAM 建图、ICM-20948 定位、
 Nav2/直航导航、目标检测/搜索/接近、速度仲裁、底盘串口桥、健康检查**。软件链路已通过
-130 项单元测试（含 29 项健康检查）、7 项 VLA/安全端到端、6 项 SLAM/导航/搜索联调；
+131 项单元测试（含 29 项健康检查）、7 项 VLA/安全端到端、6 项 SLAM/导航/搜索联调；
 实车落地还差 STM32 固件升级、硬件选型（见 `hardware/SLAM_NAV.md`）、现场标定，以及
 机械臂反馈话题接入。

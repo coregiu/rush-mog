@@ -370,7 +370,7 @@ ros2 run tf2_ros tf2_echo base_link laser_link
 |---|---|
 | USB | Astra Pro 是 USB 2.0 设备；插 Pi 4 的 **USB 3.0 口**（兼容 2.0，供电更足），不要经 Hub |
 | 带宽 | 深度 640×480@30 + RGB 同开接近 USB 2.0 上限，降帧率/分辨率更稳 |
-| 驱动 | Astra Pro 属老款结构光，官方 ROS2 `orbbec_camera` 主要覆盖 Astra 2 / Pro Plus / Gemini 系列；**先确认能出 `/camera/depth/image_raw`**，否则换 Astra Pro Plus / Gemini 2 / RealSense D435i |
+| 驱动 | 已安装 `ros-humble-orbbec-camera`，用 `launch/astra.launch.py` 启动；**先确认能出 `/camera/color/image_raw`、`/camera/depth/image_raw`**，否则换 Astra Pro Plus / Gemini 2 / RealSense D435i |
 | 供电 | 相机峰值 ~0.8A，计入 5V 预算 |
 
 ### 9.3 标定
@@ -500,7 +500,7 @@ L298N、12V 3600mAh 电池、12V→5V 3A / 3.3V 1A、USB 麦、蓝牙音箱。
 | 地图 | `/map`、`/center/map_info`、`/center/frontiers` | `map_manager_node` |
 | 定位 | `/amcl_pose`、TF、`/center/pose`、`/center/localization_status` | `localization_node` |
 | 导航 | `/center/navigate_to`、`/nav/cmd_vel` | `navigation_node` |
-| 目标 | `/camera/image_raw`、`/center/target_detections` | `target_detector_node` |
+| 目标 | `/camera/color/image_raw`、`/center/target_detections` | `target_detector_node` |
 | 搜索 | `/center/search_object`、`/center/explore` | `object_search_node` |
 | 速度 | `/cmd_vel_raw`、`/nav/cmd_vel`、`/reverse/cmd_vel`、`/safety/cmd_vel_override` → `/cmd_vel` | `velocity_mux_node` |
 | 任务 | `/center/execute_task`、`/center/execute_mission` | `task_manager_node` |

@@ -31,7 +31,7 @@
 | 项目 | 结果 |
 |---|---|
 | `colcon build --packages-select custom_msgs edge_server` | 通过 |
-| `pytest tests -q` | 130 passed |
+| `pytest tests -q` | 131 passed |
 | `tests/end_to_end_check.py` | 7/7 passed |
 | `tests/slam_nav_check.py` + `fake_slam_robot.py` | 6/6 passed |
 
@@ -193,7 +193,7 @@ sudo setcap cap_net_bind_service=+ep /usr/bin/python3
 
 其他启动前确认：
 - 激光驱动已发布 `/scan`（`robot_bringup` 默认启动 `lidar_node`；未接雷达可 `start_lidar:=false`）；
-- 相机驱动已发布 `/camera/image_raw`（Edge Server 订阅并转成 MJPEG）；
+- 相机驱动已发布 `/camera/color/image_raw`（Astra Pro；Edge Server 订阅并转成 MJPEG）；
 - 12V/5V/6V 共地，急停释放。
 
 旧模式仍可用（不推荐）：
@@ -236,7 +236,7 @@ ros2 run robot_localization ekf_node --ros-args \
 | `localization_node` | 位姿选择、定位健康度、`/center/set_initial_pose` |
 | `map_manager_node` | `/map` 消费、前沿、`/center/map_control`、PGM/YAML 存图 |
 | `navigation_node` | `/center/navigate_to`，Nav2/直航后端 |
-| `target_detector_node` | 颜色/YOLO 检测、激光/bbox 测距、map 投影、跟踪 |
+| `target_detector_node` | 颜色/YOLO 检测、深度/激光/bbox 测距、map 投影、跟踪 |
 | `object_search_node` | `/center/explore`、`/center/search_object` |
 | `lidar_node` | LD19/D6 串口驱动：UART4 → `/scan`，可选 `base_link→laser_link` TF、`/lidar/status` |
 | `edge_server_node` | Pi Edge Server：80 网页/API、8080 MJPEG、STM32 串口、蓝牙音箱/语音播报、HFP 录音与 `/edge/audio`、树莓派电源监控、`/odom`、`/joint_states`、`/base/status`、`/body/audio_status`、`/body/mic_status`、`/body/power_status` |
@@ -252,10 +252,13 @@ ros2 run robot_localization ekf_node --ros-args \
 
 | 话题 | 类型 | 方向 |
 |---|---|---|
+| `/camera/color/image_raw` | `sensor_msgs/Image` | 发布（Astra/相机驱动）/订阅 |
+| `/camera/depth/image_raw` | `sensor_msgs/Image` | 发布（Astra 驱动）/订阅（深度测距） |
+| `/camera/color/camera_info` | `sensor_msgs/CameraInfo` | 订阅（自动更新内参） |
 | `/scan` | `sensor_msgs/LaserScan` | 发布（lidar_node）/订阅 |
 | `/edge/radar` | `sensor_msgs/LaserScan` | 订阅（仿真兼容） |
 | `/lidar/status` | `std_msgs/String` | 发布（雷达串口/CRC/扫描状态，1 Hz） |
-| `/camera/image_raw`、`/edge/video` | `sensor_msgs/Image` | 订阅 |
+| `/camera/color/image_raw`、`/edge/video` | `sensor_msgs/Image` | 订阅 |
 | `/edge/audio` | `custom_msgs/AudioData` | 发布（录音时 10 Hz PCM）/订阅（bridge） |
 | `/odom`、`/robot/odometry` | `nav_msgs/Odometry` | 订阅 |
 | `/imu/data` | `sensor_msgs/Imu` | 订阅 |
@@ -547,6 +550,60 @@ curl -s http://192.168.3.26/api/power | python3 -m json.tool
 dashboard 的 BOM「电源及转换板」卡片使用该状态；health monitor 的 `power`
 设备读取 `/body/power_status`，电源异常时整体健康会降级。
 
+### 5.9 Astra Pro 深度相机
+
+Astra Pro 同时提供 RGB 和深度，使用 Orbbec ROS2 驱动（`ros-humble-orbbec-camera`）。
+本包提供：
+
+- `launch/astra.launch.py`：Astra 驱动 + `base_link → camera_link` 静态 TF；
+- `target_detector_node` 订阅深度图，bbox 中心区域中值测距；
+- health `depth_camera` 监控 `/camera/depth/image_raw`；
+- dashboard 的「深度相机」硬件卡片。
+
+安装与 USB：
+
+```bash
+sudo apt install ros-humble-orbbec-camera
+sudo cp /opt/ros/humble/share/orbbec_camera/udev/99-obsensor-libusb.rules \
+  /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+Astra Pro 是 USB 2.0 设备，插 Pi 4 的 USB 3.0 口，**不要经 Hub**，峰值约
+0.8A；建议深度/彩色都降到 640×480@10Hz。启动：
+
+```bash
+ros2 launch edge_server astra.launch.py
+# 或随 bringup（默认 start_camera:=false）
+ros2 launch edge_server robot_bringup.launch.py start_camera:=true
+```
+
+关键话题：
+
+| 话题 | 说明 |
+|---|---|
+| `/camera/color/image_raw` | RGB，Edge MJPEG / 目标检测 |
+| `/camera/depth/image_raw` | 深度 `16UC1`（mm）或 `32FC1`（m） |
+| `/camera/color/camera_info` | 彩色内参，自动更新 localizer |
+| `/camera/depth/camera_info` | 深度内参 |
+
+`astra.launch.py` 默认 `depth_registration:=true`（深度对齐到彩色），
+`enable_point_cloud:=false`（Pi 4B 省 CPU）。如果厂家驱动不支持对齐，
+把 `prefer_depth` 设为 false，深度分支会回退到激光/bbox 估距。
+
+TF 默认 `base_link → camera_link` 为 `x=0.08, y=0, z=0.22`，按实际安装位置改
+`astra.launch.py` 的 `tf_*` 参数，或用 `tf2_echo` 校验。
+
+验收：
+
+```bash
+ros2 topic hz /camera/color/image_raw
+ros2 topic hz /camera/depth/image_raw
+ros2 topic echo /camera/depth/camera_info --once
+ros2 run tf2_ros tf2_echo base_link camera_link
+curl -s http://192.168.3.26/api/modules/ros/health | python3 -m json.tool | grep -A3 depth_camera
+```
+
 ---
 
 ## 6. 配置
@@ -556,7 +613,7 @@ dashboard 的 BOM「电源及转换板」卡片使用该状态；health monitor 
 | 文件 | 用途 |
 |---|---|
 | `config.yaml` | 仿真/桌面默认；`/edge/*` 话题；`base.enabled=false`；Edge Web 使用 8081/8082 |
-| `robot.yaml` | 实车；`/scan`、`/camera/image_raw`；`base.transport=edge_serial`；Edge Web 80/8080 |
+| `robot.yaml` | 实车；`/scan`、`/camera/color/image_raw`、`/camera/depth/image_raw`；Edge Web 80/8080 |
 | `ekf.yaml` | `robot_localization` |
 | `slam_toolbox.yaml` | `slam_toolbox` |
 | `nav2_params.yaml` | Nav2 Humble 起步配置 |
@@ -605,7 +662,7 @@ dashboard 的 BOM「电源及转换板」卡片使用该状态；health monitor 
 ```bash
 cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 130 passed
+# 131 passed
 ```
 
 单独跑健康检查（不依赖 ROS 图）：
@@ -711,11 +768,11 @@ ros2 service call /center/emergency_stop custom_msgs/srv/EmergencyStop "{trigger
 1. **VLA 为规则桩**：未包含模型权重/GPU 推理；替换 `VLAEngine._load_model/predict` 即可。
 2. **STM32 固件仍为 ASCII**：Pi Edge Server 已直连 ASCII 协议；`DESIGN.md §6.13` 的二进制协议尚未在固件实现。
 3. **Nav2 参数起步值**：需实车调 `robot_radius`、速度、膨胀半径、DWB critics。
-4. **无深度相机**：目标距离靠激光/bbox 高度；遮挡/高度变化精度有限。
+4. **深度相机可选**：Astra Pro 接入后优先深度测距；未接入/深度无效时自动回退激光/bbox 高度，遮挡/高度变化精度有限。
 5. **磁力计需校准**：ICM-20948 受电机干扰时只慢速校正，不硬切航向。
 6. **单地图/单楼层**：未实现多地图切换/电梯/多层。
 7. **动态目标**：搜索假设目标基本静止；移动目标需预测/重规划。
-8. **颜色检测仅演示**：真实场景建议 YOLO/深度相机/Orin Nano。
+8. **颜色检测仅演示**：真实场景建议 YOLO；深度相机已接入 Astra Pro，可在 Pi 4B 上以 640×480@10Hz 运行。
 9. **健康反馈缺口**：机械臂 `/arm/joint_states` 尚未发布，健康接口显示 `unknown`；
    音箱/麦克风已接入 `/body/audio_status`、`/body/mic_status`，蓝牙未连接时显示
    `degraded`，连接并支持 HFP 后恢复 `ok`。

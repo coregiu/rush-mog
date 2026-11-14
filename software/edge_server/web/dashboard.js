@@ -30,12 +30,13 @@ const MODULE_META = {
   center: { name: 'CENTER SERVER', subtitle: 'SmolVLA · 推理中心', glyph: 'C', order: 2 },
 };
 
-// hardware/README.md 的 BOM 清单（10 项；麦轮底盘与电机驱动合并）
+// hardware/README.md 的 BOM 清单（11 项；麦轮底盘与电机驱动合并，Astra 彩色/深度分卡）
 const HARDWARE_MODULES = [
   { id: 'pi', name: '板载计算机', model: 'Raspberry Pi 4B', glyph: 'PI' },
   { id: 'stm32', name: 'STM 控制板', model: 'STM32F103C8T6', glyph: 'MCU' },
   { id: 'lidar', name: '雷达', model: 'D6 / LD19', glyph: 'LID' },
-  { id: 'camera', name: '相机', model: 'Astra Pro', glyph: 'CAM' },
+  { id: 'camera', name: '相机', model: 'Astra Pro · RGB', glyph: 'CAM' },
+  { id: 'depth', name: '深度相机', model: 'Astra Pro · Depth', glyph: 'DEP' },
   { id: 'imu', name: '陀螺仪', model: 'ICM-20948', glyph: 'IMU' },
   { id: 'cliff', name: '悬崖传感器', model: 'TCRT5000 ×2', glyph: 'CLF' },
   { id: 'chassis', name: '电机驱动+编码器', model: 'JGB37-520 ×4 · L298N', glyph: 'CHS' },
@@ -1032,7 +1033,7 @@ function deviceDetail(device, fallback) {
   return detail;
 }
 
-// hardware/README.md 的 10 个 BOM 模块（底盘+电机驱动已合并）-> 状态 / 描述 / 指标
+// hardware/README.md 的 11 个 BOM 模块（底盘+电机驱动已合并）-> 状态 / 描述 / 指标
 function hardwareState(id) {
   const p = (state.edge && state.edge.params) || {};
   const body = state.body.latest || {};
@@ -1084,8 +1085,16 @@ function hardwareState(id) {
       if (!device && streaming) chips.unshift('MJPEG OK');
       return {
         status: device ? device.status : (streaming ? 'ok' : 'unknown'),
-        detail: deviceDetail(device, streaming ? 'MJPEG 可用' : '未接入 · 等待 /camera/image_raw'),
+        detail: deviceDetail(device, streaming ? 'MJPEG 可用' : '未接入 · 等待 /camera/color/image_raw'),
         chips,
+      };
+    }
+    case 'depth': {
+      const device = rosDevice('depth_camera');
+      return {
+        status: device ? device.status : 'unknown',
+        detail: deviceDetail(device, '未接入 · 等待 /camera/depth/image_raw'),
+        chips: deviceMetricChips(device),
       };
     }
     case 'imu': {
