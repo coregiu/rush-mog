@@ -1,6 +1,7 @@
 # edge_server（ROS2：Pi Edge Server + VLA + SLAM + 导航 + 目标搜索 + 健康检查）
 
 设计文档：[`docs/DESIGN.md`](docs/DESIGN.md)。
+分层架构（基础能力层 / 场景编排层）：[`docs/ARCHITECTURE_LAYERS.md`](docs/ARCHITECTURE_LAYERS.md)。
 代码结构与调用链：[`docs/CODE_MAP.md`](docs/CODE_MAP.md)。
 健康检查接口契约：[`docs/HEALTHCHECK.md`](docs/HEALTHCHECK.md)。
 部署与发布说明：[`docs/DEPLOY.md`](docs/DEPLOY.md)。
@@ -13,6 +14,12 @@
 - **定位**：ICM-20948 + 轮式里程计 EKF、AMCL/TF、定位健康度与初始位姿；
 - **自主导航**：Nav2 或内置直航，目标校验、停滞检测、超时/急停；
 - **目标搜索**：颜色/YOLO 检测、激光测距、map 投影、前沿探索、确认、接近；
+- **语音找东西（场景编排层）**：网页/HTTP 语音文本 → `voice_scenario_node`（L3）
+  → `/center/search_object`（L2）→ 自主探索/确认/接近 → `/body/say` 播报
+  “找到拖鞋了”；支持“别找了”取消、目标切换、急停取消；
+- **分层架构**：基础能力层（`core/*` + ROS 能力节点）与场景编排层
+  （`core/scenarios/*` + `voice_scenario_node`）解耦，新增场景只写编排。
+  详见 [`docs/ARCHITECTURE_LAYERS.md`](docs/ARCHITECTURE_LAYERS.md)；
 - **速度仲裁**：VLA/Nav2/反向/安全统一到唯一 `/cmd_vel`；
 - **Pi Edge Server**：80 端口网页/API、8080 MJPEG、树莓派直连 STM32 USART3（115200 ASCII）、
   网页手动控制与 ROS `/cmd_vel` 共用串口出口；旧 ESP32 HTTP 桥仅保留历史兼容；
@@ -32,9 +39,10 @@
 | 项目 | 结果 |
 |---|---|
 | `colcon build --packages-select custom_msgs edge_server` | 通过 |
-| `pytest tests -q` | 143 passed |
+| `pytest tests -q` | 153 passed（含 9 项场景 + 1 项 `/api/voice`） |
 | `tests/end_to_end_check.py` | 7/7 passed |
 | `tests/slam_nav_check.py` + `fake_slam_robot.py` | 6/6 passed |
+| `tests/voice_scenario_check.py` + `fake_slam_robot.py` | 3/3 passed（找到/取消/状态链） |
 
 > VLA 仍是规则桩（无模型权重）；当前 STM32 ASCII 固件已由 `edge_server_node` 直连，若需二进制闭环再按 `DESIGN.md §6.13` 的 legacy 小节升级；
 > Nav2/建图参数是起步值，需实车标定。
@@ -240,6 +248,7 @@ ros2 launch edge_server ekf.launch.py
 | `navigation_node` | `/center/navigate_to`，Nav2/直航后端 |
 | `target_detector_node` | 颜色/YOLO 检测、深度/激光/bbox 测距、map 投影、跟踪 |
 | `object_search_node` | `/center/explore`、`/center/search_object` |
+| `voice_scenario_node` | 场景编排（L3）：语音文本 → 解析 → 调 `/center/search_object` → `/body/say` 播报；发布 `/center/scenario_status` |
 | `lidar_node` | LD19/D6 串口驱动：UART4 → `/scan`，可选 `base_link→laser_link` TF、`/lidar/status` |
 | `edge_server_node` | Pi Edge Server：80 网页/API、8080 MJPEG、STM32 串口、悬崖状态、蓝牙音箱/语音播报、HFP 录音与 `/edge/audio`、树莓派电源监控、`/odom`、`/joint_states`、`/base/status`、`/body/cliff_status`、`/body/audio_status`、`/body/mic_status`、`/body/power_status` |
 | `base_bridge_node` | 旧版 Pi ↔ STM32 二进制串口桥（legacy） |
@@ -271,6 +280,8 @@ ros2 launch edge_server ekf.launch.py
 | `/body/audio_status` | `std_msgs/String` | 发布（音箱状态 JSON，1 Hz；健康检查 speaker） |
 | `/body/mic_status` | `std_msgs/String` | 发布（麦克风状态 JSON，1 Hz；健康检查 microphone） |
 | `/body/power_status` | `std_msgs/String` | 发布（树莓派电源状态 JSON，1 Hz；健康检查 power） |
+| `/edge/voice_command` | `std_msgs/String` | 订阅（语音文本 -> 场景编排层；HTTP `/api/voice` 与外部 ASR 共用） |
+| `/center/scenario_status` | `std_msgs/String` | 发布（场景状态 JSON，1 Hz，TRANSIENT_LOCAL；`GET /api/voice` 数据源） |
 | `/battery_state` | `sensor_msgs/BatteryState` | 订阅 |
 | `/base/status` | `std_msgs/String` | 发布/订阅（STM32 遥测 JSON） |
 | `/map` | `nav_msgs/OccupancyGrid` | 订阅/发布 |
@@ -404,6 +415,8 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
 | `POST /api/microphone/{start,stop,play,volume,list}` | 开始/停止录音、回放、音量、录音列表 |
 | `GET /api/microphone/recordings[/{name}]` | 录音列表 / 下载 WAV |
 | `GET /api/power` | 树莓派欠压/降频/温度/核心电压状态 |
+| `POST /api/voice` | 语音文本（raw/form/JSON `text`）→ `/edge/voice_command`；如“帮我找一下拖鞋” |
+| `GET /api/voice` | 语音场景状态快照 + `/center/scenario_status` 最近一帧 |
 | `GET /api/modules` | Edge + 同机 ROS 子系统 + 外部模块（CENTER） |
 | `GET/POST /api/modules/edge/params` | Edge 参数（运动保活、图传帧率） |
 | `GET /api/modules/{id}/health|params` | 代理 ROS（同机）/CENTER（外部） |
@@ -643,6 +656,102 @@ ros2 run tf2_ros tf2_echo base_link camera_link
 curl -s http://192.168.3.26/api/modules/ros/health | python3 -m json.tool | grep -A3 depth_camera
 ```
 
+### 5.10 语音找东西（场景编排层）
+
+架构分层见 [`docs/ARCHITECTURE_LAYERS.md`](docs/ARCHITECTURE_LAYERS.md)：
+基础能力层负责“检测/建图/导航/搜索/播报”，场景编排层只负责
+“听懂 → 调能力 → 播报结果”。新增场景（跟随、巡逻、取物）只写编排。
+
+**三条等价入口：**
+
+```bash
+# 1) 手机网页语音按钮：说“帮我找一下拖鞋”（Web Speech API -> POST /api/voice）
+# 2) 任意 HTTP 客户端：
+curl -X POST -H 'Content-Type: text/plain; charset=utf-8' \
+  --data '帮我找一下拖鞋' http://192.168.4.1/api/voice
+
+# 3) 任意 ASR 节点/脚本（离线 ASR 也可）：
+ros2 topic pub --once /edge/voice_command std_msgs/msg/String \
+  "{data: '帮我找一下拖鞋'}"
+```
+
+流程：
+
+```text
+/api/voice 或 /edge/voice_command
+  -> voice_scenario_node（语音解析、状态机、播报）
+  -> /center/search_object（探索/确认/接近）
+  -> /body/say（TTS）
+  -> /center/scenario_status -> GET /api/voice（网页状态）
+```
+
+**可用说法：**
+
+| 说法 | 行为 |
+|---|---|
+| `帮我找一下拖鞋` / `拖鞋在哪` / `find my slippers` | 开始搜索 `slipper` |
+| `别找了` / `停止寻找` / `取消搜索` | 取消当前搜索并播报 |
+| 搜索中再说另一个目标 | 取消旧搜索，切换到新目标 |
+| 急停 | 场景节点取消搜索并播报“已急停，停止寻找” |
+
+**播报示例：**“好的，我去找拖鞋。”→“好像看到拖鞋了，我确认一下。”→
+“确认是拖鞋，正在靠近。”→“找到拖鞋了，就在前面大约60厘米。”
+找不到时：“没有找到拖鞋。”；搜索功能未启动时：“寻找功能还没准备好……”
+
+**目标 label 必须与检测器输出一致：**
+
+- 语音别名在 `instruction.object_labels` 配置，拖鞋的 canonical label 是
+  `slipper`（`拖鞋/鞋子/slipper/shoe/...` 都映射到它）；
+- 默认 `perception.detector=color` 只适合贴色块/演示，配置里的颜色目标是
+  `cup`、`bottle`；检测器没有对应 label 时搜索会超时并播报“没找到”；
+- 找拖鞋等 COCO 外类别，推荐用开放词表检测器：
+  ```yaml
+  perception:
+    detector: "yolo_world"
+    model_path: "yolov8s-worldv2.pt"
+    open_vocab_labels: ["cup", "bottle", "slipper", "remote", "keys", "bag", "phone"]
+    targets:
+      slipper:
+        real_height_m: 0.08
+  ```
+  需要 `ultralytics` 与权重；缺失时 `make_detector` 自动回退到颜色检测器。
+  也可换成自定义 YOLO 模型，只要输出 label 是 `slipper`。
+
+**配置（`scenario` 段）：**
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `voice_topic` | `/edge/voice_command` | 语音文本输入 |
+| `search_action` | `/center/search_object` | 调用的搜索能力 |
+| `say_topic` | `/body/say` | TTS 输出 |
+| `status_topic` | `/center/scenario_status` | 场景状态 JSON |
+| `max_duration_sec` | `300` | 单次搜索上限 |
+| `standoff_distance` | `0.6` | 目标前停距 |
+| `announce_start` / `announce_milestones` | `true` | 开始/确认/接近播报 |
+| `announce_progress_sec` | `30` | 长搜索进度播报间隔，0 关闭 |
+
+联调验证（无需硬件）：
+
+```bash
+# 终端 1：完整栈（fake_slam_robot 提供地图/位姿/cup 目标）
+ros2 launch edge_server edge_server.launch.py \
+  config_file:=$(pwd)/tests/config_test.yaml \
+  start_perception:=false start_localization:=false
+python3 tests/fake_slam_robot.py
+
+# 终端 2：自动检查（找到 + 取消 + 状态链）
+python3 tests/voice_scenario_check.py
+# RESULT: 3/3 passed
+
+# 或手动观察：
+ros2 topic pub --once /edge/voice_command std_msgs/msg/String "{data: '帮我找一下杯子'}"
+ros2 topic echo /body/say
+ros2 topic echo /center/scenario_status
+```
+
+`tests/test_voice_scenario.py` 覆盖解析/状态机/播报文案；`/api/voice` 在
+`tests/test_edge_web.py` 中覆盖 raw/form/JSON 三种请求体。
+
 ---
 
 ## 6. 配置
@@ -701,7 +810,7 @@ curl -s http://192.168.3.26/api/modules/ros/health | python3 -m json.tool | grep
 ```bash
 cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 134 passed
+# 153 passed
 ```
 
 单独跑健康检查（不依赖 ROS 图）：
@@ -811,10 +920,13 @@ ros2 service call /center/emergency_stop custom_msgs/srv/EmergencyStop "{trigger
 5. **磁力计需校准**：ICM-20948 受电机干扰时只慢速校正，不硬切航向。
 6. **单地图/单楼层**：未实现多地图切换/电梯/多层。
 7. **动态目标**：搜索假设目标基本静止；移动目标需预测/重规划。
-8. **颜色检测仅演示**：真实场景建议 YOLO；深度相机已接入 Astra Pro，可在 Pi 4B 上以 640×480@10Hz 运行。
+8. **颜色检测仅演示**：真实场景建议 YOLO/YOLO-World；深度相机已接入 Astra Pro，可在 Pi 4B 上以 640×480@10Hz 运行。
+   拖鞋等 COCO 外类别需要 `perception.detector=yolo_world` + 权重，或自定义 YOLO 输出 `slipper`。
 9. **健康反馈缺口**：机械臂 `/arm/joint_states` 尚未发布，健康接口显示 `unknown`；
    音箱/麦克风已接入 `/body/audio_status`、`/body/mic_status`，蓝牙未连接时显示
    `degraded`，连接并支持 HFP 后恢复 `ok`。
+10. **浏览器语音识别依赖 Web Speech API**：部分浏览器/HTTP 页面可能要求安全上下文或联网；
+   离线场景可用任意 ASR（Vosk/Whisper）发布 `/edge/voice_command`，场景层无需改动。
 
 ---
 
@@ -825,6 +937,7 @@ software/edge_server/          # ROS 包根目录
 ├── edge_server/               # Python 包
 │   ├── config/                # config.yaml / robot.yaml / ekf.yaml / slam_toolbox.yaml / nav2_params.yaml
 │   ├── core/                  # 纯算法，可单测（含 health_monitor.py）
+│   ├── core/scenarios/        # L3 场景编排：voice_intent.py / find_object.py（不依赖 ROS）
 │   ├── drivers/               # ICM-20948
 │   ├── edge_control.py        # 按钮/摇杆/运动保活/STM32 遥测纯逻辑
 │   ├── core/speaker.py        # 蓝牙音箱自动连接 + TTS/音频排队播放
@@ -834,7 +947,7 @@ software/edge_server/          # ROS 包根目录
 │   ├── edge_web.py            # Edge 网页/API/MJPEG（stdlib）
 │   ├── http_health.py         # 健康检查 HTTP 网关（stdlib）
 │   └── utils/
-├── ros_nodes/                 # 16 个 ROS2 节点（含 edge_server_node / health_monitor_node）
+├── ros_nodes/                 # 19 个 ROS2 节点（含 voice_scenario_node / edge_server_node / health_monitor_node）
 ├── web/                       # 手柄页、dashboard、静态资源
 ├── launch/                    # edge_server / robot_bringup / slam_stack / nav2_stack
 ├── tests/                     # 单元 + 仿真 + 联调（含 test_edge_*.py / test_health_*.py）

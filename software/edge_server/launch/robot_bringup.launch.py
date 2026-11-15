@@ -60,6 +60,7 @@ def generate_launch_description():
             "start_localization": "true",
             "start_map_manager": "true",
             "start_object_search": "true",
+            "start_voice_scenario": "true",
             "start_velocity_mux": "true",
         }.items(),
     )

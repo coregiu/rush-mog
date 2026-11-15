@@ -2,6 +2,7 @@
 
 > 面向二次开发：想知道“点一下网页按钮，代码到底走了哪些地方”。
 > 配套：[OPERATIONS.md](OPERATIONS.md)（启停/排障）、[DESIGN.md](DESIGN.md)（设计细节）、
+> [ARCHITECTURE_LAYERS.md](ARCHITECTURE_LAYERS.md)（能力层/场景层）、
 > [HEALTHCHECK.md](HEALTHCHECK.md)（健康检查契约）。
 > 代码基线：2026-11-14，`software/edge_server` + `software/body_control`。
 
@@ -61,6 +62,7 @@ software/
 │   │   ├── http_health.py       健康接口数据组装
 │   │   ├── core/                业务核心：body_drive、odometry、velocity_mux、
 │   │   │                        safety_checker、vla_engine、navigation、object_search…
+│   │   ├── core/scenarios/      L3 场景编排：voice_intent、find_object（纯逻辑）
 │   │   ├── drivers/             硬件驱动（ICM-20948）
 │   │   ├── utils/               配置、时钟、日志
 │   │   └── config/              robot.yaml（实车）、config.yaml（仿真）
@@ -68,6 +70,7 @@ software/
 │   │   ├── edge_server_node.py  核心：网页+串口+ROS 桥（重点）
 │   │   ├── lidar_node.py        LD19/D6 串口 -> /scan
 │   │   ├── health_monitor_node.py 健康检查 + 8090 HTTP
+│   │   ├── voice_scenario_node.py 语音找东西场景适配（L3 -> SearchObject + /body/say）
 │   │   ├── base_bridge_node.py  旧串口桥（legacy）
 │   │   ├── esp32_bridge_node.py 旧 ESP32 HTTP 桥（legacy）
 │   │   └── vla_/navigation_/object_search_…  全栈节点
@@ -239,6 +242,8 @@ Twist 量化规则（`core/body_drive.py`）：
 | POST | `/api/microphone/{start,stop,play,volume,list}` | 录音/回放/音量/列表 |
 | GET | `/api/microphone/recordings[/{name}]` | 录音列表/WAV 下载 |
 | GET | `/api/power` | 树莓派欠压/降频/温度/核心电压状态 |
+| POST | `/api/voice` | 语音文本 → `/edge/voice_command`（raw/form/JSON） |
+| GET | `/api/voice` | 语音场景状态 + `/center/scenario_status` |
 | GET | `/api/modules` | 模块注册表 |
 | GET | `/api/modules/edge` | Edge 模块详情 |
 | GET | `/api/modules/edge/params` | 可调参数（含 `speaker_volume`） |

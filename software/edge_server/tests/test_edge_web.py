@@ -72,6 +72,20 @@ class FakeRuntime:
             "error": "",
         }
         self.mic_file = ""
+        self.voice_commands = []
+        self.voice_status_payload = {
+            "ok": True,
+            "scenario_online": True,
+            "last_text": "帮我找拖鞋",
+            "age_ms": 120,
+            "scenario": {
+                "state": "searching",
+                "target_label": "slipper",
+                "display_name": "拖鞋",
+                "detail": "explore frontier",
+                "elapsed_sec": 3.2,
+            },
+        }
         self.power_payload = {
             "ok": True,
             "enabled": True,
@@ -186,6 +200,23 @@ class FakeRuntime:
         if message.startswith("button:stop") or message == "raw:0":
             return "0"
         return "1"
+
+    def handle_voice(self, text):
+        text = str(text or "").strip()
+        if not text:
+            raise ValueError("语音文本为空")
+        self.voice_commands.append(text)
+        return {
+            "ok": True,
+            "accepted": True,
+            "text": text,
+            "message": "语音指令已发送",
+            "scenario_online": True,
+            "scenario": self.voice_status_payload["scenario"],
+        }
+
+    def voice_status(self):
+        return dict(self.voice_status_payload)
 
     def speaker_status(self):
         return dict(self.speaker_payload)
@@ -569,6 +600,63 @@ def test_power_api(web_server):
     assert payload["status"] == "ok"
     assert payload["model"].startswith("Raspberry Pi 4")
     assert payload["warning"] is True
+
+
+def test_voice_api(web_server):
+    port, runtime = web_server
+
+    status, _, body = request(
+        port,
+        "/api/voice",
+        method="POST",
+        data="帮我找一下拖鞋",
+        headers={"Content-Type": "text/plain; charset=utf-8"},
+    )
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["accepted"] is True
+    assert payload["text"] == "帮我找一下拖鞋"
+    assert runtime.voice_commands[-1] == "帮我找一下拖鞋"
+
+    status, _, body = request(
+        port,
+        "/api/voice",
+        method="POST",
+        data=json.dumps({"text": "别找了"}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert status == 200
+    assert runtime.voice_commands[-1] == "别找了"
+
+    status, _, _ = request(
+        port,
+        "/api/voice",
+        method="POST",
+        data="text=找拖鞋",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert status == 200
+    assert runtime.voice_commands[-1] == "找拖鞋"
+
+    status, _, body = request(port, "/api/voice")
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["scenario"]["state"] == "searching"
+    assert payload["scenario"]["display_name"] == "拖鞋"
+
+    status, _, body = request(port, "/api/voice", method="POST", data="")
+    assert status == 400
+    assert json.loads(body)["error"]["code"] == "empty_voice_command"
+
+    status, _, body = request(
+        port,
+        "/api/voice",
+        method="POST",
+        data="找" * 201,
+        headers={"Content-Type": "text/plain"},
+    )
+    assert status == 400
+    assert json.loads(body)["error"]["code"] == "voice_command_too_long"
 
 
 def test_microphone_api(web_server, tmp_path):

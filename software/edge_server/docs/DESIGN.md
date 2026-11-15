@@ -13,10 +13,11 @@
 | 代码 | `software/edge_server`（ament_python，ROS2 Humble） |
 | 消息/动作 | `software/custom_msgs`（v0.2.0） |
 | 构建 | `colcon build --packages-select custom_msgs edge_server` 通过 |
-| 单元测试 | `pytest tests -q`：134 passed（新增 Edge 控制/HTTP 25 项） |
+| 单元测试 | `pytest tests -q`：153 passed（含语音场景 9 项 + `/api/voice` 1 项） |
 | 健康检查 | `test_health_monitor.py` + `test_health_http.py`：29 passed；ROS/HTTP 手工联调通过 |
 | VLA/安全端到端 | `end_to_end_check.py`：7/7 passed |
 | SLAM/导航/搜索联调 | `slam_nav_check.py` + `fake_slam_robot.py`：6/6 passed |
+| 语音找东西联调 | `voice_scenario_check.py` + `fake_slam_robot.py`：3/3 passed（找到/取消/状态链） |
 | 真实 VLA 模型 | 未包含权重；规则桩，接口固定 |
 | STM32 协议 | 当前 ASCII 固件由 `edge_server_node` 直连；二进制协议主机侧保留为 legacy |
 
@@ -171,14 +172,17 @@ software/
     │   │   ├── target_localizer.py   # bbox/激光 -> map 坐标
     │   │   ├── target_tracker.py
     │   │   ├── velocity_mux.py
-    │   │   └── vla_engine.py
+    │   │   ├── vla_engine.py
+    │   │   └── scenarios/            # L3 场景编排（纯逻辑）
+    │   │       ├── voice_intent.py   # 文本 -> find/cancel/ignore
+    │   │       └── find_object.py    # 找东西状态机 + 播报文案
     │   ├── edge_control.py           # 网页按钮/摇杆/运动保活
     │   ├── edge_web.py               # Edge 网页/API/MJPEG
     │   ├── http_health.py            # 健康检查 HTTP 网关（stdlib）
     │   ├── drivers/
     │   │   └── icm20948.py           # 寄存器级 I2C 驱动
     │   └── utils/
-    ├── ros_nodes/                    # 18 个节点（含 edge_server_node、lidar_node）
+    ├── ros_nodes/                    # 19 个节点（含 voice_scenario_node、edge_server_node、lidar_node）
     ├── web/                          # 手柄页/dashboard/静态资源
     ├── launch/
     │   ├── edge_server.launch.py
@@ -191,6 +195,7 @@ software/
     │   ├── test_edge_web.py
     │   ├── test_vla_engine.py
     │   ├── test_slam_nav_core.py
+    │   ├── test_voice_scenario.py
     │   ├── fake_edge_publisher.py
     │   ├── fake_slam_robot.py
     │   ├── end_to_end_check.py
@@ -217,7 +222,8 @@ software/
 | 10 | `navigation_node` | `/center/navigate_to`，Nav2/直航后端 | → `/nav/cmd_vel`、`/center/nav_status` |
 | 11 | `target_detector_node` | 颜色/YOLO 检测、测距、map 投影、跟踪 | → `/center/target_detections` |
 | 12 | `object_search_node` | 前沿探索、目标确认、接近 | → `/center/search_status` |
-| 13 | `edge_server_node` | Pi Edge Server：80 网页/API、8080 MJPEG、STM32 ASCII 串口、运动仲裁、悬崖遥测 | ↔ `/cmd_vel`、`/odom`、`/joint_states`、`/base/status`、`/body/cliff_status`、`/center/safety_state` |
+| 12a | `voice_scenario_node` | 场景编排（L3）：语音文本 → 解析 → 搜索 → TTS 播报、取消/切换/急停 | ↔ `/edge/voice_command`、`/center/scenario_status`、`/body/say`、`/center/search_object` |
+| 13 | `edge_server_node` | Pi Edge Server：80 网页/API、8080 MJPEG、STM32 ASCII 串口、运动仲裁、悬崖遥测 | ↔ `/cmd_vel`、`/odom`、`/joint_states`、`/base/status`、`/body/cliff_status`、`/center/safety_state`、`/api/voice` |
 | 13a | `lidar_node` | LD19/D6 UART 驱动，47 字节帧解析/分箱 | → `/scan`、`/lidar/status`、`base_link→laser_link` TF |
 | 13b | `base_bridge_node` | 旧版二进制串口桥（legacy） | ↔ `/odom`、`/imu/data`、`/battery_state` |
 | 14 | `imu_node` | Pi I2C 直连 ICM-20948 | → `/imu/data` |
@@ -620,6 +626,63 @@ health_monitor_node
 接口契约、JSON 字段、设备反馈协议和 Edge Server/dashboard 接入示例见
 [`HEALTHCHECK.md`](HEALTHCHECK.md)。
 
+### 6.16 场景编排与语音找东西（`voice_scenario_node` + `core/scenarios/`）
+
+在能力层之上增加 L3 场景层，避免把“语音交互 + 搜索 + 播报”写进
+`object_search_node` 或 `task_manager_node`。完整分层说明见
+[`ARCHITECTURE_LAYERS.md`](ARCHITECTURE_LAYERS.md)。
+
+**分层：**
+
+```text
+L4 交互：web/audio.js、POST /api/voice、/edge/voice_command
+L3 场景：voice_scenario_node + core/scenarios/{voice_intent,find_object}.py
+L2 能力：object_search_node、navigation_node、target_detector_node、speaker
+L1 平台：ROS2 / 相机 / 雷达 / STM32 / 蓝牙音箱
+```
+
+**纯逻辑：**
+
+- `VoiceIntentResolver`：文本 → `find / cancel / ignore`；复用
+  `InstructionParser`，支持“拖鞋在哪”“帮我找一下拖鞋”“find my slippers”；
+- `FindObjectScenario`：`idle → searching → succeeded/failed/canceled`；
+  输入语音、搜索进度、搜索结果、急停；输出 `ScenarioEffect`
+  （`speak` / `start_search` / `cancel_search`）；不 import rclpy，可单测；
+- `InstructionParser` 增加自由 label 兜底：`找充电器` → `充电器`，便于接
+  开放词表检测器；别名匹配优先于自由抽取。
+
+**ROS 适配（`voice_scenario_node`）：**
+
+| 方向 | 接口 | 说明 |
+|---|---|---|
+| 订阅 | `/edge/voice_command` | 网页/HTTP/外部 ASR 的文本 |
+| 订阅 | `/center/search_status` | 搜索状态/进度，用于确认/接近里程碑播报 |
+| 订阅 | `/center/safety_state` | 急停取消 |
+| 订阅 | `/center/pose` | 计算找到目标后的距离播报 |
+| 发布 | `/body/say` | TTS 播报 |
+| 发布 | `/center/scenario_status` | JSON 状态，1 Hz + 变化即发，TRANSIENT_LOCAL |
+| Action | `/center/search_object` | 调用搜索能力；支持 cancel |
+
+**HTTP：**
+
+- `POST /api/voice`：raw 文本 / form `text=...` / JSON `{"text": "..."}`；
+  `edge_server_node` 发布 `/edge/voice_command`，并缓存
+  `/center/scenario_status` 供 `GET /api/voice`；
+- 网页 `audio.js` 用 Web Speech API 识别；命中“找/在哪”走场景接口，
+  命中“别找了/停止寻找”取消并同时停车；普通方向/按键指令仍走原 `/cmd`。
+
+**失败与降级：**
+
+- 搜索 Action 未启动：等待 2 s，播报“寻找功能还没准备好”，不进入 searching；
+- 检测器没有对应 label：搜索超时 → 播报“没有找到 X”；
+- 急停：取消搜索 + 播报“已急停，停止寻找”；
+- 浏览器不支持/不能联网 ASR：外部 ASR 发布 `/edge/voice_command` 即可，
+  场景层不变。
+
+**配置：** `scenario.*`（voice/search/say/status topic、时长、standoff、
+播报开关/间隔）；`instruction.object_labels` 维护 canonical label 与中文别名；
+拖鞋 canonical label 为 `slipper`，需要 YOLO-World/自定义 YOLO 输出同名 label。
+
 ---
 
 ## 7. 数据流
@@ -704,6 +767,8 @@ edge/Pi sensors → bridge_node → /center/synced_data
 | `/body/cliff_status` | `std_msgs/String` | 发布 | 悬崖左右/触发状态 JSON（1 Hz） |
 | `/arm/joint_states` | `sensor_msgs/JointState` | 订阅 | 机械臂回读（待接入） |
 | `/body/say` | `std_msgs/String` | 订阅 | 文本 -> TTS -> 蓝牙音箱 |
+| `/edge/voice_command` | `std_msgs/String` | 订阅 | 语音文本 -> 场景编排层；HTTP `/api/voice` 与外部 ASR 共用 |
+| `/center/scenario_status` | `std_msgs/String` | 发布 | 场景状态 JSON（1 Hz，TRANSIENT_LOCAL）；`GET /api/voice` 数据源 |
 | `/body/audio_status` | `std_msgs/String` | 发布 | 音箱状态 JSON（1 Hz） |
 | `/body/mic_status` | `std_msgs/String` | 发布 | HFP 麦克风状态 JSON（1 Hz） |
 | `/body/power_status` | `std_msgs/String` | 发布 | 树莓派电源状态 JSON（1 Hz） |
@@ -934,7 +999,7 @@ python3 tests/slam_nav_check.py          # 6/6
 ```bash
 cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 134 passed
+# 153 passed
 ```
 
 健康检查专项：
@@ -980,6 +1045,23 @@ python3 tests/slam_nav_check.py
 
 `fake_slam_robot.py` 模拟地图、激光、位姿、定位状态和目标检测，不依赖真实硬件。
 
+### 14.4 语音找东西联调
+
+```bash
+python3 tests/voice_scenario_check.py
+# RESULT: 3/3 passed
+```
+
+覆盖：
+
+1. 语音“找杯子” → `SearchObject` → `/body/say` “找到杯子了”；
+2. 语音“别找了” → 取消 Action → `/body/say` “好的，停止寻找”；
+3. `/center/scenario_status` 的 `searching/succeeded/canceled` 状态链。
+
+前置：`fake_slam_robot.py` + `edge_server.launch.py`（见 §12.2 / 14.3）。
+`tests/test_voice_scenario.py` 另有 9 项纯逻辑单测，覆盖解析、状态机、
+播报文案；`/api/voice` 的 raw/form/JSON 请求体在 `test_edge_web.py` 覆盖。
+
 ---
 
 ## 15. 当前限制与后续工作
@@ -1012,6 +1094,6 @@ python3 tests/slam_nav_check.py
 
 `edge_server` v2 在 v1 的 VLA 推理、安全、反向操作之上，补齐了 **SLAM 建图、ICM-20948 定位、
 Nav2/直航导航、目标检测/搜索/接近、速度仲裁、底盘串口桥、健康检查**。软件链路已通过
-134 项单元测试（含 29 项健康检查）、7 项 VLA/安全端到端、6 项 SLAM/导航/搜索联调；
+153 项单元测试（含 29 项健康检查、9 项语音场景、1 项 `/api/voice`）、7 项 VLA/安全端到端、6 项 SLAM/导航/搜索联调；
 实车落地还差 STM32 固件升级、硬件选型（见 `hardware/SLAM_NAV.md`）、现场标定，以及
 机械臂反馈话题接入。

@@ -408,6 +408,21 @@ class EdgeHttpApp:
             raise RuntimeError("麦克风功能未启用")
         return str(handler(str(name or "")))
 
+    # ------------------------------------------------------------- voice
+    def voice_command(self, text: str) -> dict:
+        """``POST /api/voice``：文本语音指令 -> ROS 场景节点。"""
+        handler = getattr(self.runtime, "handle_voice", None)
+        if handler is None:
+            raise RuntimeError("语音场景未启用")
+        return handler(str(text or ""))
+
+    def voice_payload(self) -> dict:
+        """``GET /api/voice``：当前场景状态快照。"""
+        handler = getattr(self.runtime, "voice_status", None)
+        if handler is None:
+            raise RuntimeError("语音场景未启用")
+        return handler()
+
     # ------------------------------------------------------------- power
     def power_payload(self) -> dict:
         handler = getattr(self.runtime, "power_status", None)
@@ -671,6 +686,51 @@ class _EdgeRequestHandler(BaseHTTPRequestHandler):
             self._send_json(200, payload)
             return
 
+        if path == "/api/voice":
+            body = self._read_body()
+            if body is None:
+                return
+            fields = self._parse_fields(body)
+            text = str(fields.get("text") or fields.get("command") or "").strip()
+            if not text:
+                raw = body.decode("utf-8", "replace").strip()
+                if raw and not raw.startswith("{") and "=" not in raw:
+                    text = raw
+            if not text:
+                self._send_json(
+                    400,
+                    app.error_payload(
+                        "empty_voice_command", "缺少语音文本 text/command"
+                    ),
+                )
+                return
+            if len(text) > 200:
+                self._send_json(
+                    400,
+                    app.error_payload("voice_command_too_long", "语音文本过长（>200）"),
+                )
+                return
+            try:
+                payload = app.voice_command(text)
+            except ValueError as exc:
+                self._send_json(
+                    400, app.error_payload("invalid_voice_request", str(exc))
+                )
+                return
+            except RuntimeError as exc:
+                self._send_json(
+                    503, app.error_payload("voice_unavailable", str(exc))
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("voice command failed")
+                self._send_json(
+                    500, app.error_payload("voice_failed", f"语音指令失败: {exc}")
+                )
+                return
+            self._send_json(200, payload)
+            return
+
         if path == "/api/modules/report":
             body = self._read_body()
             if body is None:
@@ -876,6 +936,27 @@ class _EdgeRequestHandler(BaseHTTPRequestHandler):
                 filename=os.path.basename(filename),
                 head_only=head_only,
             )
+            return
+
+        if path == "/api/voice":
+            try:
+                payload = app.voice_payload()
+            except RuntimeError as exc:
+                self._send_json(
+                    503,
+                    app.error_payload("voice_unavailable", str(exc)),
+                    head_only=head_only,
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("voice status failed")
+                self._send_json(
+                    500,
+                    app.error_payload("voice_failed", f"语音状态不可用: {exc}"),
+                    head_only=head_only,
+                )
+                return
+            self._send_json(200, payload, head_only=head_only)
             return
 
         if path == "/api/power":

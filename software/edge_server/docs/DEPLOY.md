@@ -205,7 +205,7 @@ cd /mnt/f/CODE/rush-mog/software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest -q tests
 ```
 
-当前基线：`134 passed`。
+当前基线：`153 passed`。
 
 ### 3.3 同步源码到 Pi
 

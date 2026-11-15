@@ -3,6 +3,7 @@
 RushMog智能系统包括语音控制系统，车体控制系统，视觉分析系统，远程控制中心系统、激光雷达系统、VLA推理系统、机械臂系统、SLAM/导航/目标搜索系统等核心子系统。
 - 语音控制系统，识别语音，将语音转换成执行指令，并将指令传给主控制系统，进行控制执行。(原计划采用asr-pro车载控制，但小车电机噪音较大，效果不好。改用终端控制。)
 - 语音播报/录音系统。Edge Server 自动连接蓝牙音箱（默认 NewMine，可切 HONOR AM510，BlueZ + PipeWire A2DP），通过 `espeak-ng` 中文 TTS 或本地音频文件播报；同一设备的 HFP 麦克风支持录音，录音时自动切 HFP、停止后恢复 A2DP。HTTP `/api/speaker/*`、`/api/microphone/*`、ROS `/body/say`、`/edge/audio` 和 dashboard 面板均可使用。
+- 语音找东西场景编排（L3）。说“帮我找一下拖鞋” → `POST /api/voice` / `/edge/voice_command` → `voice_scenario_node` 解析 → 调用 `/center/search_object` 自主探索、确认、接近 → `/body/say` 播报“找到拖鞋了”。支持“别找了”取消、目标切换、急停取消；“找/检测/导航”等能力在基础能力层，场景层只做编排。分层设计见 [edge_server/docs/ARCHITECTURE_LAYERS.md](edge_server/docs/ARCHITECTURE_LAYERS.md)，实现见 [edge_server/README.md](edge_server/README.md) §5.10。
 - 车体控制系统，STM32单板控制，接收语音指令、PS2手柄指令对小车行进、声音、机械臂进行控制执行。
 - 远程控制中心系统，由 Pi Edge Server 提供 Wi-Fi AP（hostapd）、PS2 手柄页面、摄像头 MJPEG 图传、底盘串口桥和模拟手柄指令；网页/API 与 ROS2 同机运行。
 - 激光雷达系统。`edge_server` 内置 `lidar_node`（LD19/D6 47 字节协议，UART4 `/dev/rush_lidar`）发布 `/scan` 和 `base_link→laser_link` TF；`slam_toolbox` 建图，`AMCL` 定位。硬件方案见 [hardware/SLAM_NAV.md](../hardware/SLAM_NAV.md)。

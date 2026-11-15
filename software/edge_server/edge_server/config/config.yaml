@@ -20,8 +20,31 @@ edge_server:
       person: ["人", "人员", "person"]
       box: ["盒子", "箱子", "box"]
       ball: ["球", "小球", "ball"]
+      slipper: ["拖鞋", "鞋子", "鞋", "slipper", "slippers", "shoe", "shoes"]
+      remote: ["遥控器", "遥控", "remote", "remote control"]
+      keys: ["钥匙", "key", "keys"]
+      bag: ["包", "背包", "书包", "bag", "backpack"]
+      phone: ["手机", "phone", "cell phone"]
+      tissue: ["纸巾", "抽纸", "tissue"]
     waypoints: {}
     home_pose: [0.0, 0.0, 0.0]
+
+  # 语音找东西场景（L3：voice_scenario_node）
+  # 只负责“听懂 -> 调搜索能力 -> 播报”，具体探索/导航/检测在能力层。
+  scenario:
+    voice_topic: "/edge/voice_command"
+    search_action: "/center/search_object"
+    say_topic: "/body/say"
+    status_topic: "/center/scenario_status"
+    status_rate_hz: 1.0
+    max_duration_sec: 300.0
+    min_confidence: 0.5
+    standoff_distance: 0.6
+    explore_if_not_found: true
+    save_map: false
+    announce_start: true
+    announce_milestones: true
+    announce_progress_sec: 30.0
 
   action_generator:
     max_linear_speed: 0.8
@@ -398,6 +421,7 @@ edge_server:
       - reverse_operation_node
       - safety_manager_node
       - task_manager_node
+      - voice_scenario_node
       - health_monitor_node
     http:
       enabled: true

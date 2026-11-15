@@ -1246,6 +1246,81 @@ paths:
               schema:
                 $ref: '#/components/schemas/CenterErrorResponse'
 
+  /api/voice:
+    get:
+      tags: [Edge Server]
+      summary: 语音找东西场景状态
+      description: |
+        返回 Edge Server 缓存的 `/center/scenario_status` 最近一帧，以及
+        `/edge/voice_command` 的在线/近一次文本。网页用它在语音寻找时显示
+        “正在找 / 找到了 / 没找到”。
+      operationId: edgeVoiceStatus
+      responses:
+        '200':
+          description: 语音场景状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgeVoiceStatus'
+        '503':
+          description: 语音场景功能未启用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+    post:
+      tags: [Edge Server]
+      summary: 发送语音文本（找东西 / 取消）
+      description: |
+        语音识别在手机/终端完成，这里只接收文本。支持 raw `text/plain`、
+        form `text=...`、JSON `{"text": "..."}` 三种请求体。文本会发布到
+        `/edge/voice_command`，由 `voice_scenario_node` 解析并调用
+        `/center/search_object`；找到后通过 `/body/say` 播报。
+
+        示例：
+        - `帮我找一下拖鞋` → 搜索 `slipper`
+        - `拖鞋在哪` → 搜索 `slipper`
+        - `别找了` / `停止寻找` → 取消当前搜索
+      operationId: edgeVoiceCommand
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+              example: 帮我找一下拖鞋
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: {type: string, example: 帮我找一下拖鞋}
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: {type: string, example: 帮我找一下拖鞋}
+      responses:
+        '200':
+          description: 指令已发送
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgeVoiceCommandResponse'
+        '400':
+          description: 文本为空或过长
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '503':
+          description: 语音场景功能未启用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
   /api/modules/report:
     post:
       tags: [Edge Server]
@@ -2310,6 +2385,56 @@ components:
         error: {type: string}
         checked_ms: {type: integer, format: int64}
         age_ms: {type: integer}
+
+    EdgeVoiceScenario:
+      type: object
+      description: 语音找东西场景状态（来自 /center/scenario_status）
+      properties:
+        state:
+          type: string
+          enum: [idle, searching, succeeded, failed, canceled]
+        active: {type: boolean}
+        target_label: {type: string, example: slipper}
+        display_name: {type: string, example: 拖鞋}
+        detail: {type: string, example: "explore frontier (1.20, 0.80)"}
+        search_state:
+          type: string
+          example: exploring
+        elapsed_sec: {type: number, example: 12.4}
+        confidence: {type: number, example: 0.87}
+        explored_ratio: {type: number, example: 0.42}
+        last_utterance: {type: string, example: 帮我找一下拖鞋}
+
+    EdgeVoiceStatus:
+      type: object
+      required: [ok, scenario_online]
+      properties:
+        ok: {type: boolean, enum: [true]}
+        topic: {type: string, example: /edge/voice_command}
+        status_topic: {type: string, example: /center/scenario_status}
+        scenario_online: {type: boolean}
+        subscribers: {type: integer}
+        last_text: {type: string, example: 帮我找一下拖鞋}
+        age_ms: {type: integer, example: 120}
+        scenario:
+          allOf:
+            - $ref: '#/components/schemas/EdgeVoiceScenario'
+          nullable: true
+
+    EdgeVoiceCommandResponse:
+      type: object
+      required: [ok, accepted, text]
+      properties:
+        ok: {type: boolean, enum: [true]}
+        accepted: {type: boolean}
+        text: {type: string, example: 帮我找一下拖鞋}
+        message: {type: string, example: 语音指令已发送}
+        scenario_online: {type: boolean}
+        subscribers: {type: integer}
+        scenario:
+          allOf:
+            - $ref: '#/components/schemas/EdgeVoiceScenario'
+          nullable: true
 
     EdgeMicrophoneStatus:
       type: object

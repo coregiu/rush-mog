@@ -12,7 +12,7 @@ Use a phone as a PS2 emulator to drive the car forward, backward, turn left, tur
 Monitor, automatically identify, and classify objects through the onboard camera, and view the live feed in real time on the phone-based PS2 controller interface.
 
 #### (3) SLAM Mapping, Autonomous Navigation, and Automatic Target Seeking
-Build a 2D occupancy grid with a 2D LiDAR + wheel encoders + ICM-20948, and localize with AMCL/EKF. Navigate to goals with Nav2 or the built-in direct controller. Search for target objects using camera detection + LiDAR ranging + frontier exploration, return the target pose, and approach it while maintaining a configured standoff distance. Map save/load, mapping missions, exploration missions, and target-search missions are supported.
+Build a 2D occupancy grid with a 2D LiDAR + wheel encoders + ICM-20948, and localize with AMCL/EKF. Navigate to goals with Nav2 or the built-in direct controller. Search for target objects using camera detection + LiDAR ranging + frontier exploration, return the target pose, and approach it while maintaining a configured standoff distance. Map save/load, mapping missions, exploration missions, and target-search missions are supported. Voice-initiated search is supported: say "find my slippers", the scenario layer invokes the search capability, and the robot announces "found the slippers" over TTS; say "stop looking" to cancel. See [layered architecture](software/edge_server/docs/ARCHITECTURE_LAYERS.md).
 
 #### (4) Object Handling
 Use the VLA model to control vehicle movement: search for, lock onto, and track target objects. Use the robotic arm to grasp, transfer, and place objects within a designated area, implementing object transport. Transport paths can be planned or learned automatically.

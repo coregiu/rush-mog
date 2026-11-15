@@ -256,7 +256,13 @@ edge_server:
     depth_max_m: 8.0
     depth_min_pixels: 5
     prefer_depth: true
-    detector: "color"               # 接入 YOLO 后改为 yolo 并配置 model_path
+    # color = HSV 色块（默认，无模型依赖）
+    # yolo  = 固定类别模型；yolo_world = 开放词表，可检测“拖鞋”等 COCO 外类别
+    detector: "color"
+    model_path: ""                  # yolo/yolo_world 权重，例如 yolov8s-worldv2.pt
+    # yolo_world 启动时注册的类别；必须与 instruction.object_labels 的
+    # canonical label 一致（拖鞋 -> slipper）。
+    open_vocab_labels: ["cup", "bottle", "slipper", "remote", "keys", "bag", "phone"]
     publish_rate: 10.0
     min_confidence: 0.5
     lidar_window_deg: 6.0
@@ -284,6 +290,10 @@ edge_server:
         min_area_ratio: 0.002
         max_area_ratio: 0.5
         real_height_m: 0.22
+      # 拖鞋用于 YOLO-World/自定义 YOLO；颜色检测器没有 HSV 阈值时自动跳过。
+      # real_height_m 用于没有深度/雷达时的 bbox 高度估距。
+      slipper:
+        real_height_m: 0.08
 
   # ---------------------------------------------------------------- 搜索
   search:
@@ -314,6 +324,12 @@ edge_server:
       person: ["人", "人员", "person"]
       box: ["盒子", "箱子", "box"]
       ball: ["球", "小球", "ball"]
+      slipper: ["拖鞋", "鞋子", "鞋", "slipper", "slippers", "shoe", "shoes"]
+      remote: ["遥控器", "遥控", "remote", "remote control"]
+      keys: ["钥匙", "key", "keys"]
+      bag: ["包", "背包", "书包", "bag", "backpack"]
+      phone: ["手机", "phone", "cell phone"]
+      tissue: ["纸巾", "抽纸", "tissue"]
     waypoints:
       kitchen:
         x: 1.2
@@ -331,6 +347,25 @@ edge_server:
         yaw: 1.57
         aliases: ["客厅", "living room"]
     home_pose: [0.0, 0.0, 0.0]
+
+  # ---------------------------------------------------------------- 语音场景
+  # 分层：web/ASR -> /edge/voice_command -> voice_scenario_node(L3)
+  #       -> /center/search_object(L2) -> 探索/导航/检测/接近 -> /body/say
+  # 说明：target_label 必须与检测器输出一致；拖鞋的 canonical label 是 slipper。
+  scenario:
+    voice_topic: "/edge/voice_command"
+    search_action: "/center/search_object"
+    say_topic: "/body/say"
+    status_topic: "/center/scenario_status"
+    status_rate_hz: 1.0
+    max_duration_sec: 300.0
+    min_confidence: 0.5
+    standoff_distance: 0.6
+    explore_if_not_found: true
+    save_map: false
+    announce_start: true
+    announce_milestones: true
+    announce_progress_sec: 30.0
 
   # ---------------------------------------------------------------- 安全
   safety:
@@ -430,6 +465,7 @@ edge_server:
       - navigation_node
       - target_detector_node
       - object_search_node
+      - voice_scenario_node
       - edge_server_node
       - health_monitor_node
     http:

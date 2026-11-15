@@ -27,17 +27,81 @@ DEFAULT_OBJECT_LABELS: Dict[str, List[str]] = {
     "person": ["人", "人员", "person"],
     "box": ["盒子", "箱子", "box"],
     "ball": ["球", "小球", "ball"],
+    "slipper": ["拖鞋", "鞋子", "鞋", "slipper", "slippers", "shoe", "shoes"],
+    "remote": ["遥控器", "遥控", "remote", "remote control"],
+    "keys": ["钥匙", "key", "keys"],
+    "bag": ["包", "背包", "书包", "bag", "backpack"],
+    "phone": ["手机", "phone", "cell phone"],
+    "tissue": ["纸巾", "抽纸", "tissue"],
 }
 
 DEFAULT_WAYPOINTS: Dict[str, Tuple[float, float, float]] = {}
 
 _MAP_WORDS = ("建图", "地图", "slam", "mapping", "map")
 _EXPLORE_WORDS = ("探索", "巡检", "explore", "patrol")
-_SEARCH_WORDS = ("找", "寻找", "搜索", "find", "search", "look for")
+_SEARCH_WORDS = (
+    "找",
+    "寻找",
+    "搜索",
+    "在哪",
+    "在哪里",
+    "在哪儿",
+    "find",
+    "search",
+    "look for",
+    "where is",
+)
 _RETURN_WORDS = ("回家", "返回", "回来", "return home", "go home", "home")
 _NAV_WORDS = ("导航", "前往", "去", "navigate", "goto", "go to")
 
 _NUM = r"(-?\d+(?:\.\d+)?)"
+
+# 未命中 object_labels 时的兜底：从“找一下遥控器”“遥控器在哪”里取 label。
+# 取出来的 label 会直接下发给 /center/search_object，因此检测器必须能输出
+# 同名 label；未知目标请优先在 instruction.object_labels 里配 canonical label。
+_FREE_LABEL_PATTERNS = (
+    re.compile(
+        r"(?:帮我|请|麻烦)?(?:找一下|找一找|寻找一下|寻找|搜索一下|搜索|找)\s*"
+        r"([\u4e00-\u9fa5A-Za-z0-9_\-]{1,24})"
+    ),
+    re.compile(r"([\u4e00-\u9fa5A-Za-z0-9_\-]{1,24})(?:在哪|在哪里|在哪儿)"),
+    re.compile(
+        r"(?:find|look for|search for|where is)\s+"
+        r"(?:my|the|a|an)?\s*([A-Za-z0-9_\- ]{1,32})"
+    ),
+)
+_FREE_LABEL_PREFIXES = (
+    "一下",
+    "一找",
+    "一个",
+    "一只",
+    "一双",
+    "个",
+    "只",
+    "双",
+    "我的",
+    "我",
+    "的",
+    "my ",
+    "the ",
+    "a ",
+    "an ",
+)
+_FREE_LABEL_SUFFIXES = ("在哪里", "在哪", "在哪儿", "呢", "吗", "啊", "please")
+_FREE_LABEL_STOPWORDS = {
+    "",
+    "东西",
+    "物品",
+    "什么",
+    "啥",
+    "一下",
+    "一找",
+    "它",
+    "他",
+    "她",
+    "something",
+    "anything",
+}
 
 
 @dataclass
@@ -161,9 +225,47 @@ class InstructionParser:
         return MissionSpec()
 
     def extract_label(self, text: str) -> str:
+        normalized = (text or "").strip().lower()
         for label, aliases in self.object_labels.items():
-            if any(alias and alias in text for alias in aliases):
+            if any(alias and alias in normalized for alias in aliases):
                 return label
+        return self._free_label(normalized)
+
+    def display_name(self, label: str) -> str:
+        """给播报用的中文名；没有中文别名时退回 canonical label。"""
+        aliases = self.object_labels.get(str(label or "")) or []
+        for alias in aliases:
+            if re.search(r"[\u4e00-\u9fff]", alias):
+                return alias
+        return aliases[0] if aliases else str(label or "")
+
+    def _free_label(self, text: str) -> str:
+        """从自由说法里抽取一个可能的目标 label（供检测器同名匹配）。"""
+        for pattern in _FREE_LABEL_PATTERNS:
+            match = pattern.search(text)
+            if match is None:
+                continue
+            label = match.group(1).strip().strip("，。,.!?！？；;：:")
+            changed = True
+            while changed:
+                changed = False
+                for prefix in _FREE_LABEL_PREFIXES:
+                    if label.startswith(prefix):
+                        label = label[len(prefix) :].strip()
+                        changed = True
+                for suffix in _FREE_LABEL_SUFFIXES:
+                    if label.endswith(suffix):
+                        label = label[: -len(suffix)].strip()
+                        changed = True
+            if label in _FREE_LABEL_STOPWORDS:
+                continue
+            if not label:
+                continue
+            # 只保留一个物品名；英文统一小写，中文原样。
+            label = re.sub(r"\s+", " ", label).strip()
+            if re.search(r"[\u4e00-\u9fff]", label):
+                return label[:24]
+            return label.lower()[:32]
         return ""
 
     def _extract_waypoint(self, text: str) -> Optional[str]:
