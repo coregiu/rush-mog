@@ -504,7 +504,7 @@
       </div>
 
       <div class="monitor-grid">
-        <div class="monitor-block monitor-command">
+        <div class="monitor-block monitor-command monitor-current">
           <div class="monitor-head">
             <span>当前指令</span>
             <span class="status-chip status-unknown" id="ops-source">空闲</span>
@@ -529,24 +529,6 @@
               <span>底盘 <b id="ops-body">--</b></span>
             </div>
           </div>
-
-          <form id="scenario-form" class="scenario-exec" autocomplete="off">
-            <div class="scenario-head">
-              <span>执行场景指令</span>
-              <span class="monitor-tag" id="scenario-result">待执行</span>
-            </div>
-            <div class="scenario-input">
-              <input id="scenario-text" type="text" maxlength="200"
-                     placeholder="输入指令，例如：找拖鞋 / 去厨房 / 建图 / 别找了">
-              <button class="btn btn-primary" type="submit">执行</button>
-            </div>
-            <div class="scenario-quick" id="scenario-quick">
-              <button type="button" class="scenario-chip" data-text="找拖鞋">找拖鞋</button>
-              <button type="button" class="scenario-chip" data-text="别找了">别找了</button>
-              <button type="button" class="scenario-chip" data-text="去厨房">去厨房</button>
-              <button type="button" class="scenario-chip" data-text="建图">建图</button>
-            </div>
-          </form>
         </div>
 
         <div class="monitor-block monitor-video" id="video-panel" data-state="waiting">
@@ -588,6 +570,26 @@
             <span id="radar-meta">--</span>
           </div>
         </div>
+
+        <div class="monitor-block monitor-command monitor-scenario">
+          <form id="scenario-form" class="scenario-exec" autocomplete="off">
+              <div class="scenario-head">
+                <span>执行场景指令</span>
+                <span class="monitor-tag" id="scenario-result">待执行</span>
+              </div>
+              <div class="scenario-input">
+                <input id="scenario-text" type="text" maxlength="200"
+                      placeholder="输入指令，例如：找拖鞋 / 去厨房 / 建图 / 别找了">
+                <button class="btn btn-primary" type="submit">执行</button>
+              </div>
+              <div class="scenario-quick" id="scenario-quick">
+                <button type="button" class="scenario-chip" data-text="找拖鞋">找拖鞋</button>
+                <button type="button" class="scenario-chip" data-text="别找了">别找了</button>
+                <button type="button" class="scenario-chip" data-text="去厨房">去厨房</button>
+                <button type="button" class="scenario-chip" data-text="建图">建图</button>
+              </div>
+            </form>
+          </div>
       </div>
     </section>
 
