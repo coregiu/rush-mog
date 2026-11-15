@@ -4,7 +4,7 @@
     发布  /center/health          custom_msgs/HealthStatus（TRANSIENT_LOCAL，1 Hz）
     服务  /center/healthcheck     custom_msgs/HealthCheck
     HTTP  /ros/health 等         供同机 Edge Server/dashboard 等非 ROS 调用方使用
-                                 契约见 software/edge_server/HEALTHCHECK.md
+                                 契约见 software/edge_server/docs/HEALTHCHECK.md
 
 监控范围：
     - 传感器/执行器：相机、雷达、IMU、麦克风、音箱、机械臂、底盘、电池、里程计；

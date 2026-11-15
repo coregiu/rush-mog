@@ -1,0 +1,32 @@
+[Unit]
+Description=Rush-MOG Center Server (SmolVLA HTTP inference + Edge handshake)
+Documentation=file:///opt/rush-mog-center/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 建议创建独立用户：sudo useradd -r -m -d /var/lib/rush-mog-center center
+User=center
+Group=center
+WorkingDirectory=/opt/rush-mog-center
+EnvironmentFile=-/etc/rush-mog/center.env
+# 启动即加载模型：首请求更快，但会占显存；不需要可去掉 --warmup
+ExecStart=/opt/rush-mog-center/.venv/bin/python -m center_server \
+    --config /opt/rush-mog-center/config.yaml --warmup
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+KillSignal=SIGTERM
+
+# 基础加固（模型/HF 缓存放 /opt 或 /var/lib 时无需额外 ReadWritePaths）
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

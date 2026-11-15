@@ -3,11 +3,11 @@
 RushMog智能系统包括语音控制系统，车体控制系统，视觉分析系统，远程控制中心系统、激光雷达系统、VLA推理系统、机械臂系统、SLAM/导航/目标搜索系统等核心子系统。
 - 语音控制系统，识别语音，将语音转换成执行指令，并将指令传给主控制系统，进行控制执行。(原计划采用asr-pro车载控制，但小车电机噪音较大，效果不好。改用终端控制。)
 - 语音播报/录音系统。Edge Server 自动连接蓝牙音箱（默认 NewMine，可切 HONOR AM510，BlueZ + PipeWire A2DP），通过 `espeak-ng` 中文 TTS 或本地音频文件播报；同一设备的 HFP 麦克风支持录音，录音时自动切 HFP、停止后恢复 A2DP。HTTP `/api/speaker/*`、`/api/microphone/*`、ROS `/body/say`、`/edge/audio` 和 dashboard 面板均可使用。
-- 语音找东西场景编排（L3）。说“帮我找一下拖鞋” → `POST /api/voice` / `/edge/voice_command` → `voice_scenario_node` 解析 → 调用 `/center/search_object` 自主探索、确认、接近 → `/body/say` 播报“找到拖鞋了”。支持“别找了”取消、目标切换、急停取消；“找/检测/导航”等能力在基础能力层，场景层只做编排。分层设计见 [edge_server/docs/ARCHITECTURE_LAYERS.md](edge_server/docs/ARCHITECTURE_LAYERS.md)，实现见 [edge_server/README.md](edge_server/README.md) §5.10。
+- 语音找东西场景编排（L3）。说“帮我找一下拖鞋” → `POST /api/voice` / `/edge/voice_command` → `voice_scenario_node` 解析 → 调用 `/center/search_object` 自主探索、确认、接近 → `/body/say` 播报“找到拖鞋了”。支持“别找了”取消、目标切换、急停取消；“找/检测/导航”等能力在基础能力层，场景层只做编排。分层设计见 [edge_server/docs/design/DESIGN.md](edge_server/docs/design/DESIGN.md)，实现见 [edge_server/README.md](edge_server/README.md) §5.10。
 - 车体控制系统，STM32单板控制，接收语音指令、PS2手柄指令对小车行进、声音、机械臂进行控制执行。
 - 远程控制中心系统，由 Pi Edge Server 提供 Wi-Fi AP（hostapd）、PS2 手柄页面、摄像头 MJPEG 图传、底盘串口桥和模拟手柄指令；网页/API 与 ROS2 同机运行。
 - 激光雷达系统。`edge_server` 内置 `lidar_node`（LD19/D6 47 字节协议，UART4 `/dev/rush_lidar`）发布 `/scan` 和 `base_link→laser_link` TF；`slam_toolbox` 建图，`AMCL` 定位。硬件方案见 [hardware/SLAM_NAV.md](../hardware/SLAM_NAV.md)。
-- VLA推理系统。由 `software/center_server` 的 SmolVLA HTTP 服务执行真实策略推理；机载 ROS 负责采集、安全门控与执行，规则桩保留为降级路径。
+- VLA推理系统。由 `software/center_server` 的 SmolVLA HTTP 服务执行真实策略推理；Center 启动后向 Edge 握手上报 IP/端口，机载 `vla_inference_node` 经 `GET /api/center` 自动发现并异步调用，Center 不可用时规则桩降级。部署见 [center_server/deploy/README.md](center_server/deploy/README.md)。
 - 机械臂系统。PCA9685 驱动，`/arm/trajectory` 接口；抓取/放置轨迹待 IK 接入。
 - 深度相机系统。Astra Pro 经 `orbbec_camera` 输出 RGB/深度，`target_detector_node` 优先用深度做目标测距；`edge_server` dashboard 提供深度相机健康卡片。
 - SLAM/导航/目标搜索系统。由 `software/edge_server` 的 ROS 包 `edge_server` 实现：建图、定位健康度、Nav2/直航、目标检测、前沿探索、目标确认与接近。
@@ -70,8 +70,8 @@ RushMog智能系统包括语音控制系统，车体控制系统，视觉分析�
 
 
 ## 3.3 远程控制子系统
-- [Pi Edge Server / ROS 包](ros/README.md)
-- [数字孪生监控页](ros/web/dashboard.html)（`/dashboard.html`）
+- [Pi Edge Server / ROS 包](edge_server/README.md)
+- [数字孪生监控页](edge_server/web/dashboard.html)（`/dashboard.html`）
 - [ROS/CENTER 自动接入与上报](tools/README.md)
 
 远程控制子系统功能：
@@ -82,8 +82,8 @@ RushMog智能系统包括语音控制系统，车体控制系统，视觉分析�
 - 5 模块注册/上报/代理 API，展示 EDGE（含 ROS）/CENTER 状态并支持参数修改
 
 ## 3.4 中心推理子系统
-- 机载 ROS 包（SLAM/导航/搜索/安全/健康检查）：[ros/README.md](ros/README.md)、[详细设计](ros/DESIGN.md)、[健康检查契约](ros/HEALTHCHECK.md)
-- 中心 SmolVLA HTTP 推理服务：[center_server/README.md](center_server/README.md)、[服务设计](center_server/DESIGN.md)
+- 机载 ROS 包（SLAM/导航/搜索/安全/健康检查）：[edge_server/README.md](edge_server/README.md)、[设计文档](edge_server/docs/design/DESIGN.md)、[部署与运维](edge_server/docs/deploy/DEPLOY.md)、[健康检查契约](edge_server/docs/HEALTHCHECK.md)
+- 中心 SmolVLA HTTP 推理服务：[center_server/README.md](center_server/README.md)、[服务设计](center_server/DESIGN.md)、[部署与发布](center_server/deploy/README.md)
 
 中心推理子系统功能：
 - 1 接收端侧/机载多模态数据（图像、激光、音频、里程计、IMU、地图、定位）
@@ -92,10 +92,12 @@ RushMog智能系统包括语音控制系统，车体控制系统，视觉分析�
 - 4 目标检测、前沿探索、目标确认与接近
 - 5 多源速度仲裁、安全门控、反向操作
 - 6 中心服务与机载 ROS 通过 HTTP 解耦，可分别部署和降级
-- 7 节点/设备健康检查，HTTP `:8090/ros/health` 供同机 Edge Server/dashboard 代理
+- 7 Center 启动握手 → Edge 记录 IP/端口 → 机载 VLA 节点自动发现并调用
+- 8 节点/设备健康检查，HTTP `:8090/ros/health` 供同机 Edge Server/dashboard 代理
 
-验证：ROS 包 94 项单元测试（含 29 项健康检查）、7/7 VLA/安全端到端、
-6/6 SLAM/导航/搜索联调；`center_server` 服务 38 项单元/HTTP 测试（不依赖 GPU）。
+验证：ROS 包 179 项测试（含 26 项握手/远程 VLA、29 项健康检查）、
+7/7 VLA/安全端到端、6/6 SLAM/导航/搜索联调；
+`center_server` 服务 55 项单元/HTTP 测试（不依赖 GPU）。
 
 
 # 4 使用的相关工具软件：

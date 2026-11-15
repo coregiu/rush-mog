@@ -45,6 +45,33 @@ edge_server:
     tf_y: 0.0
     tf_z: 0.18
     tf_yaw_deg: 0.0
+
+  # VLA：优先调用 Center Server 的真实 SmolVLA，失败回退规则桩。
+  # Center 启动后向 Edge 握手（web 端口 80 的 /api/center），这里从注册表发现地址。
+  vla_engine:
+    backend: "auto"                  # auto | remote | stub
+    inference_rate: 10
+    confidence_threshold: 0.6
+    model_name: "rush-mog-smolvla"
+    remote:
+      enabled: true
+      discovery_url: "http://127.0.0.1/api/center"
+      discovery_interval_sec: 5.0
+      discovery_timeout_sec: 1.0
+      host: ""                       # 可选：直接写 Center IP，跳过发现
+      port: 8000
+      api_key: ""
+      timeout_sec: 1.5
+      max_rate_hz: 5.0
+      chunk_size: 1
+      image_key: "front"
+      color_order: "bgr"
+      state_joint_names: []
+      confidence: 0.9
+      turn_threshold: 0.15
+      linear_threshold: 0.02
+      retry_after_sec: 5.0
+      fallback_to_rules: true
   base:
     enabled: true
     transport: "edge_serial"         # edge_serial | serial_binary | esp32_http(legacy)
@@ -435,7 +462,7 @@ edge_server:
   # 健康检查（health_monitor_node）
   #   GET  http://127.0.0.1:8090/ros/health   -> Edge Server/dashboard
   #   ROS  /center/health + /center/healthcheck
-  # 接口契约与字段语义见 software/edge_server/HEALTHCHECK.md。
+  # 接口契约与字段语义见 software/edge_server/docs/HEALTHCHECK.md。
   #
   # 已实现：speaker -> /body/audio_status，microphone -> /body/mic_status
   # 仍在缺口（状态 unknown，不影响整体 ok）：

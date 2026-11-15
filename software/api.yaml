@@ -8,7 +8,7 @@ info:
 
     | 模块 | 传输 | 入口 | 说明 |
     | --- | --- | --- | --- |
-    | **Edge Server** | HTTP | `http://192.168.4.1`（80） | 树莓派 Edge Server：网页手柄、数字孪生、模块上报/代理、静态资源、MJPEG 图传、STM32 串口桥；内置 ROS 健康网关（`:8090`） |
+    | **Edge Server** | HTTP | `http://192.168.3.26`（80） | 树莓派 Edge Server：网页手柄、数字孪生、模块上报/代理、静态资源、MJPEG 图传、STM32 串口桥；内置 ROS 健康网关（`:8090`） |
     | **Center Server** | HTTP | `http://127.0.0.1:8000` | SmolVLA 多模态推理、健康检查、模型/参数信息 |
     | **Body Control** | UART | STM32 USART3，115200 8N1 | 树莓派 Edge Server → STM32 的 ASCII 运动/音频命令，无 ACK |
 
@@ -17,7 +17,7 @@ info:
     > ROS 健康网关已并入 Edge Server：`health_monitor_node` 默认在
     > `127.0.0.1:8090` 提供 `/ros/*` 接口，80 端口通过
     > `/api/modules/ros/health|params` 代理；完整契约见
-    > `software/edge_server/HEALTHCHECK.md`。
+    > `software/edge_server/docs/HEALTHCHECK.md`。
     >
     > **UART 说明**：OpenAPI/Swagger 只原生描述 HTTP。本文档用
     > `/body-control/uart/command` 作为**虚拟归档路径**，并在
@@ -27,7 +27,7 @@ info:
     详细文档：
     - Edge Server：`software/edge_server/README.md`（`edge_server_node`）
     - Center Server：`software/center_server/README.md`、`DESIGN.md`
-    - ROS 健康网关（Edge Server 内置）：`software/edge_server/HEALTHCHECK.md`
+    - ROS 健康网关（Edge Server 内置）：`software/edge_server/docs/HEALTHCHECK.md`
     - Body Control：`software/body_control/README.md`
 
   license:
@@ -35,7 +35,7 @@ info:
     url: https://www.apache.org/licenses/LICENSE-2.0.html
 
 servers:
-  - url: "http://192.168.4.1"
+  - url: "http://192.168.3.26"
     description: Pi Edge Server（树莓派 AP，HTTP 80）
 
 # Edge/UART/健康检查默认匿名；Center 受保护端点在各 operation 上覆盖为可选鉴权
@@ -45,7 +45,7 @@ tags:
   - name: Edge Server
     description: |
       树莓派 4B/5 车载上位机（Edge Server 与 ROS 2 同机）。手机/PC 连接
-      `RUSH-MOG` Wi-Fi（树莓派 hostapd）后访问 `http://192.168.4.1`。
+      `RUSH-MOG` Wi-Fi（树莓派 hostapd）后访问 `http://192.168.3.26`。
       80 端口负责网页/静态文件/控制/状态/模块监控 API，8080 端口负责
       ROS 相机 MJPEG 图传；控制命令通过 Pi UART 直接发给 STM32。
 
@@ -54,11 +54,15 @@ tags:
       `/api/modules/report` 上报，页面通过 `/api/modules/{id}/health|params`
       由 Edge Server 代理访问模块。`ros` 是本地保留子系统 ID，不允许外部上报。
 
+      CENTER 启动时调用 `POST /api/center/handshake`，Edge 记录其 IP/端口与
+      `infer_url`；机载 VLA 节点通过 `GET /api/center` 发现推理地址。注册表在
+      内存中，Center 每 10s 心跳续约，Edge 重启后自动恢复。
+
       内置 ROS 健康网关：`health_monitor_node` 默认监听 `127.0.0.1:8090`，
       提供 `/ros/health`、`/ros/health/devices/{id}`、`/ros/params`、
       `/ros/healthz`、`/ros/readyz`；80 端口通过
       `/api/modules/ros/health|params` 代理。完整契约见
-      `software/edge_server/HEALTHCHECK.md`。
+      `software/edge_server/docs/HEALTHCHECK.md`。
     x-docs: "./edge_server/README.md"
   - name: Center Server
     description: |
@@ -70,6 +74,10 @@ tags:
       中心服务的 `GET /` 服务信息因与 Edge Server 的 `GET /` 冲突，
       不单独占用 path，见 `x-center-server.root_response`；CORS 见
       `x-center-server.cors`。
+
+      Center 启动并绑定端口后向 Edge 发送 `POST /api/center/handshake`
+      （之后每 10s heartbeat），上报本机 IP、推理端口与模型能力；
+      机载 VLA 节点据此发现 `/v1/infer`，不需要手工配置 IP。
     x-docs: "./center_server/README.md"
   - name: Body Control (UART)
     description: |
@@ -92,7 +100,7 @@ x-modules:
   - id: edge_server
     name: Edge Server
     transport: http
-    base_url: "http://192.168.4.1"
+    base_url: "http://192.168.3.26"
     ports:
       http: 80
       mjpeg: 8080
@@ -107,7 +115,7 @@ x-modules:
       - "edge_server/web/"
     docs:
       - "edge_server/README.md"
-      - "edge_server/HEALTHCHECK.md"
+      - "edge_server/docs/HEALTHCHECK.md"
   - id: center_server
     name: Center Server
     transport: http
@@ -127,8 +135,8 @@ x-modules:
 x-edge-network:
   mode: AP
   ssid: "RUSH-MOG"
-  ip: "192.168.4.1"
-  gateway: "192.168.4.1"
+  ip: "192.168.3.26"
+  gateway: "192.168.3.26"
   subnet: "255.255.255.0"
   channel: 6
   max_clients: 4
@@ -136,7 +144,7 @@ x-edge-network:
     http: 80
     mjpeg: 8080
     ros_health: 8090
-  note: "树莓派 hostapd 提供该 AP（或接入现有局域网）；手机连上后打开 http://192.168.4.1 进入 PS2 手柄页面。"
+  note: "树莓派 hostapd 提供该 AP（或接入现有局域网）；手机连上后打开 http://192.168.3.26 进入 PS2 手柄页面。"
 
 x-edge-http:
   implementation: "edge_server/edge_server/edge_web.py（stdlib ThreadingHTTPServer）"
@@ -269,7 +277,7 @@ x-edge-ros-health:
   auth:
     optional: true
     note: "health.http.api_key 非空时，/ros/health 与 /ros/params 需要 Bearer 或 X-API-Key；/ros/healthz、/ros/readyz 保持匿名。"
-  docs: "edge_server/HEALTHCHECK.md"
+  docs: "edge_server/docs/HEALTHCHECK.md"
 
 x-center-server:
   service: "rush-mog-center-server"
@@ -676,7 +684,7 @@ paths:
         页面实际使用 `http://<host>:8080/stream`。
       operationId: edgeMjpegStream
       servers:
-        - url: "http://192.168.4.1:8080"
+        - url: "http://192.168.3.26:8080"
           description: Edge Server MJPEG 端口
       responses:
         '200':
@@ -705,7 +713,7 @@ paths:
             Location:
               schema:
                 type: string
-              example: "http://192.168.4.1:8080/stream"
+              example: "http://192.168.3.26:8080/stream"
           content:
             text/plain:
               schema:
@@ -949,7 +957,7 @@ paths:
                 mic_recording: false
                 power_status: ok
                 power_ok: true
-                ip: "192.168.4.1"
+                ip: "192.168.3.26"
                 hostname: "rush-mog"
 
   /api/modules:
@@ -1359,6 +1367,71 @@ paths:
               schema:
                 $ref: '#/components/schemas/CenterErrorResponse'
 
+  /api/center/handshake:
+    post:
+      tags: [Edge Server]
+      summary: CENTER 启动/心跳握手
+      description: |
+        Center Server 启动并绑定 HTTP 端口后调用；之后每 `interval_sec`
+        （默认 10s）以 `heartbeat` 续约。Edge 以 TCP 连接来源 IP 为准记录地址，
+        忽略 payload 里的 `ip`，并按端口/路径生成 `infer_url`，供机载
+        `vla_inference_node` 通过 `GET /api/center` 发现。
+
+        也兼容 `POST /api/modules/report`（Center 配置 `handshake.path` 可切换）；
+        本接口等价于强制 `module=center` 的上报。支持 JSON 或表单。
+      operationId: edgeCenterHandshake
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CenterHandshake'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CenterHandshake'
+      responses:
+        '200':
+          description: 已记录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterHandshakeAck'
+        '400':
+          description: 端口/路径/地址非法（必须是本机或内网地址）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '507':
+          description: 注册表已满
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /api/center:
+    get:
+      tags: [Edge Server]
+      summary: CENTER 握手快照（VLA 地址发现）
+      description: |
+        返回最近一次 CENTER 握手记录的 IP、端口、`base_url`、`infer_url`、
+        health/params 地址、模型 `meta` 与新鲜度。未握手时 404；机载客户端
+        应继续使用规则桩，等 Center 下一次 heartbeat。
+      operationId: edgeCenterEndpoint
+      responses:
+        '200':
+          description: CENTER 已握手
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgeCenterEndpoint'
+        '404':
+          description: CENTER 尚未握手
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
   /api/modules/{module_id}:
     get:
       tags: [Edge Server]
@@ -1671,6 +1744,58 @@ paths:
         '503':
           $ref: '#/components/responses/CenterModelUnavailable'
 
+  /v1/handshake:
+    servers:
+      - url: "http://127.0.0.1:8000"
+        description: Center Server（默认端口）
+    get:
+      tags: [Center Server]
+      summary: Edge 握手状态
+      description: |
+        返回握手目标、连接状态、尝试/成功/失败次数、最近错误与最近一次
+        Edge 响应（含 `infer_url`）。`GET` 只读状态，不触发网络请求。
+      operationId: centerHandshakeStatus
+      security:
+        - {}
+        - centerBearer: []
+        - centerApiKey: []
+      responses:
+        '200':
+          description: 握手状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterHandshakeStatusResponse'
+        '401':
+          $ref: '#/components/responses/CenterUnauthorized'
+    post:
+      tags: [Center Server]
+      summary: 立即重发一次握手
+      description: |
+        手动触发 `POST <edge>/api/center/handshake`（`handshake=manual`），
+        用于 Edge 重启、换网段或排障。握手未配置/不可达时返回 502，
+        不影响推理端点。
+      operationId: centerHandshakeAnnounce
+      security:
+        - {}
+        - centerBearer: []
+        - centerApiKey: []
+      responses:
+        '200':
+          description: 握手成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterHandshakeResult'
+        '401':
+          $ref: '#/components/responses/CenterUnauthorized'
+        '502':
+          description: Edge 不可达或拒绝握手
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterHandshakeResult'
+
   /v1/model:
     servers:
       - url: "http://127.0.0.1:8000"
@@ -1899,7 +2024,7 @@ paths:
         机器健康看 body 的 `status` / `healthy` / `ready`。
 
         同端口（`:8090`）别名：`/v1/health`、`/health`、`/healthcheck`。完整字段、状态语义和
-        Edge Server/dashboard 接入示例见 `software/edge_server/HEALTHCHECK.md`。
+        Edge Server/dashboard 接入示例见 `software/edge_server/docs/HEALTHCHECK.md`。
       operationId: edgeRosHealth
       security:
         - {}
@@ -2588,6 +2713,178 @@ components:
           type: string
           maxLength: 2048
           description: 精简参数 JSON 字符串；Edge Server 原样缓存
+        scheme:
+          type: string
+          enum: [http, https]
+          default: http
+        infer_port:
+          type: integer
+          minimum: 0
+          maximum: 65535
+          description: 推理端口；CENTER 默认取 health_port（8000）
+        infer_path:
+          type: string
+          maxLength: 80
+          default: "/v1/infer"
+        meta_json:
+          type: string
+          maxLength: 2048
+          description: 模型能力/协议等扩展信息 JSON（CENTER 使用）
+
+    CenterHandshake:
+      type: object
+      description: |
+        Center Server 启动/心跳握手负载（`POST /api/center/handshake`）。
+        Edge 只信任 TCP 对端 IP；`ip` 仅供展示。`module` 会被强制为 `center`。
+      required: [health_port, infer_port]
+      properties:
+        module:
+          type: string
+          enum: [center]
+        name:
+          type: string
+          maxLength: 48
+        version:
+          type: string
+          maxLength: 24
+        status:
+          type: string
+          enum: [ok, starting, degraded, error, unknown, offline, disabled]
+        summary:
+          type: string
+          maxLength: 240
+        ip:
+          type: string
+          description: 仅展示；Edge 以连接来源地址为准
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        scheme:
+          type: string
+          enum: [http, https]
+          default: http
+        health_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          default: 8000
+        health_path:
+          type: string
+          maxLength: 80
+          default: "/v1/health"
+        params_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          default: 8000
+        params_path:
+          type: string
+          maxLength: 80
+          default: "/v1/params"
+        infer_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          default: 8000
+        infer_path:
+          type: string
+          maxLength: 80
+          default: "/v1/infer"
+        params_json:
+          type: string
+          maxLength: 2048
+        meta_json:
+          type: string
+          maxLength: 2048
+        handshake:
+          type: string
+          enum: [startup, heartbeat, manual]
+          default: startup
+        timestamp:
+          type: string
+          format: date-time
+
+    CenterHandshakeAck:
+      type: object
+      required: [ok, module, ip, port, infer_url]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        module:
+          type: string
+          enum: [center]
+        ip:
+          type: string
+          description: Edge 记录的 TCP 对端 IP
+        port:
+          type: integer
+        scheme:
+          type: string
+        health_url:
+          type: string
+        params_url:
+          type: string
+        infer_url:
+          type: string
+        handshake:
+          type: string
+        message:
+          type: string
+
+    EdgeCenterEndpoint:
+      type: object
+      required: [ok, reported, module, ip, port, base_url, infer_url, updated_ms, stale]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        reported:
+          type: boolean
+          enum: [true]
+        module:
+          type: string
+          enum: [center]
+        message:
+          type: string
+        ip:
+          type: string
+        port:
+          type: integer
+        scheme:
+          type: string
+          enum: [http, https]
+        base_url:
+          type: string
+          example: "http://192.168.4.50:8000"
+        infer_url:
+          type: string
+          example: "http://192.168.4.50:8000/v1/infer"
+        health_url:
+          type: string
+        params_url:
+          type: string
+        version:
+          type: string
+        status:
+          type: string
+        summary:
+          type: string
+        handshake:
+          type: string
+          enum: [startup, heartbeat, manual, ""]
+        meta:
+          type: object
+          additionalProperties: true
+        updated_ms:
+          type: integer
+          format: int64
+        age_ms:
+          type: integer
+          format: int64
+        stale:
+          type: boolean
 
     EdgeModule:
       type: object
@@ -2611,6 +2908,21 @@ components:
         health_url:
           type: string
         params_url:
+          type: string
+        port:
+          type: integer
+          description: 推理端口（CENTER 握手记录）
+        scheme:
+          type: string
+          enum: [http, https]
+        base_url:
+          type: string
+        infer_url:
+          type: string
+        meta:
+          type: object
+          additionalProperties: true
+        handshake:
           type: string
         updated_ms:
           type: integer
@@ -3034,11 +3346,102 @@ components:
           example: "rush-mog-center-server"
         version:
           type: string
-          example: "0.1.0"
+          example: "0.2.0"
         uptime_sec:
           type: number
         model:
           $ref: '#/components/schemas/CenterModelInfo'
+        handshake:
+          $ref: '#/components/schemas/CenterHandshakeStatus'
+        request_id:
+          type: string
+
+    CenterHandshakeStatus:
+      type: object
+      required: [enabled, target, connected, attempts, successes, failures]
+      properties:
+        enabled:
+          type: boolean
+          description: 是否启用且配置了 edge_url
+        target:
+          type: string
+          example: "http://192.168.3.26/api/center/handshake"
+        path:
+          type: string
+        host:
+          type: string
+        port:
+          type: integer
+        public_host:
+          type: string
+        interval_sec:
+          type: number
+        retry_sec:
+          type: number
+        max_retry_sec:
+          type: number
+        timeout_sec:
+          type: number
+        auth:
+          type: boolean
+          description: 是否给 Edge 请求带 Bearer
+        attempts:
+          type: integer
+        successes:
+          type: integer
+        failures:
+          type: integer
+        connected:
+          type: boolean
+          description: 最近一次握手是否成功
+        last_error:
+          type: string
+        last_attempt_at:
+          type: string
+          format: date-time
+        last_ok_at:
+          type: string
+          format: date-time
+        last_reason:
+          type: string
+          enum: [startup, heartbeat, manual, ""]
+        last_response:
+          type: object
+          additionalProperties: true
+          description: Edge 最近一次响应的精简副本（含 infer_url）
+
+    CenterHandshakeStatusResponse:
+      type: object
+      required: [ok, handshake, request_id]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        handshake:
+          $ref: '#/components/schemas/CenterHandshakeStatus'
+        request_id:
+          type: string
+
+    CenterHandshakeResult:
+      type: object
+      required: [ok, handshake, request_id]
+      properties:
+        ok:
+          type: boolean
+        result:
+          type: object
+          additionalProperties: true
+          description: 本次发送结果（ok/enabled/reason/error）
+        handshake:
+          $ref: '#/components/schemas/CenterHandshakeStatus'
+        error:
+          type: object
+          description: 仅失败时返回
+          properties:
+            code:
+              type: string
+            message:
+              type: string
         request_id:
           type: string
 

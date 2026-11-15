@@ -5,3 +5,6 @@ __pycache__/
 *.pt
 *.pth
 *.safetensors
+# 部署本地文件（模型权重、compose 变量）
+models/
+.env

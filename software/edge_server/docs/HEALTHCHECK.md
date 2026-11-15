@@ -3,7 +3,7 @@
 > 版本：1.1（对应 Pi Edge Server 合并后的 `edge_server` 0.2.0）
 > 调用方：Edge Server（HTTP）；ROS 内部客户端也可用 ROS 2 服务/话题
 > 实现：`ros_nodes/health_monitor_node.py` + `edge_server/core/health_monitor.py`
-> 统一接口归档：[`software/api.yaml`](../api.yaml) 的 `Edge Server` 分组
+> 统一接口归档：[`software/api.yaml`](../../api.yaml) 的 `Edge Server` 分组
 
 ---
 
@@ -822,7 +822,7 @@ cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests/test_health_monitor.py tests/test_health_http.py -q
 # 29 passed
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 153 passed（含音箱/API/语音场景新增用例）
+# 179 passed（含远程 VLA/握手、音箱/API/语音场景新增用例）
 ```
 
 覆盖：

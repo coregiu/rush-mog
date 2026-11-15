@@ -5,6 +5,10 @@ edge_server:
   # ======================================================================
   vla_engine:
     model_name: "vla_policy_v1"
+    # auto：优先 Center Server 的真实 SmolVLA（通过 Edge 注册表发现），
+    #       未握手/超时/报错时回退规则桩；remote：只用远程，失败停车；
+    #       stub：只用规则桩（无网络依赖）。
+    backend: "auto"
     inference_rate: 10
     confidence_threshold: 0.6
     # 当前实现未加载真实模型，仅使用规则桩；有 GPU 且接入模型后可改为 cuda
@@ -12,6 +16,28 @@ edge_server:
     max_queue_size: 5
     default_linear_speed: 0.3
     default_angular_speed: 0.5
+    remote:
+      enabled: true
+      # Edge Server 上 CENTER 的握手注册表；Center 启动后自动填入地址
+      discovery_url: "http://127.0.0.1:8081/api/center"
+      discovery_interval_sec: 5.0
+      discovery_timeout_sec: 1.0
+      # 静态回退（注册表不可用/直连调试）；留空则只用发现结果
+      host: ""
+      port: 8000
+      api_key: ""
+      timeout_sec: 1.5
+      # 单次远程推理最长占用；配合 max_rate_hz 防止控制循环被拖慢
+      max_rate_hz: 5.0
+      chunk_size: 1
+      image_key: "front"
+      color_order: "bgr"          # cv_bridge bgr8 帧；RGB 相机改 rgb
+      state_joint_names: []       # 空=按 JointState 顺序拼到 [x,y,yaw] 之后
+      confidence: 0.9             # SmolVLA 不提供校准置信度
+      turn_threshold: 0.15        # rad/s
+      linear_threshold: 0.02      # m/s
+      retry_after_sec: 5.0        # 失败后多久再试 Center
+      fallback_to_rules: true
 
   instruction:
     object_labels:
@@ -400,7 +426,7 @@ edge_server:
   # 健康检查（health_monitor_node）
   #   GET  http://127.0.0.1:8090/ros/health   -> Edge Server / dashboard
   #   ROS  /center/health + /center/healthcheck
-  # 接口契约与字段语义见 software/edge_server/HEALTHCHECK.md。
+  # 接口契约与字段语义见 software/edge_server/docs/HEALTHCHECK.md。
   # 仿真默认：camera/lidar/odom/arm 由 fake_edge_publisher 提供；
   # imu/microphone/speaker 为可选；base/battery 关闭。
   # ======================================================================

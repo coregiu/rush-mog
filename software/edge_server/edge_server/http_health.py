@@ -1,7 +1,7 @@
 """Healthcheck HTTP 网关（stdlib，无 ROS 依赖）。
 
 `health_monitor_node` 内嵌本模块，把最新的健康快照以 HTTP/JSON 暴露给
-同机 Edge Server/dashboard 等非 ROS 调用方。接口契约见 `software/edge_server/HEALTHCHECK.md`。
+同机 Edge Server/dashboard 等非 ROS 调用方。接口契约见 `software/edge_server/docs/HEALTHCHECK.md`。
 
 设计要点：
 - HTTP 线程只读取节点预计算好的快照，不直接调用 rclpy，避免线程安全问题；

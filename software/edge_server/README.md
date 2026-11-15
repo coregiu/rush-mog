@@ -1,11 +1,8 @@
 # edge_server（ROS2：Pi Edge Server + VLA + SLAM + 导航 + 目标搜索 + 健康检查）
 
-设计文档：[`docs/DESIGN.md`](docs/DESIGN.md)。
-分层架构（基础能力层 / 场景编排层）：[`docs/ARCHITECTURE_LAYERS.md`](docs/ARCHITECTURE_LAYERS.md)。
-代码结构与调用链：[`docs/CODE_MAP.md`](docs/CODE_MAP.md)。
+设计、架构与代码地图：[`docs/design/DESIGN.md`](docs/design/DESIGN.md)。
 健康检查接口契约：[`docs/HEALTHCHECK.md`](docs/HEALTHCHECK.md)。
-部署与发布说明：[`docs/DEPLOY.md`](docs/DEPLOY.md)。
-**实机启停/日志/排障：[`docs/OPERATIONS.md`](docs/OPERATIONS.md)。**
+部署、发布、启停与排障：[`docs/deploy/DEPLOY.md`](docs/deploy/DEPLOY.md)。
 硬件方案与缺口分析：[`hardware/SLAM_NAV.md`](../../hardware/SLAM_NAV.md)。
 
 本包在 v1 的 VLA 推理/安全/反向操作之上，补齐：
@@ -19,8 +16,12 @@
   “找到拖鞋了”；支持“别找了”取消、目标切换、急停取消；
 - **分层架构**：基础能力层（`core/*` + ROS 能力节点）与场景编排层
   （`core/scenarios/*` + `voice_scenario_node`）解耦，新增场景只写编排。
-  详见 [`docs/ARCHITECTURE_LAYERS.md`](docs/ARCHITECTURE_LAYERS.md)；
+  详见设计文档 [`docs/design/DESIGN.md`](docs/design/DESIGN.md) §2.3；
 - **速度仲裁**：VLA/Nav2/反向/安全统一到唯一 `/cmd_vel`；
+- **远程 VLA 推理**：Center Server（`software/center_server`）启动时向 Edge 握手，
+  Edge 在 `/api/center` 记录其 IP/端口；`vla_inference_node` 从注册表自动发现并
+  调用 `/v1/infer`，无 Center/超时/报错时回退规则桩（`vla_engine.backend` 可配
+  `auto`/`remote`/`stub`）；
 - **Pi Edge Server**：80 端口网页/API、8080 MJPEG、树莓派直连 STM32 USART3（115200 ASCII）、
   网页手动控制与 ROS `/cmd_vel` 共用串口出口；旧 ESP32 HTTP 桥仅保留历史兼容；
 - **蓝牙音箱/麦克风（NewMine / HONOR AM510 可选）**：默认 `newmine`，可切 `am510`
@@ -39,12 +40,13 @@
 | 项目 | 结果 |
 |---|---|
 | `colcon build --packages-select custom_msgs edge_server` | 通过 |
-| `pytest tests -q` | 153 passed（含 9 项场景 + 1 项 `/api/voice`） |
+| `pytest tests -q` | 179 passed（含 26 项远程 VLA/握手 + 9 项场景 + 1 项 `/api/voice`） |
 | `tests/end_to_end_check.py` | 7/7 passed |
 | `tests/slam_nav_check.py` + `fake_slam_robot.py` | 6/6 passed |
 | `tests/voice_scenario_check.py` + `fake_slam_robot.py` | 3/3 passed（找到/取消/状态链） |
 
-> VLA 仍是规则桩（无模型权重）；当前 STM32 ASCII 固件已由 `edge_server_node` 直连，若需二进制闭环再按 `DESIGN.md §6.13` 的 legacy 小节升级；
+> VLA 默认 `backend: auto`：Center Server 在线时走真实 SmolVLA，离线时回退规则桩；
+> 当前 STM32 ASCII 固件已由 `edge_server_node` 直连，若需二进制闭环再按设计文档 §8.4 的 legacy 小节升级；
 > Nav2/建图参数是起步值，需实车标定。
 
 ---
@@ -196,7 +198,7 @@ ros2 topic echo /lidar/status --once
 sudo setcap cap_net_bind_service=+ep /usr/bin/python3
 ```
 
-网络：树莓派用 `hostapd` + `dnsmasq` 提供 `RUSH-MOG` AP（`192.168.4.1`），
+网络：树莓派用 `hostapd` + `dnsmasq` 提供 `RUSH-MOG` AP（`192.168.3.26`），
 或接入现有局域网；手机/PC 打开 `http://<pi-ip>/`，视频流为
 `http://<pi-ip>:8080/stream`。
 
@@ -237,7 +239,7 @@ ros2 launch edge_server ekf.launch.py
 | 节点 | 职责 |
 |---|---|
 | `center_bridge_node` | image/laser/odom 软同步；audio/joint/imu 最近值缓存 |
-| `vla_inference_node` | 多模态预处理 + VLA 规则桩，发布意图/结果 |
+| `vla_inference_node` | 多模态预处理 + Center 远程 SmolVLA（规则桩兜底），发布意图/结果 |
 | `action_generator_node` | 单步意图 → `/cmd_vel_raw`，发布前安全校验 |
 | `reverse_operation_node` | 急停/回退/机械臂复位/任务撤销/手动接管 → `/reverse/cmd_vel` |
 | `safety_manager_node` | 障碍/数据/电量/定位/急停 → `/center/safety_state`、`/safety/cmd_vel_override` |
@@ -357,7 +359,7 @@ ros2 action send_goal /center/search_object custom_msgs/action/SearchObject \
 
 ### 5.4 健康检查（供 Edge Server / dashboard）
 
-详细契约、字段语义和接入示例见 [`HEALTHCHECK.md`](HEALTHCHECK.md)。主接口：
+详细契约、字段语义和接入示例见 [`docs/HEALTHCHECK.md`](docs/HEALTHCHECK.md)。主接口：
 
 ```bash
 # 详细健康（HTTP 200 只代表数据可读；机器健康看 body.status/healthy/ready）
@@ -421,11 +423,39 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
 | `GET/POST /api/modules/edge/params` | Edge 参数（运动保活、图传帧率） |
 | `GET /api/modules/{id}/health|params` | 代理 ROS（同机）/CENTER（外部） |
 | `POST /api/modules/report` | CENTER 等外部模块上报（`edge`/`ros` 保留） |
+| `POST /api/center/handshake` | Center Server 启动/心跳握手，记录 IP、端口、`infer_url` |
+| `GET /api/center` | 最近一次 CENTER 握手快照（VLA 节点据此发现推理地址） |
 | `GET /stream`（8080） | ROS 相机的 MJPEG；80 端口返回 302 |
 
 完整 OpenAPI 定义见 [`software/api.yaml`](../api.yaml)；实现见
 `edge_server/edge_web.py`、`edge_server/edge_control.py` 和
 `ros_nodes/edge_server_node.py`。
+
+#### 5.5.1 CENTER 握手与 VLA 地址发现
+
+`EdgeHttpApp` 内置一个**内存模块注册表**（最多 8 个外部模块）：
+
+1. Center Server 启动后 `POST /api/center/handshake`（JSON 或表单），字段见
+   [`center_server/deploy/README.md`](../center_server/deploy/README.md#6-握手协议center--edge)；
+2. Edge 以 TCP 对端 IP 为准（忽略 payload 的 `ip`），按 `infer_port`/`infer_path`
+   生成 `infer_url`，记录 `base_url`、health/params 地址和模型 `meta`；
+3. `vla_inference_node` 按 `vla_engine.remote.discovery_url`（默认
+   `http://127.0.0.1/api/center`，仿真配置为 8081）拉取地址，调用 Center
+   `/v1/infer`；发现失败/超时/HTTP 错误时按 `retry_after_sec` 降级到规则桩；
+4. Center 每 `interval_sec` 发 `heartbeat`，Edge 重启或注册表被清空后可自动恢复。
+
+```bash
+# 查看 CENTER 是否已握手（含 IP/端口/推理地址/新旧程度）
+curl -s http://127.0.0.1/api/center | python3 -m json.tool
+# 伪装一次握手（联调用；正式由 Center 自动发送）
+curl -X POST http://127.0.0.1/api/center/handshake \
+  -H 'Content-Type: application/json' \
+  -d '{"module":"center","health_port":8000,"infer_port":8000}'
+```
+
+> 注册表只在内存中，Edge 重启后等待 Center 的下一次 heartbeat（默认 ≤10s）。
+> 旧版上报脚本 `software/tools/edge_link.py` 仍可用 `/api/modules/report` 兼容，
+> 但推荐由 Center Server 内置握手替代（少一个常驻进程）。
 
 ### 5.6 蓝牙音箱与语音播报（NewMine / HONOR AM510）
 
@@ -658,7 +688,7 @@ curl -s http://192.168.3.26/api/modules/ros/health | python3 -m json.tool | grep
 
 ### 5.10 语音找东西（场景编排层）
 
-架构分层见 [`docs/ARCHITECTURE_LAYERS.md`](docs/ARCHITECTURE_LAYERS.md)：
+架构分层见设计文档 [`docs/design/DESIGN.md`](docs/design/DESIGN.md) §2：
 基础能力层负责“检测/建图/导航/搜索/播报”，场景编排层只负责
 “听懂 → 调能力 → 播报结果”。新增场景（跟随、巡逻、取物）只写编排。
 
@@ -668,7 +698,7 @@ curl -s http://192.168.3.26/api/modules/ros/health | python3 -m json.tool | grep
 # 1) 手机网页语音按钮：说“帮我找一下拖鞋”（Web Speech API -> POST /api/voice）
 # 2) 任意 HTTP 客户端：
 curl -X POST -H 'Content-Type: text/plain; charset=utf-8' \
-  --data '帮我找一下拖鞋' http://192.168.4.1/api/voice
+  --data '帮我找一下拖鞋' http://192.168.3.26/api/voice
 
 # 3) 任意 ASR 节点/脚本（离线 ASR 也可）：
 ros2 topic pub --once /edge/voice_command std_msgs/msg/String \
@@ -768,7 +798,11 @@ ros2 topic echo /center/scenario_status
 
 关键参数：
 
-- `vla_engine.inference_rate` / `confidence_threshold`
+- `vla_engine.backend`（auto/remote/stub） / `inference_rate` / `confidence_threshold`
+- `vla_engine.remote.*`：`discovery_url` / `discovery_interval_sec` / `host` / `port` /
+  `api_key` / `timeout_sec` / `max_rate_hz` / `chunk_size` / `image_key` /
+  `color_order` / `state_joint_names` / `confidence` / `turn_threshold` /
+  `linear_threshold` / `retry_after_sec` / `fallback_to_rules`
 - `safety.obstacle_stop_distance` / `data_timeout_sec` / `battery_low_percent`
 - `localization.min_quality`
 - `map_manager.frontier_min_size` / `map_dir`
@@ -810,7 +844,7 @@ ros2 topic echo /center/scenario_status
 ```bash
 cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 153 passed
+# 179 passed
 ```
 
 单独跑健康检查（不依赖 ROS 图）：
@@ -913,8 +947,11 @@ ros2 service call /center/emergency_stop custom_msgs/srv/EmergencyStop "{trigger
 
 ## 9. 当前限制
 
-1. **VLA 为规则桩**：未包含模型权重/GPU 推理；替换 `VLAEngine._load_model/predict` 即可。
-2. **STM32 固件仍为 ASCII**：Pi Edge Server 已直连 ASCII 协议；`DESIGN.md §6.13` 的二进制协议尚未在固件实现。
+1. **VLA 依赖 Center Server**：仓库不带模型权重；`backend: auto` 时由 Center
+   提供真实 SmolVLA，离线自动回退规则桩。`backend: remote` 且
+   `fallback_to_rules: false` 时，Center 不可用会发 `stop`（confidence 0），
+   需要人工/上层确认，不会继续执行旧动作。
+2. **STM32 固件仍为 ASCII**：Pi Edge Server 已直连 ASCII 协议；设计文档 §8.4 的二进制协议尚未在固件实现。
 3. **Nav2 参数起步值**：需实车调 `robot_radius`、速度、膨胀半径、DWB critics。
 4. **深度相机可选**：Astra Pro 接入后优先深度测距；未接入/深度无效时自动回退激光/bbox 高度，遮挡/高度变化精度有限。
 5. **磁力计需校准**：ICM-20948 受电机干扰时只慢速校正，不硬切航向。
@@ -951,8 +988,10 @@ software/edge_server/          # ROS 包根目录
 ├── web/                       # 手柄页、dashboard、静态资源
 ├── launch/                    # edge_server / robot_bringup / slam_stack / nav2_stack
 ├── tests/                     # 单元 + 仿真 + 联调（含 test_edge_*.py / test_health_*.py）
-├── DESIGN.md
-├── HEALTHCHECK.md             # 健康检查接口契约（HTTP + ROS）
+├── docs/
+│   ├── design/DESIGN.md       # 设计、架构与代码地图
+│   ├── deploy/DEPLOY.md       # 部署、发布、启停与排障
+│   └── HEALTHCHECK.md         # 健康检查接口契约（HTTP + ROS）
 ├── README.md
 ├── package.xml
 └── setup.py

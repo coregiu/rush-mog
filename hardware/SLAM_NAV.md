@@ -511,4 +511,4 @@ ros2 launch edge_server robot_bringup.launch.py start_imu:=true
 # 激光驱动、EKF、slam_toolbox、Nav2 另行 launch（见 software/edge_server/launch/）
 ```
 
-详细软件设计见 [`software/edge_server/DESIGN.md`](../software/edge_server/DESIGN.md)。
+详细软件设计见 [`software/edge_server/docs/design/DESIGN.md`](../software/edge_server/docs/design/DESIGN.md)。

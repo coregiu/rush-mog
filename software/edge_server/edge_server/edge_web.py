@@ -112,7 +112,19 @@ class ModuleRecord:
     params_json: str
     health_url: str
     params_url: str
+    # 外部模块（CENTER）握手时记录的地址；ROS 侧据此发现推理服务
+    ip: str = ""
+    port: int = 0
+    scheme: str = "http"
+    infer_url: str = ""
+    meta_json: str = "{}"
+    handshake: str = ""
     updated_at: float = field(default_factory=time.monotonic)
+
+    def base_url(self) -> str:
+        if not self.ip or not self.port:
+            return ""
+        return f"{self.scheme}://{_url_host(self.ip)}:{self.port}"
 
     def to_dict(self, now: Optional[float] = None, include_params: bool = True) -> dict:
         moment = time.monotonic() if now is None else float(now)
@@ -123,8 +135,15 @@ class ModuleRecord:
             "version": self.version,
             "status": self.status,
             "summary": self.summary,
+            "ip": self.ip,
+            "port": self.port,
+            "scheme": self.scheme,
+            "base_url": self.base_url(),
             "health_url": self.health_url,
             "params_url": self.params_url,
+            "infer_url": self.infer_url,
+            "meta": _parse_json_object(self.meta_json),
+            "handshake": self.handshake,
             "updated_ms": int(self.updated_at * 1000.0),
             "age_ms": int(age * 1000.0),
             "stale": age > _MODULE_STALE_SEC,
@@ -132,6 +151,13 @@ class ModuleRecord:
         if include_params:
             payload["params"] = _parse_json_object(self.params_json)
         return payload
+
+
+def _url_host(host: str) -> str:
+    text = str(host or "").strip()
+    if ":" in text and not text.startswith("["):
+        return f"[{text}]"
+    return text
 
 
 def _parse_json_object(text: str) -> dict:
@@ -189,36 +215,62 @@ class EdgeHttpApp:
         if len(params_json) > 2048:
             params_json = "{}"
         params_json = json.dumps(_parse_json_object(params_json), ensure_ascii=False)
+        meta_json = str(fields.get("meta_json", "") or "{}")
+        if len(meta_json) > 2048:
+            meta_json = "{}"
+        meta_json = json.dumps(_parse_json_object(meta_json), ensure_ascii=False)
+        handshake = str(fields.get("handshake", "") or "").strip()[:16]
+        scheme = str(fields.get("scheme", "") or "http").strip().lower()
+        if scheme not in {"http", "https"}:
+            raise ValueError("scheme 只能是 http/https")
         health_port = _int_or(fields.get("health_port"), 0)
         params_port = _int_or(fields.get("params_port"), 0)
+        infer_port = _int_or(fields.get("infer_port"), 0)
         if health_port <= 0:
             health_port = 8000 if module_id == "center" else 8090
         if params_port <= 0:
             params_port = health_port
-        if not (1 <= health_port <= 65535 and 1 <= params_port <= 65535):
-            raise ValueError("端口必须在 1..65535")
+        if infer_port <= 0 and module_id == "center":
+            infer_port = health_port
+        for port in (health_port, params_port):
+            if not 1 <= port <= 65535:
+                raise ValueError("端口必须在 1..65535")
+        if infer_port < 0 or infer_port > 65535:
+            raise ValueError("infer_port 必须在 1..65535")
         health_path = str(fields.get("health_path", "") or "").strip()
         params_path = str(fields.get("params_path", "") or "").strip()
+        infer_path = str(fields.get("infer_path", "") or "").strip()
         if not health_path:
             health_path = "/v1/health" if module_id == "center" else "/ros/health"
         if not params_path:
             params_path = "/v1/params" if module_id == "center" else "/ros/params"
-        for path in (health_path, params_path):
+        if not infer_path and module_id == "center":
+            infer_path = "/v1/infer"
+        for path in (health_path, params_path, infer_path):
+            if not path:
+                continue
             if not path.startswith("/") or ".." in path or len(path) > 80:
-                raise ValueError("health_path/params_path 非法")
+                raise ValueError("health/params/infer path 非法")
 
         host = str(remote_ip or "").strip()
         if not host or host == "0.0.0.0":
             raise ValueError("无法获取模块 IP")
-        url_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
+        url_host = _url_host(host)
         health_url = _valid_module_url(
-            f"http://{url_host}:{health_port}{health_path}"
+            f"{scheme}://{url_host}:{health_port}{health_path}"
         )
         params_url = _valid_module_url(
-            f"http://{url_host}:{params_port}{params_path}"
+            f"{scheme}://{url_host}:{params_port}{params_path}"
         )
+        infer_url = ""
+        if infer_port > 0 and infer_path:
+            infer_url = _valid_module_url(
+                f"{scheme}://{url_host}:{infer_port}{infer_path}"
+            ) or ""
         if health_url is None or params_url is None:
             raise ValueError("模块地址必须是本机/内网地址")
+        if infer_path and not infer_url:
+            raise ValueError("推理地址必须是本机/内网地址")
 
         record = ModuleRecord(
             id=module_id,
@@ -229,6 +281,12 @@ class EdgeHttpApp:
             params_json=params_json,
             health_url=health_url,
             params_url=params_url,
+            ip=host,
+            port=infer_port or health_port,
+            scheme=scheme,
+            infer_url=infer_url,
+            meta_json=meta_json,
+            handshake=handshake,
         )
         with self._modules_lock:
             if len(self._modules) >= 8 and module_id not in self._modules:
@@ -238,9 +296,35 @@ class EdgeHttpApp:
             "ok": True,
             "module": module_id,
             "ip": host,
+            "port": record.port,
+            "scheme": scheme,
             "health_url": health_url,
             "params_url": params_url,
+            "infer_url": infer_url,
+            "handshake": handshake,
         }
+
+    def center_endpoint(self) -> Optional[dict]:
+        """``GET /api/center``：最近一次握手记录的 CENTER 地址与能力。
+
+        返回 ``None`` 表示尚未握手；调用方（VLA 节点/dashboard）应等待
+        Center Server 启动后的首次 ``startup`` 握手或下次 heartbeat。
+        """
+
+        with self._modules_lock:
+            record = self._modules.get("center")
+        if record is None:
+            return None
+        payload = record.to_dict(include_params=False)
+        payload.update(
+            {
+                "ok": True,
+                "reported": True,
+                "module": "center",
+                "message": "CENTER 已握手",
+            }
+        )
+        return payload
 
     def local_modules(self) -> List[dict]:
         provider = getattr(self.runtime, "local_modules", None)
@@ -731,6 +815,25 @@ class _EdgeRequestHandler(BaseHTTPRequestHandler):
             self._send_json(200, payload)
             return
 
+        if path == "/api/center/handshake":
+            body = self._read_body()
+            if body is None:
+                return
+            fields = self._parse_fields(body)
+            fields["module"] = "center"
+            remote = self.client_address[0] if self.client_address else ""
+            try:
+                payload = app.report_module(fields, remote)
+            except ValueError as exc:
+                self._send_json(400, app.error_payload("invalid_handshake", str(exc)))
+                return
+            except RuntimeError as exc:
+                self._send_json(507, app.error_payload("registry_full", str(exc)))
+                return
+            payload["message"] = "CENTER 握手成功，地址已记录"
+            self._send_json(200, payload)
+            return
+
         if path == "/api/modules/report":
             body = self._read_body()
             if body is None:
@@ -982,6 +1085,21 @@ class _EdgeRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/api/modules":
             self._send_json(200, app.modules_payload_with_reported(), head_only=head_only)
+            return
+
+        if path == "/api/center":
+            center = app.center_endpoint()
+            if center is None:
+                self._send_json(
+                    404,
+                    app.error_payload(
+                        "center_not_reported",
+                        "CENTER 尚未握手；等待 Center Server 启动上报",
+                    ),
+                    head_only=head_only,
+                )
+                return
+            self._send_json(200, center, head_only=head_only)
             return
 
         if path in {"/api/modules/edge", "/api/modules/edge/health"}:

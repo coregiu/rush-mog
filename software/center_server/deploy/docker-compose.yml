@@ -1,0 +1,53 @@
+# Rush-MOG Center Server —— Docker Compose 部署
+#
+# 用法（在 center_server/ 下）：
+#   cp deploy/.env.example .env    # 按现场网络修改
+#   docker compose -f deploy/docker-compose.yml up -d --build
+#   docker compose -f deploy/docker-compose.yml logs -f center
+#
+# GPU 主机叠加：
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.gpu.yml up -d --build
+#
+# 模型：默认 ../models/smolvla_base（先跑 scripts/download_model.sh）。
+# 不想构建 2GB+ 的 torch 镜像时，把 INSTALL_VLA 改成 "0"，在宿主机装 VLA 依赖，
+# 或者直接把 CENTER_DEVICE 设为 cpu 只跑 stub 链路。
+
+name: rush-mog-center
+
+services:
+  center:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        INSTALL_VLA: ${INSTALL_VLA:-1}
+    image: rush-mog/center-server:${CENTER_VERSION:-0.2.0}
+    container_name: rush-mog-center
+    restart: unless-stopped
+    ports:
+      - "${CENTER_PORT:-8000}:8000"
+    environment:
+      CENTER_SERVER_CONFIG: /app/config.yaml
+      # Edge Server 地址：Compose 容器里不能用 127.0.0.1 指向 Pi
+      CENTER_SERVER_EDGE_URL: ${EDGE_URL:-http://192.168.3.26}
+      CENTER_SERVER_MODEL_PATH: ${CENTER_MODEL_PATH:-/models/smolvla_base}
+      CENTER_SERVER_DEVICE: ${CENTER_DEVICE:-auto}
+      HF_HOME: /home/app/.cache/huggingface
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-0}
+    volumes:
+      - ${CENTER_CONFIG:-../config.yaml}:/app/config.yaml:ro
+      - ${CENTER_MODELS:-../models}:/models:ro
+      - center-hf-cache:/home/app/.cache/huggingface
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)"
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  center-hf-cache:

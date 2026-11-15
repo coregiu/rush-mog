@@ -1,13 +1,18 @@
 # Center Server — SmolVLA HTTP 推理服务
 
-> 版本：0.1.0  
+> 版本：0.2.0  
 > 运行环境：Python 3.10+；真实模型建议 NVIDIA GPU（CPU 可跑但延迟高）  
-> 接口：HTTP/JSON，`POST /v1/infer`、`GET/POST /v1/params`
+> 接口：HTTP/JSON，`POST /v1/infer`、`GET/POST /v1/params`、`GET/POST /v1/handshake`
 
 本目录是 Rush-MOG 架构中的**中心推理模块**。机载 ROS（树莓派 4B/5 或 Jetson
 Orin Nano）负责相机/激光/里程计采集与底盘安全控制；中心服务器加载 SmolVLA，
 把语言指令 + 多路图像 + 本体状态推理成动作块（action chunk），再通过 HTTP
 返回给 ROS。
+
+启动后本服务会主动向 **Edge Server 发送握手**（默认每 10s 心跳），上报本机
+IP、推理端口和模型能力；Edge 记录后，机载 `vla_inference_node` 通过
+`GET /api/center` 自动发现并调用本服务，不需要手工维护 IP。部署细节见
+[`deploy/README.md`](deploy/README.md)。
 
 > 本服务**不直接控制 STM32**。动作必须先经过 ROS 的 `velocity_mux_node`、
 > `safety_manager_node` 和 `base_bridge_node`，否则绕过急停/避障会有安全风险。
@@ -22,7 +27,9 @@ Orin Nano）负责相机/激光/里程计采集与底盘安全控制；中心服
 │ camera / scan / odom / arm   │ ──────────────────────► │ SmolVLA policy + processors   │
 │ vla_inference_node           │ ◄────────────────────── │ action chunk + base_cmd       │
 │ safety / velocity_mux / base │   actions / base_cmd    │ /v1/health /v1/model         │
-└──────────────┬───────────────┘                         └──────────────────────────────┘
+│       ▲  GET /api/center     │                         │                              │
+│  Edge Server（Pi，80 端口）   │ ◄── 启动握手/每 10s ──── │ POST /api/center/handshake   │
+└──────────────┬───────────────┘   {ip,port,infer_url}   └──────────────────────────────┘
                │ UART
 ┌──────────────▼───────────────┐
 │ STM32 + L298N + 机械臂        │
@@ -43,14 +50,17 @@ software/center_server/
 │   ├── config.py            # YAML 配置加载/校验
 │   ├── engine.py            # SmolVLA 加载 + 推理 + stub 后端
 │   ├── errors.py            # 统一错误码
+│   ├── handshake.py         # 启动/心跳握手 -> Edge Server 注册表
 │   ├── http_api.py          # 路由（纯函数，便于单测）
 │   ├── images.py            # base64/data URI -> float32 CHW
 │   ├── server.py            # ThreadingHTTPServer + CLI
 │   ├── service.py           # 校验/推理/响应组装
 │   └── clients/http_client.py  # 给 ROS/调试脚本用的轻量客户端
+├── deploy/                  # Dockerfile、compose、systemd、部署说明
+├── scripts/                 # download_model.sh / run.sh
 ├── tests/                   # 单元 + HTTP 端到端（不需要 GPU）
-├── config.yaml              # 生产配置（smolvla 后端）
-├── config.stub.yaml         # 联调配置（stub 后端）
+├── config.yaml              # 生产配置（smolvla 后端 + Edge 握手）
+├── config.stub.yaml         # 联调配置（stub 后端，默认不握手）
 ├── requirements.txt         # 基础服务依赖
 ├── requirements-vla.txt     # torch/lerobot 依赖
 ├── requirements-dev.txt     # pytest 等开发依赖
@@ -152,10 +162,69 @@ python -m center_server --config config.yaml --check
 | POST | `/v1/infer` | 多模态推理 | 是* |
 | POST | `/v1/reset` | 清理策略内部动作队列/回合状态 | 是* |
 | POST | `/v1/warmup` | 空推理预热（会加载模型） | 是* |
+| GET | `/v1/handshake` | 握手状态（目标地址/连接/最近错误） | 是* |
+| POST | `/v1/handshake` | 立即向 Edge Server 重发一次握手 | 是* |
 | OPTIONS | `*` | CORS 预检 | 否 |
 
 \* 仅当 `server.api_key` 非空时要求鉴权。支持
 `Authorization: Bearer <key>` 或 `X-API-Key: <key>`。
+
+`GET /v1/health` 额外返回 `handshake` 段：
+
+```json
+{
+  "handshake": {
+    "enabled": true,
+    "target": "http://192.168.3.26/api/center/handshake",
+    "connected": true,
+    "attempts": 3,
+    "successes": 3,
+    "failures": 0,
+    "last_error": "",
+    "last_ok_at": "2026-11-15T05:20:10+00:00",
+    "last_response": {"ok": true, "ip": "192.168.4.50", "port": 8000,
+                      "infer_url": "http://192.168.4.50:8000/v1/infer"}
+  }
+}
+```
+
+### 4.1.0 启动握手：`POST /api/center/handshake`（Center → Edge）
+
+Center Server 在 HTTP 端口绑定成功后，由后台线程向 Edge 发送：
+
+```json
+{
+  "module": "center",
+  "name": "SmolVLA Center Server",
+  "version": "0.2.0",
+  "status": "ok",
+  "summary": "ready=True backend=smolvla device=cuda model=lerobot/smolvla_base",
+  "ip": "192.168.4.50",
+  "port": 8000,
+  "scheme": "http",
+  "health_port": 8000, "health_path": "/v1/health",
+  "params_port": 8000, "params_path": "/v1/params",
+  "infer_port": 8000,  "infer_path": "/v1/infer",
+  "params_json": "{\"action.mode\":\"base_twist\",\"action.max_linear_x\":0.5}",
+  "meta_json": "{\"protocol\":\"http-json-v1\",\"capabilities\":[\"infer\"],\"model\":{\"backend\":\"smolvla\"}}",
+  "handshake": "startup",
+  "timestamp": "2026-11-15T05:20:00+00:00"
+}
+```
+
+- Edge 以 **TCP 对端 IP** 为准记录地址，payload 里的 `ip` 仅用于展示；
+- 成功后每 `handshake.interval_sec` 发送 `heartbeat`，失败按
+  `retry_sec → max_retry_sec` 指数退避（不影响 `/v1/infer`）；
+- Edge 重启后下一次 heartbeat 自动重新注册；
+- 兼容旧版：`handshake.path` 设为 `/api/modules/report` 即可复用旧上报接口。
+
+手工触发一次（调试）：
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/v1/handshake | python3 -m json.tool
+# Edge 侧确认
+curl -s http://192.168.3.26/api/center | python3 -m json.tool
+```
 
 ### 4.1.1 参数：`GET/POST /v1/params`
 
@@ -398,10 +467,21 @@ SmolVLA 输出动作块；服务按 `action.mode` 解释：
 | `action.mode` | `base_twist` | 动作解释方式 |
 | `action.normalized` | true | 模型输出是否归一化 |
 | `action.max_linear_x` 等 | 0.5/0.4/1.0 | 速度限幅 |
+| `handshake.enabled` | true | 是否向 Edge 握手（`edge_url` 为空时亦不发送） |
+| `handshake.edge_url` | 空（生产配置示例 `http://192.168.3.26`） | Edge Server 基地址 |
+| `handshake.path` | `/api/center/handshake` | 握手指令路径（兼容旧版可改 `/api/modules/report`） |
+| `handshake.interval_sec` | 10 s | 成功后的心跳间隔 |
+| `handshake.retry_sec` / `max_retry_sec` | 2 s / 30 s | 失败指数退避 |
+| `handshake.timeout_sec` | 3 s | 单次握手 HTTP 超时 |
+| `handshake.api_key` | 空 | Edge 启用鉴权时使用 |
+| `handshake.public_host` | 空 | 空=自动探测到 Edge 的出口 IP（Edge 仍以对端 IP 为准） |
+| `handshake.service_name` | `SmolVLA Center Server` | dashboard 展示名 |
 
 环境变量覆盖：`CENTER_SERVER_CONFIG`、`CENTER_SERVER_HOST`、`CENTER_SERVER_PORT`、
 `CENTER_SERVER_API_KEY`、`CENTER_SERVER_BACKEND`、`CENTER_SERVER_MODEL_PATH`、
-`CENTER_SERVER_DEVICE`、`CENTER_SERVER_DTYPE`。
+`CENTER_SERVER_DEVICE`、`CENTER_SERVER_DTYPE`、`CENTER_SERVER_EDGE_URL`、
+`CENTER_SERVER_HANDSHAKE_ENABLED`、`CENTER_SERVER_HANDSHAKE_PATH`、
+`CENTER_SERVER_PUBLIC_HOST`、`CENTER_SERVER_EDGE_API_KEY`。
 
 ---
 
@@ -443,12 +523,18 @@ except CenterServerError as exc:
     # fallback: 规则桩 / 停车
 ```
 
-> 现有 `software/edge_server` 的 `VLAEngine` 仍是规则桩。若要正式接入，建议把 HTTP
-> 调用放到独立异步节点，保留规则桩作为降级路径，避免同步网络阻塞控制循环。
+> **机载已实现**：`software/edge_server` 的 `VLAEngine` 支持 `backend: auto`，
+> 通过 Edge 注册表发现本服务并异步调用 `/v1/infer`；Center 不可用时自动回退
+> 规则桩（`remote` 模式下发 stop）。客户端在
+> [`edge_server/core/center_client.py`](../edge_server/edge_server/core/center_client.py)，
+> 图像默认按 BGR（`cv_bridge bgr8`）编码，state 为 `[x,y,yaw]+关节`。
 
 ---
 
 ## 8. 部署与性能
+
+部署方式（venv + systemd / Docker CPU / Docker GPU）、模型下载、发布清单、
+握手验证与故障排查见 [`deploy/README.md`](deploy/README.md)。
 
 - **GPU**：SmolVLA 约 450M 参数；float16 权重约 1 GB，建议 ≥6 GB 显存。
   CPU 可运行，但单次推理可能数百毫秒到数秒，不适合闭环。
@@ -488,7 +574,10 @@ python3 -m pytest tests -q
 ```
 
 覆盖：配置校验、动作映射/限幅/关节限位、图像编解码、HTTP 路由/鉴权/错误码、
-socket 服务与自带客户端、模型缺失时 503、`/v1/params` 参数查询/修改/校验。
+socket 服务与自带客户端、模型缺失时 503、`/v1/params` 参数查询/修改/校验、
+握手负载/重试/心跳/`/v1/handshake`（共 55 项）。机载侧另有
+`edge_server/tests/test_center_handshake.py`、`test_vla_remote.py` 覆盖
+注册表与远程推理降级。
 
 手工联调：
 
@@ -511,6 +600,9 @@ curl -s -X POST http://127.0.0.1:8000/v1/infer \
    历史，需在客户端维护或在服务端扩展 session。
 4. **单模型/单进程**：不支持多模型热切换、多租户、批处理。
 5. **未做硬件在环**：真实相机/Wi-Fi/GPU 延迟需实车压测。
-6. **图像语义**：默认按 RGB 处理；ROS `cv_bridge` 的 `bgr8` 帧需先转 RGB。
+6. **图像语义**：服务端按 RGB 解码；机载客户端已把 OpenCV BGR 帧编码为
+   JPEG 后再上传（`CenterClient.color_order="bgr"`），自定义客户端需自行保证。
+7. **握手注册表在内存**：Edge 重启后需等待下一次 heartbeat（默认 ≤10s）才能
+   重新发现；不落盘、不支持多 Center 同时注册（同 module 覆盖）。
 
 详细设计（模块、协议、错误处理、扩展点）见 [`DESIGN.md`](DESIGN.md)。

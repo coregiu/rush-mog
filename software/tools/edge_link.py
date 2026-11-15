@@ -37,7 +37,7 @@ except Exception:  # pragma: no cover - 运行环境通常有 PyYAML
 LOGGER = logging.getLogger("rush-mog.edge-link")
 
 DEFAULT_SSID = "RUSH-MOG"
-DEFAULT_EDGE_URL = "http://192.168.4.1"
+DEFAULT_EDGE_URL = "http://192.168.3.26"
 DEFAULT_INTERVAL = 5.0
 MAX_SUMMARY = 240
 MAX_PARAMS_JSON = 2048
@@ -298,7 +298,7 @@ def run(config: Dict[str, Any], *, once: bool = False, dry_run: bool = False) ->
     edge_url = str(config.get("edge_url") or DEFAULT_EDGE_URL)
     interval = max(1.0, float(config.get("interval_sec", DEFAULT_INTERVAL)))
     connect_wifi = bool(config.get("connect_wifi", True))
-    edge_host = urllib.parse.urlsplit(edge_url).hostname or "192.168.4.1"
+    edge_host = urllib.parse.urlsplit(edge_url).hostname or "192.168.3.26"
 
     backoff = 1.0
     while True:
@@ -341,7 +341,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--once", action="store_true", help="只上报一次后退出")
     parser.add_argument("--dry-run", action="store_true", help="不发送，只打印上报内容")
     parser.add_argument("--no-wifi", action="store_true", help="不主动连接 Wi-Fi")
-    parser.add_argument("--edge-url", default="", help="覆盖 Edge Server 地址（默认 http://192.168.4.1）")
+    parser.add_argument("--edge-url", default="", help="覆盖 Edge Server 地址（默认 http://192.168.3.26）")
     parser.add_argument("--verbose", action="store_true", help="DEBUG 日志")
     args = parser.parse_args(argv)
 

@@ -12,7 +12,7 @@ Rush Mog是一款致敬Unimog的VLA控制的智能万向轮小车。基于树莓
 通过车载摄像头监控和自动识别、分类物体。并将画面实时在手机模拟的PS2控制器上查看。
 
 #### （3）SLAM建图、自主导航与自动寻找目标
-通过 2D 激光 + 轮式编码器 + ICM-20948 建立占据栅格地图，使用 AMCL/EKF 定位；通过 Nav2 或内置直航导航到目标点；通过相机检测 + 激光测距 + 前沿探索搜索目标物体，返回目标位姿并保持设定距离接近。支持地图保存/加载、建图任务、探索任务和目标搜索任务。支持语音发起“找拖鞋”：网页/HTTP 文本进入场景编排层，调用搜索能力自主探索、确认、接近，找到后通过 TTS 播报“找到拖鞋了”，说“别找了”可取消。分层设计见 [edge_server 分层架构](software/edge_server/docs/ARCHITECTURE_LAYERS.md)。
+通过 2D 激光 + 轮式编码器 + ICM-20948 建立占据栅格地图，使用 AMCL/EKF 定位；通过 Nav2 或内置直航导航到目标点；通过相机检测 + 激光测距 + 前沿探索搜索目标物体，返回目标位姿并保持设定距离接近。支持地图保存/加载、建图任务、探索任务和目标搜索任务。支持语音发起“找拖鞋”：网页/HTTP 文本进入场景编排层，调用搜索能力自主探索、确认、接近，找到后通过 TTS 播报“找到拖鞋了”，说“别找了”可取消。分层设计见 [edge_server 设计文档](software/edge_server/docs/design/DESIGN.md)。
 
 #### （4）搬运物体
 使用VLA模型控制车体移动，可以根据目标物体进行搜索、锁定，并对移动目标物体进行跟踪。使用机械臂对物体进行夹起、转移、放下到指定范围区域等动作，实现物体搬运。搬运路径可规划也可自动学习。
@@ -43,7 +43,7 @@ Rush Mog是一款致敬Unimog的VLA控制的智能万向轮小车。基于树莓
 | **车辆控制接口** | uart | Edge Server | BodyControl | 小车运动命令执行；小车速度、里程状态获取。 |
 | **Center Server 接口** | http | Edge Server / ROS | Center Server | 提供 VLA 推理执行。 |
 
-> ROS 2 与 Edge Server 同机运行；ROS 健康网关 `:8090` 由 Edge Server 代理给 dashboard。设备健康契约见 [HEALTHCHECK.md](software/edge_server/HEALTHCHECK.md)。
+> ROS 2 与 Edge Server 同机运行；ROS 健康网关 `:8090` 由 Edge Server 代理给 dashboard。设备健康契约见 [HEALTHCHECK.md](software/edge_server/docs/HEALTHCHECK.md)。
 
 #### 硬件架构设计
 - DIY小车，使用97mm万向轮加JGB37-520电机（带霍尔编码器），L298N驱动板(四驱的，或者用两个两驱的)。导航目标建议换四路独立 PWM 驱动（TB6612/DRV8871/BTS7960）。
@@ -60,8 +60,8 @@ Rush Mog是一款致敬Unimog的VLA控制的智能万向轮小车。基于树莓
 - 软件分车体控制子系统和中心推理/导航子系统。
 - 车体控制子系统，由STM32单板承载，驱动小车电机、机械臂、外放，接机载计算机/桥接命令进行执行。
 - 机载 Linux 子系统运行 ROS2 驱动、`edge_server_node`（网页/API/底盘串口）、ICM-20948、EKF、slam_toolbox、Nav2、目标检测和目标搜索。
-- `software/edge_server` 的 ROS 包 `edge_server` 提供 SLAM 地图管理、定位健康度门控、自主导航、目标检测/搜索/接近、速度仲裁，并与 Pi Edge Server（80 网页/API、8080 MJPEG、STM32 ASCII 串口）同机运行。详见 [ROS 包设计](software/edge_server/DESIGN.md)。
-- `health_monitor_node` 通过 HTTP（`:8090/ros/health`）向同机 Edge Server/dashboard 提供 ROS 节点与全部设备健康，同时保留 ROS 话题/服务；见 [健康检查契约](software/edge_server/HEALTHCHECK.md)。
+- `software/edge_server` 的 ROS 包 `edge_server` 提供 SLAM 地图管理、定位健康度门控、自主导航、目标检测/搜索/接近、速度仲裁，并与 Pi Edge Server（80 网页/API、8080 MJPEG、STM32 ASCII 串口）同机运行。详见 [ROS 包设计](software/edge_server/docs/design/DESIGN.md)。
+- `health_monitor_node` 通过 HTTP（`:8090/ros/health`）向同机 Edge Server/dashboard 提供 ROS 节点与全部设备健康，同时保留 ROS 话题/服务；见 [健康检查契约](software/edge_server/docs/HEALTHCHECK.md)。
 - 独立部署的 [Center Server SmolVLA 推理服务](software/center_server/README.md) 通过 HTTP 为 ROS 提供 VLA 推理；接口见 [服务设计](software/center_server/DESIGN.md)。
 
 ![](software/architechture.png)

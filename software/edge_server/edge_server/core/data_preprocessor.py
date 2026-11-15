@@ -28,6 +28,9 @@ class SyncedDTO:
     joint: Dict[str, float] = field(default_factory=dict)
     task_id: str = ""
     instruction: str = ""
+    # 原始相机帧（BGR，cv_bridge bgr8）；远程 SmolVLA 需要原始分辨率，
+    # 不能用上面 224x224 的预处理图。规则桩路径忽略该字段。
+    image_raw: Optional[np.ndarray] = None
 
 
 class MultiModalPreprocessor:

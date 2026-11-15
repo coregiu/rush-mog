@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import os
+import urllib.parse
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -49,6 +50,20 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "chunk_size": 50,
         "n_action_steps": 1,
         "stub_action": [0.0, 0.0, 0.0],
+    },
+    "handshake": {
+        # 启动后向 Edge Server 上报本机 IP/端口/模型能力，供 VLA 推理与
+        # dashboard 后续调用。edge_url 为空时不发握手（只影响可见性，不影响推理）。
+        "enabled": True,
+        "edge_url": "",  # 例如 http://192.168.3.26:80
+        "path": "/api/center/handshake",
+        "interval_sec": 10.0,  # 成功后的心跳间隔；Edge 重启后自动重连
+        "retry_sec": 2.0,  # 失败后的首次重试间隔
+        "max_retry_sec": 30.0,
+        "timeout_sec": 3.0,
+        "api_key": "",  # Edge 启用鉴权时使用
+        "public_host": "",  # 空=自动探测到 Edge 的出口 IP
+        "service_name": "SmolVLA Center Server",
     },
     "action": {
         "mode": "base_twist",  # raw | base_twist | hybrid | joint
@@ -144,14 +159,27 @@ def _apply_env_overrides(cfg: dict) -> None:
     if "CENTER_SERVER_DTYPE" in env:
         model["dtype"] = env["CENTER_SERVER_DTYPE"]
 
+    handshake = cfg["handshake"]
+    if "CENTER_SERVER_EDGE_URL" in env:
+        handshake["edge_url"] = env["CENTER_SERVER_EDGE_URL"]
+    if "CENTER_SERVER_HANDSHAKE_ENABLED" in env:
+        handshake["enabled"] = env["CENTER_SERVER_HANDSHAKE_ENABLED"]
+    if "CENTER_SERVER_HANDSHAKE_PATH" in env:
+        handshake["path"] = env["CENTER_SERVER_HANDSHAKE_PATH"]
+    if "CENTER_SERVER_PUBLIC_HOST" in env:
+        handshake["public_host"] = env["CENTER_SERVER_PUBLIC_HOST"]
+    if "CENTER_SERVER_EDGE_API_KEY" in env:
+        handshake["api_key"] = env["CENTER_SERVER_EDGE_API_KEY"]
+
 
 def _validate(cfg: dict) -> None:
-    for section in ("server", "model", "action", "logging"):
+    for section in ("server", "model", "handshake", "action", "logging"):
         if not isinstance(cfg.get(section), dict):
             raise ConfigError(f"{section} 必须是映射")
 
     server = cfg["server"]
     model = cfg["model"]
+    handshake = cfg["handshake"]
     action = cfg["action"]
 
     host = str(server.get("host", "")).strip()
@@ -185,6 +213,41 @@ def _validate(cfg: dict) -> None:
     if timeout <= 0:
         raise ConfigError("server.request_timeout_sec 必须大于 0")
     server["request_timeout_sec"] = timeout
+
+    handshake["enabled"] = _as_bool(
+        handshake.get("enabled", True), "handshake.enabled"
+    )
+    handshake["edge_url"] = str(handshake.get("edge_url") or "").strip()
+    if handshake["edge_url"]:
+        parsed = urllib.parse.urlsplit(handshake["edge_url"])
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ConfigError(
+                "handshake.edge_url 必须是 http(s)://host[:port] 形式"
+            )
+        if parsed.query or parsed.fragment:
+            raise ConfigError("handshake.edge_url 不能带 query/fragment")
+        handshake["edge_url"] = handshake["edge_url"].rstrip("/")
+    handshake["path"] = str(handshake.get("path") or "/api/center/handshake").strip()
+    if not handshake["path"].startswith("/") or ".." in handshake["path"]:
+        raise ConfigError("handshake.path 必须以 / 开头且不能包含 ..")
+    for key, default in (
+        ("interval_sec", 10.0),
+        ("retry_sec", 2.0),
+        ("max_retry_sec", 30.0),
+        ("timeout_sec", 3.0),
+    ):
+        value = _as_float(handshake.get(key, default), f"handshake.{key}")
+        if value <= 0:
+            raise ConfigError(f"handshake.{key} 必须大于 0")
+        handshake[key] = value
+    if handshake["max_retry_sec"] < handshake["retry_sec"]:
+        raise ConfigError("handshake.max_retry_sec 不能小于 handshake.retry_sec")
+    handshake["api_key"] = str(handshake.get("api_key") or "")
+    handshake["public_host"] = str(handshake.get("public_host") or "").strip()
+    handshake["service_name"] = (
+        str(handshake.get("service_name") or "SmolVLA Center Server").strip()[:48]
+        or "SmolVLA Center Server"
+    )
 
     backend = str(model.get("backend", "smolvla")).strip().lower()
     if backend not in {"smolvla", "stub"}:
