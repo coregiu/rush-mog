@@ -129,6 +129,29 @@ def test_method_not_allowed(api):
     assert payload["error"]["code"] == "method_not_allowed"
 
 
+def test_empty_body_post_ignores_content_type(api):
+    # curl -X POST /v1/warmup 会带 form Content-Type 但没有 body，不应 415
+    status, payload, _ = api.dispatch(
+        "POST",
+        "/v1/warmup",
+        {"content-type": "application/x-www-form-urlencoded"},
+        b"",
+    )
+    assert status == 200
+    assert payload["ok"] is True
+
+
+def test_non_empty_body_still_requires_json(api):
+    status, payload, _ = api.dispatch(
+        "POST",
+        "/v1/infer",
+        {"content-type": "application/x-www-form-urlencoded"},
+        b"instruction=go",
+    )
+    assert status == 415
+    assert payload["error"]["code"] == "unsupported_media_type"
+
+
 def test_options(api):
     status, _, headers = api.dispatch("OPTIONS", "/v1/infer")
     assert status == 204

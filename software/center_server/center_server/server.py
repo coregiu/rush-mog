@@ -23,6 +23,7 @@ from typing import Any
 from . import SERVICE_NAME, __version__
 from .config import ConfigError, default_config_path, load_config, validate_config
 from .errors import ApiError
+from .handshake import HandshakeAnnouncer
 from .http_api import HttpApi
 from .service import InferenceService
 
@@ -243,6 +244,16 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--device", default=None, help="cpu/cuda/cuda:0/mps/auto")
     parser.add_argument(
+        "--edge-url",
+        default=None,
+        help="Edge Server 地址，例如 http://192.168.3.26（覆盖 handshake.edge_url）",
+    )
+    parser.add_argument(
+        "--no-handshake",
+        action="store_true",
+        help="启动时不向 Edge Server 发送握手",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="只加载配置并打印状态，不启动 HTTP 服务",
@@ -293,6 +304,10 @@ def main(argv: list[str] | None = None) -> int:
         cfg["model"]["backend"] = args.backend
     if args.device:
         cfg["model"]["device"] = args.device
+    if args.edge_url is not None:
+        cfg["handshake"]["edge_url"] = args.edge_url
+    if args.no_handshake:
+        cfg["handshake"]["enabled"] = False
     if args.log_level:
         cfg["logging"]["level"] = args.log_level.upper()
 
@@ -331,9 +346,16 @@ def main(argv: list[str] | None = None) -> int:
             service.close()
             return 1
 
-    api = HttpApi(service, cfg)
     host = str(cfg["server"]["host"])
     port = int(cfg["server"]["port"])
+    announcer = HandshakeAnnouncer(
+        cfg,
+        status_provider=service.status,
+        params_provider=service.params,
+        model_provider=service.model_info,
+        port=port,
+    )
+    api = HttpApi(service, cfg, handshake=announcer)
     try:
         httpd = create_server(api, host, port)
     except OSError as exc:
@@ -351,11 +373,14 @@ def main(argv: list[str] | None = None) -> int:
 
     LOGGER.info("listening on http://%s:%s", host, port)
     LOGGER.info("health: http://%s:%s/v1/health", host, port)
+    # HTTP 已绑定成功后再握手：Edge 记录的地址一定是可连接的。
+    announcer.start()
     try:
         httpd.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:
         pass
     finally:
+        announcer.stop()
         httpd.server_close()
         service.close()
         LOGGER.info("server stopped")

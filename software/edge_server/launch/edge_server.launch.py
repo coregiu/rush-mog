@@ -35,6 +35,7 @@ def generate_launch_description():
     start_nav = LaunchConfiguration("start_navigation")
     start_perception = LaunchConfiguration("start_perception")
     start_search = LaunchConfiguration("start_object_search")
+    start_scenario = LaunchConfiguration("start_voice_scenario")
     start_base = LaunchConfiguration("start_base_bridge")
     base_transport = LaunchConfiguration("base_transport")
     start_imu = LaunchConfiguration("start_imu")
@@ -90,6 +91,13 @@ def generate_launch_description():
             output="screen",
             parameters=params,
             condition=IfCondition(start_search),
+        ),
+        Node(
+            package="edge_server",
+            executable="voice_scenario_node",
+            output="screen",
+            parameters=params,
+            condition=IfCondition(start_scenario),
         ),
         Node(
             package="edge_server",
@@ -175,6 +183,11 @@ def generate_launch_description():
                 "start_object_search",
                 default_value="true",
                 description="Start explore/search action servers",
+            ),
+            DeclareLaunchArgument(
+                "start_voice_scenario",
+                default_value="true",
+                description="Start voice scenario node (L3: find-object orchestration)",
             ),
             DeclareLaunchArgument(
                 "start_base_bridge",

@@ -54,7 +54,7 @@ class Esp32BridgeNode(Node):
         esp_cfg = base_cfg.get("esp32", {}) or {}
 
         self.enabled = bool(base_cfg.get("enabled", True))
-        host = str(esp_cfg.get("host", "192.168.4.1")).strip()
+        host = str(esp_cfg.get("host", "192.168.3.26")).strip()
         if host.startswith("http://") or host.startswith("https://"):
             self.base_url = host.rstrip("/")
         else:

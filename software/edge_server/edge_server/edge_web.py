@@ -112,7 +112,19 @@ class ModuleRecord:
     params_json: str
     health_url: str
     params_url: str
+    # 外部模块（CENTER）握手时记录的地址；ROS 侧据此发现推理服务
+    ip: str = ""
+    port: int = 0
+    scheme: str = "http"
+    infer_url: str = ""
+    meta_json: str = "{}"
+    handshake: str = ""
     updated_at: float = field(default_factory=time.monotonic)
+
+    def base_url(self) -> str:
+        if not self.ip or not self.port:
+            return ""
+        return f"{self.scheme}://{_url_host(self.ip)}:{self.port}"
 
     def to_dict(self, now: Optional[float] = None, include_params: bool = True) -> dict:
         moment = time.monotonic() if now is None else float(now)
@@ -123,8 +135,15 @@ class ModuleRecord:
             "version": self.version,
             "status": self.status,
             "summary": self.summary,
+            "ip": self.ip,
+            "port": self.port,
+            "scheme": self.scheme,
+            "base_url": self.base_url(),
             "health_url": self.health_url,
             "params_url": self.params_url,
+            "infer_url": self.infer_url,
+            "meta": _parse_json_object(self.meta_json),
+            "handshake": self.handshake,
             "updated_ms": int(self.updated_at * 1000.0),
             "age_ms": int(age * 1000.0),
             "stale": age > _MODULE_STALE_SEC,
@@ -132,6 +151,13 @@ class ModuleRecord:
         if include_params:
             payload["params"] = _parse_json_object(self.params_json)
         return payload
+
+
+def _url_host(host: str) -> str:
+    text = str(host or "").strip()
+    if ":" in text and not text.startswith("["):
+        return f"[{text}]"
+    return text
 
 
 def _parse_json_object(text: str) -> dict:
@@ -189,36 +215,62 @@ class EdgeHttpApp:
         if len(params_json) > 2048:
             params_json = "{}"
         params_json = json.dumps(_parse_json_object(params_json), ensure_ascii=False)
+        meta_json = str(fields.get("meta_json", "") or "{}")
+        if len(meta_json) > 2048:
+            meta_json = "{}"
+        meta_json = json.dumps(_parse_json_object(meta_json), ensure_ascii=False)
+        handshake = str(fields.get("handshake", "") or "").strip()[:16]
+        scheme = str(fields.get("scheme", "") or "http").strip().lower()
+        if scheme not in {"http", "https"}:
+            raise ValueError("scheme 只能是 http/https")
         health_port = _int_or(fields.get("health_port"), 0)
         params_port = _int_or(fields.get("params_port"), 0)
+        infer_port = _int_or(fields.get("infer_port"), 0)
         if health_port <= 0:
             health_port = 8000 if module_id == "center" else 8090
         if params_port <= 0:
             params_port = health_port
-        if not (1 <= health_port <= 65535 and 1 <= params_port <= 65535):
-            raise ValueError("端口必须在 1..65535")
+        if infer_port <= 0 and module_id == "center":
+            infer_port = health_port
+        for port in (health_port, params_port):
+            if not 1 <= port <= 65535:
+                raise ValueError("端口必须在 1..65535")
+        if infer_port < 0 or infer_port > 65535:
+            raise ValueError("infer_port 必须在 1..65535")
         health_path = str(fields.get("health_path", "") or "").strip()
         params_path = str(fields.get("params_path", "") or "").strip()
+        infer_path = str(fields.get("infer_path", "") or "").strip()
         if not health_path:
             health_path = "/v1/health" if module_id == "center" else "/ros/health"
         if not params_path:
             params_path = "/v1/params" if module_id == "center" else "/ros/params"
-        for path in (health_path, params_path):
+        if not infer_path and module_id == "center":
+            infer_path = "/v1/infer"
+        for path in (health_path, params_path, infer_path):
+            if not path:
+                continue
             if not path.startswith("/") or ".." in path or len(path) > 80:
-                raise ValueError("health_path/params_path 非法")
+                raise ValueError("health/params/infer path 非法")
 
         host = str(remote_ip or "").strip()
         if not host or host == "0.0.0.0":
             raise ValueError("无法获取模块 IP")
-        url_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
+        url_host = _url_host(host)
         health_url = _valid_module_url(
-            f"http://{url_host}:{health_port}{health_path}"
+            f"{scheme}://{url_host}:{health_port}{health_path}"
         )
         params_url = _valid_module_url(
-            f"http://{url_host}:{params_port}{params_path}"
+            f"{scheme}://{url_host}:{params_port}{params_path}"
         )
+        infer_url = ""
+        if infer_port > 0 and infer_path:
+            infer_url = _valid_module_url(
+                f"{scheme}://{url_host}:{infer_port}{infer_path}"
+            ) or ""
         if health_url is None or params_url is None:
             raise ValueError("模块地址必须是本机/内网地址")
+        if infer_path and not infer_url:
+            raise ValueError("推理地址必须是本机/内网地址")
 
         record = ModuleRecord(
             id=module_id,
@@ -229,6 +281,12 @@ class EdgeHttpApp:
             params_json=params_json,
             health_url=health_url,
             params_url=params_url,
+            ip=host,
+            port=infer_port or health_port,
+            scheme=scheme,
+            infer_url=infer_url,
+            meta_json=meta_json,
+            handshake=handshake,
         )
         with self._modules_lock:
             if len(self._modules) >= 8 and module_id not in self._modules:
@@ -238,9 +296,35 @@ class EdgeHttpApp:
             "ok": True,
             "module": module_id,
             "ip": host,
+            "port": record.port,
+            "scheme": scheme,
             "health_url": health_url,
             "params_url": params_url,
+            "infer_url": infer_url,
+            "handshake": handshake,
         }
+
+    def center_endpoint(self) -> Optional[dict]:
+        """``GET /api/center``：最近一次握手记录的 CENTER 地址与能力。
+
+        返回 ``None`` 表示尚未握手；调用方（VLA 节点/dashboard）应等待
+        Center Server 启动后的首次 ``startup`` 握手或下次 heartbeat。
+        """
+
+        with self._modules_lock:
+            record = self._modules.get("center")
+        if record is None:
+            return None
+        payload = record.to_dict(include_params=False)
+        payload.update(
+            {
+                "ok": True,
+                "reported": True,
+                "module": "center",
+                "message": "CENTER 已握手",
+            }
+        )
+        return payload
 
     def local_modules(self) -> List[dict]:
         provider = getattr(self.runtime, "local_modules", None)
@@ -369,6 +453,93 @@ class EdgeHttpApp:
         if not command:
             return 200, "ignored"
         return 200, "ok"
+
+    # ------------------------------------------------------------- speaker
+    def speaker_payload(self) -> dict:
+        handler = getattr(self.runtime, "speaker_status", None)
+        if handler is None:
+            raise RuntimeError("音箱功能未启用")
+        return handler()
+
+    def speaker_action(self, action: str, fields: Mapping[str, Any]) -> dict:
+        handler = getattr(self.runtime, "handle_speaker", None)
+        if handler is None:
+            raise RuntimeError("音箱功能未启用")
+        return handler(str(action or ""), fields)
+
+    # ------------------------------------------------------------- microphone
+    def microphone_payload(self) -> dict:
+        handler = getattr(self.runtime, "microphone_status", None)
+        if handler is None:
+            raise RuntimeError("麦克风功能未启用")
+        return handler()
+
+    def microphone_action(self, action: str, fields: Mapping[str, Any]) -> dict:
+        handler = getattr(self.runtime, "handle_microphone", None)
+        if handler is None:
+            raise RuntimeError("麦克风功能未启用")
+        return handler(str(action or ""), fields)
+
+    def microphone_recordings(self) -> dict:
+        handler = getattr(self.runtime, "handle_microphone", None)
+        if handler is None:
+            raise RuntimeError("麦克风功能未启用")
+        return handler("list", {})
+
+    def microphone_recording(self, name: str) -> str:
+        handler = getattr(self.runtime, "microphone_recording", None)
+        if handler is None:
+            raise RuntimeError("麦克风功能未启用")
+        return str(handler(str(name or "")))
+
+    # ------------------------------------------------------------- voice
+    def voice_command(self, text: str) -> dict:
+        """``POST /api/voice``：文本语音指令 -> ROS 场景节点。"""
+        handler = getattr(self.runtime, "handle_voice", None)
+        if handler is None:
+            raise RuntimeError("语音场景未启用")
+        return handler(str(text or ""))
+
+    def voice_payload(self) -> dict:
+        """``GET /api/voice``：当前场景状态快照。"""
+        handler = getattr(self.runtime, "voice_status", None)
+        if handler is None:
+            raise RuntimeError("语音场景未启用")
+        return handler()
+
+    # ------------------------------------------------------------ scenario
+    def scenario_command(self, text: str, source: str = "text") -> dict:
+        """``POST /api/scenario/execute``：通用场景指令 -> ROS 场景节点。"""
+        handler = getattr(self.runtime, "handle_scenario_command", None)
+        if handler is None:
+            handler = getattr(self.runtime, "handle_voice", None)
+            if handler is None:
+                raise RuntimeError("场景执行接口未启用")
+            return handler(str(text or ""))
+        return handler(str(text or ""), str(source or "text"))
+
+    def scenario_payload(self) -> dict:
+        """``GET /api/scenario``：通用场景状态快照（兼容 /api/voice）。"""
+        handler = getattr(self.runtime, "scenario_status", None)
+        if handler is None:
+            handler = getattr(self.runtime, "voice_status", None)
+        if handler is None:
+            raise RuntimeError("场景执行接口未启用")
+        return handler()
+
+    # ------------------------------------------------------------- power
+    def power_payload(self) -> dict:
+        handler = getattr(self.runtime, "power_status", None)
+        if handler is None:
+            raise RuntimeError("电源监控不可用")
+        return handler()
+
+    # ------------------------------------------------------------- radar
+    def radar_payload(self) -> dict:
+        handler = getattr(self.runtime, "radar_status", None)
+        if handler is None:
+            raise RuntimeError("雷达地图未启用")
+        return handler()
 
     # ------------------------------------------------------------- static
     def _safe_path(self, root: str, request_path: str) -> Optional[str]:
@@ -556,6 +727,190 @@ class _EdgeRequestHandler(BaseHTTPRequestHandler):
             self._send_text(200, "stopped")
             return
 
+        if path.startswith("/api/speaker"):
+            action = path[len("/api/speaker") :].strip("/")
+            if action not in {"connect", "model", "prepare", "say", "play", "volume", "stop"}:
+                self._send_json(
+                    404,
+                    app.error_payload("not_found", "未知音箱操作"),
+                )
+                return
+            body = self._read_body()
+            if body is None:
+                return
+            fields = self._parse_fields(body)
+            if action == "say" and not fields.get("text"):
+                raw_text = body.decode("utf-8", "replace").strip()
+                if raw_text and not raw_text.startswith("{") and "=" not in raw_text:
+                    fields["text"] = raw_text
+            try:
+                payload = app.speaker_action(action, fields)
+            except ValueError as exc:
+                self._send_json(
+                    400, app.error_payload("invalid_speaker_request", str(exc))
+                )
+                return
+            except RuntimeError as exc:
+                self._send_json(
+                    503, app.error_payload("speaker_unavailable", str(exc))
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("speaker action failed")
+                self._send_json(
+                    500, app.error_payload("speaker_failed", f"音箱操作失败: {exc}")
+                )
+                return
+            self._send_json(200, payload)
+            return
+
+        if path.startswith("/api/microphone"):
+            action = path[len("/api/microphone") :].strip("/")
+            if action not in {"start", "stop", "play", "volume", "gain", "list"}:
+                self._send_json(
+                    404,
+                    app.error_payload("not_found", "未知麦克风操作"),
+                )
+                return
+            body = self._read_body()
+            if body is None:
+                return
+            fields = self._parse_fields(body)
+            try:
+                payload = app.microphone_action(action, fields)
+            except ValueError as exc:
+                self._send_json(
+                    400, app.error_payload("invalid_microphone_request", str(exc))
+                )
+                return
+            except RuntimeError as exc:
+                self._send_json(
+                    503, app.error_payload("microphone_unavailable", str(exc))
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("microphone action failed")
+                self._send_json(
+                    500, app.error_payload("microphone_failed", f"麦克风操作失败: {exc}")
+                )
+                return
+            self._send_json(200, payload)
+            return
+
+        if path == "/api/voice":
+            body = self._read_body()
+            if body is None:
+                return
+            fields = self._parse_fields(body)
+            text = str(fields.get("text") or fields.get("command") or "").strip()
+            if not text:
+                raw = body.decode("utf-8", "replace").strip()
+                if raw and not raw.startswith("{") and "=" not in raw:
+                    text = raw
+            if not text:
+                self._send_json(
+                    400,
+                    app.error_payload(
+                        "empty_voice_command", "缺少语音文本 text/command"
+                    ),
+                )
+                return
+            if len(text) > 200:
+                self._send_json(
+                    400,
+                    app.error_payload("voice_command_too_long", "语音文本过长（>200）"),
+                )
+                return
+            try:
+                payload = app.voice_command(text)
+            except ValueError as exc:
+                self._send_json(
+                    400, app.error_payload("invalid_voice_request", str(exc))
+                )
+                return
+            except RuntimeError as exc:
+                self._send_json(
+                    503, app.error_payload("voice_unavailable", str(exc))
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("voice command failed")
+                self._send_json(
+                    500, app.error_payload("voice_failed", f"语音指令失败: {exc}")
+                )
+                return
+            self._send_json(200, payload)
+            return
+
+        if path in {"/api/scenario", "/api/scenario/execute"}:
+            body = self._read_body()
+            if body is None:
+                return
+            fields = self._parse_fields(body)
+            text = str(fields.get("text") or fields.get("command") or "").strip()
+            if not text:
+                raw = body.decode("utf-8", "replace").strip()
+                if raw and not raw.startswith("{") and "=" not in raw:
+                    text = raw
+            source = str(fields.get("source") or "text").strip().lower()
+            if source not in {"text", "voice"}:
+                source = "text"
+            if not text:
+                self._send_json(
+                    400,
+                    app.error_payload(
+                        "empty_scenario_command", "缺少场景指令文本 text/command"
+                    ),
+                )
+                return
+            if len(text) > 200:
+                self._send_json(
+                    400,
+                    app.error_payload(
+                        "scenario_command_too_long", "场景指令过长（>200）"
+                    ),
+                )
+                return
+            try:
+                payload = app.scenario_command(text, source)
+            except ValueError as exc:
+                self._send_json(
+                    400, app.error_payload("invalid_scenario_request", str(exc))
+                )
+                return
+            except RuntimeError as exc:
+                self._send_json(
+                    503, app.error_payload("scenario_unavailable", str(exc))
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("scenario command failed")
+                self._send_json(
+                    500, app.error_payload("scenario_failed", f"场景指令失败: {exc}")
+                )
+                return
+            self._send_json(200, payload)
+            return
+
+        if path == "/api/center/handshake":
+            body = self._read_body()
+            if body is None:
+                return
+            fields = self._parse_fields(body)
+            fields["module"] = "center"
+            remote = self.client_address[0] if self.client_address else ""
+            try:
+                payload = app.report_module(fields, remote)
+            except ValueError as exc:
+                self._send_json(400, app.error_payload("invalid_handshake", str(exc)))
+                return
+            except RuntimeError as exc:
+                self._send_json(507, app.error_payload("registry_full", str(exc)))
+                return
+            payload["message"] = "CENTER 握手成功，地址已记录"
+            self._send_json(200, payload)
+            return
+
         if path == "/api/modules/report":
             body = self._read_body()
             if body is None:
@@ -664,6 +1019,27 @@ class _EdgeRequestHandler(BaseHTTPRequestHandler):
             self._send_json(200, payload, head_only=head_only)
             return
 
+        if path == "/api/radar":
+            try:
+                payload = app.radar_payload()
+            except RuntimeError as exc:
+                self._send_json(
+                    503,
+                    app.error_payload("radar_unavailable", str(exc)),
+                    head_only=head_only,
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("radar status failed")
+                self._send_json(
+                    500,
+                    app.error_payload("radar_failed", f"雷达地图不可用: {exc}"),
+                    head_only=head_only,
+                )
+                return
+            self._send_json(200, payload, head_only=head_only)
+            return
+
         if path == "/api/events":
             handler = getattr(app.runtime, "events", None)
             if handler is None:
@@ -680,8 +1056,169 @@ class _EdgeRequestHandler(BaseHTTPRequestHandler):
             self._send_json(200, handler(limit), head_only=head_only)
             return
 
+        if path == "/api/speaker":
+            try:
+                payload = app.speaker_payload()
+            except RuntimeError as exc:
+                self._send_json(
+                    503,
+                    app.error_payload("speaker_unavailable", str(exc)),
+                    head_only=head_only,
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("speaker status failed")
+                self._send_json(
+                    500,
+                    app.error_payload("speaker_failed", f"音箱状态不可用: {exc}"),
+                    head_only=head_only,
+                )
+                return
+            self._send_json(200, payload, head_only=head_only)
+            return
+
+        if path == "/api/microphone":
+            try:
+                payload = app.microphone_payload()
+            except RuntimeError as exc:
+                self._send_json(
+                    503,
+                    app.error_payload("microphone_unavailable", str(exc)),
+                    head_only=head_only,
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("microphone status failed")
+                self._send_json(
+                    500,
+                    app.error_payload(
+                        "microphone_failed", f"麦克风状态不可用: {exc}"
+                    ),
+                    head_only=head_only,
+                )
+                return
+            self._send_json(200, payload, head_only=head_only)
+            return
+
+        if path == "/api/microphone/recordings":
+            try:
+                payload = app.microphone_recordings()
+            except RuntimeError as exc:
+                self._send_json(
+                    503,
+                    app.error_payload("microphone_unavailable", str(exc)),
+                    head_only=head_only,
+                )
+                return
+            self._send_json(200, payload, head_only=head_only)
+            return
+
+        if path.startswith("/api/microphone/recordings/"):
+            name = urllib.parse.unquote(path[len("/api/microphone/recordings/") :])
+            try:
+                filename = app.microphone_recording(name)
+            except ValueError as exc:
+                self._send_json(
+                    404,
+                    app.error_payload("recording_not_found", str(exc)),
+                    head_only=head_only,
+                )
+                return
+            except RuntimeError as exc:
+                self._send_json(
+                    503,
+                    app.error_payload("microphone_unavailable", str(exc)),
+                    head_only=head_only,
+                )
+                return
+            self._send_file(
+                filename,
+                "audio/wav",
+                filename=os.path.basename(filename),
+                head_only=head_only,
+            )
+            return
+
+        if path == "/api/scenario":
+            try:
+                payload = app.scenario_payload()
+            except RuntimeError as exc:
+                self._send_json(
+                    503,
+                    app.error_payload("scenario_unavailable", str(exc)),
+                    head_only=head_only,
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("scenario status failed")
+                self._send_json(
+                    500,
+                    app.error_payload("scenario_failed", f"场景状态不可用: {exc}"),
+                    head_only=head_only,
+                )
+                return
+            self._send_json(200, payload, head_only=head_only)
+            return
+
+        if path == "/api/voice":
+            try:
+                payload = app.voice_payload()
+            except RuntimeError as exc:
+                self._send_json(
+                    503,
+                    app.error_payload("voice_unavailable", str(exc)),
+                    head_only=head_only,
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("voice status failed")
+                self._send_json(
+                    500,
+                    app.error_payload("voice_failed", f"语音状态不可用: {exc}"),
+                    head_only=head_only,
+                )
+                return
+            self._send_json(200, payload, head_only=head_only)
+            return
+
+        if path == "/api/power":
+            try:
+                payload = app.power_payload()
+            except RuntimeError as exc:
+                self._send_json(
+                    503,
+                    app.error_payload("power_unavailable", str(exc)),
+                    head_only=head_only,
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("power status failed")
+                self._send_json(
+                    500,
+                    app.error_payload("power_failed", f"电源状态不可用: {exc}"),
+                    head_only=head_only,
+                )
+                return
+            self._send_json(200, payload, head_only=head_only)
+            return
+
         if path == "/api/modules":
             self._send_json(200, app.modules_payload_with_reported(), head_only=head_only)
+            return
+
+        if path == "/api/center":
+            center = app.center_endpoint()
+            if center is None:
+                self._send_json(
+                    404,
+                    app.error_payload(
+                        "center_not_reported",
+                        "CENTER 尚未握手；等待 Center Server 启动上报",
+                    ),
+                    head_only=head_only,
+                )
+                return
+            self._send_json(200, center, head_only=head_only)
             return
 
         if path in {"/api/modules/edge", "/api/modules/edge/health"}:
@@ -872,6 +1409,39 @@ class _EdgeRequestHandler(BaseHTTPRequestHandler):
         self, status: int, body: bytes, content_type: str
     ) -> None:
         self._send_bytes(status, body, content_type)
+
+    def _send_file(
+        self,
+        path: str,
+        content_type: str,
+        *,
+        filename: str = "",
+        head_only: bool = False,
+    ) -> None:
+        try:
+            with open(path, "rb") as handle:
+                body = handle.read()
+        except OSError:
+            self._send_text(500, "Failed to open file", head_only=head_only)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        if filename:
+            quoted = urllib.parse.quote(filename)
+            self.send_header(
+                "Content-Disposition",
+                f"attachment; filename={quoted}; filename*=UTF-8''{quoted}",
+            )
+        self.end_headers()
+        if body and not head_only:
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
     def _send_bytes(
         self,

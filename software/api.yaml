@@ -8,7 +8,7 @@ info:
 
     | 模块 | 传输 | 入口 | 说明 |
     | --- | --- | --- | --- |
-    | **Edge Server** | HTTP | `http://192.168.4.1`（80） | 树莓派 Edge Server：网页手柄、数字孪生、模块上报/代理、静态资源、MJPEG 图传、STM32 串口桥；内置 ROS 健康网关（`:8090`） |
+    | **Edge Server** | HTTP | `http://192.168.3.26`（80） | 树莓派 Edge Server：网页手柄、数字孪生、模块上报/代理、静态资源、MJPEG 图传、STM32 串口桥；内置 ROS 健康网关（`:8090`） |
     | **Center Server** | HTTP | `http://127.0.0.1:8000` | SmolVLA 多模态推理、健康检查、模型/参数信息 |
     | **Body Control** | UART | STM32 USART3，115200 8N1 | 树莓派 Edge Server → STM32 的 ASCII 运动/音频命令，无 ACK |
 
@@ -17,7 +17,7 @@ info:
     > ROS 健康网关已并入 Edge Server：`health_monitor_node` 默认在
     > `127.0.0.1:8090` 提供 `/ros/*` 接口，80 端口通过
     > `/api/modules/ros/health|params` 代理；完整契约见
-    > `software/edge_server/HEALTHCHECK.md`。
+    > `software/edge_server/docs/HEALTHCHECK.md`。
     >
     > **UART 说明**：OpenAPI/Swagger 只原生描述 HTTP。本文档用
     > `/body-control/uart/command` 作为**虚拟归档路径**，并在
@@ -27,7 +27,7 @@ info:
     详细文档：
     - Edge Server：`software/edge_server/README.md`（`edge_server_node`）
     - Center Server：`software/center_server/README.md`、`DESIGN.md`
-    - ROS 健康网关（Edge Server 内置）：`software/edge_server/HEALTHCHECK.md`
+    - ROS 健康网关（Edge Server 内置）：`software/edge_server/docs/HEALTHCHECK.md`
     - Body Control：`software/body_control/README.md`
 
   license:
@@ -35,7 +35,7 @@ info:
     url: https://www.apache.org/licenses/LICENSE-2.0.html
 
 servers:
-  - url: "http://192.168.4.1"
+  - url: "http://192.168.3.26"
     description: Pi Edge Server（树莓派 AP，HTTP 80）
 
 # Edge/UART/健康检查默认匿名；Center 受保护端点在各 operation 上覆盖为可选鉴权
@@ -45,7 +45,7 @@ tags:
   - name: Edge Server
     description: |
       树莓派 4B/5 车载上位机（Edge Server 与 ROS 2 同机）。手机/PC 连接
-      `RUSH-MOG` Wi-Fi（树莓派 hostapd）后访问 `http://192.168.4.1`。
+      `RUSH-MOG` Wi-Fi（树莓派 hostapd）后访问 `http://192.168.3.26`。
       80 端口负责网页/静态文件/控制/状态/模块监控 API，8080 端口负责
       ROS 相机 MJPEG 图传；控制命令通过 Pi UART 直接发给 STM32。
 
@@ -54,11 +54,15 @@ tags:
       `/api/modules/report` 上报，页面通过 `/api/modules/{id}/health|params`
       由 Edge Server 代理访问模块。`ros` 是本地保留子系统 ID，不允许外部上报。
 
+      CENTER 启动时调用 `POST /api/center/handshake`，Edge 记录其 IP/端口与
+      `infer_url`；机载 VLA 节点通过 `GET /api/center` 发现推理地址。注册表在
+      内存中，Center 每 10s 心跳续约，Edge 重启后自动恢复。
+
       内置 ROS 健康网关：`health_monitor_node` 默认监听 `127.0.0.1:8090`，
       提供 `/ros/health`、`/ros/health/devices/{id}`、`/ros/params`、
       `/ros/healthz`、`/ros/readyz`；80 端口通过
       `/api/modules/ros/health|params` 代理。完整契约见
-      `software/edge_server/HEALTHCHECK.md`。
+      `software/edge_server/docs/HEALTHCHECK.md`。
     x-docs: "./edge_server/README.md"
   - name: Center Server
     description: |
@@ -70,6 +74,10 @@ tags:
       中心服务的 `GET /` 服务信息因与 Edge Server 的 `GET /` 冲突，
       不单独占用 path，见 `x-center-server.root_response`；CORS 见
       `x-center-server.cors`。
+
+      Center 启动并绑定端口后向 Edge 发送 `POST /api/center/handshake`
+      （之后每 10s heartbeat），上报本机 IP、推理端口与模型能力；
+      机载 VLA 节点据此发现 `/v1/infer`，不需要手工配置 IP。
     x-docs: "./center_server/README.md"
   - name: Body Control (UART)
     description: |
@@ -92,7 +100,7 @@ x-modules:
   - id: edge_server
     name: Edge Server
     transport: http
-    base_url: "http://192.168.4.1"
+    base_url: "http://192.168.3.26"
     ports:
       http: 80
       mjpeg: 8080
@@ -107,7 +115,7 @@ x-modules:
       - "edge_server/web/"
     docs:
       - "edge_server/README.md"
-      - "edge_server/HEALTHCHECK.md"
+      - "edge_server/docs/HEALTHCHECK.md"
   - id: center_server
     name: Center Server
     transport: http
@@ -127,8 +135,8 @@ x-modules:
 x-edge-network:
   mode: AP
   ssid: "RUSH-MOG"
-  ip: "192.168.4.1"
-  gateway: "192.168.4.1"
+  ip: "192.168.3.26"
+  gateway: "192.168.3.26"
   subnet: "255.255.255.0"
   channel: 6
   max_clients: 4
@@ -136,7 +144,7 @@ x-edge-network:
     http: 80
     mjpeg: 8080
     ros_health: 8090
-  note: "树莓派 hostapd 提供该 AP（或接入现有局域网）；手机连上后打开 http://192.168.4.1 进入 PS2 手柄页面。"
+  note: "树莓派 hostapd 提供该 AP（或接入现有局域网）；手机连上后打开 http://192.168.3.26 进入 PS2 手柄页面。"
 
 x-edge-http:
   implementation: "edge_server/edge_server/edge_web.py（stdlib ThreadingHTTPServer）"
@@ -269,7 +277,7 @@ x-edge-ros-health:
   auth:
     optional: true
     note: "health.http.api_key 非空时，/ros/health 与 /ros/params 需要 Bearer 或 X-API-Key；/ros/healthz、/ros/readyz 保持匿名。"
-  docs: "edge_server/HEALTHCHECK.md"
+  docs: "edge_server/docs/HEALTHCHECK.md"
 
 x-center-server:
   service: "rush-mog-center-server"
@@ -353,9 +361,11 @@ x-body-control-uart:
     note: |
       STM32 不返回命令 ACK，uart_log 输出已关闭。
       USART3 上会周期发送编码器遥测（STM32 -> Pi Edge Server）：
-      $B,<seq>,<uptime_ms>,<fl>,<fr>,<rl>,<rr>,<distance_mm>\n
-      轮速单位 mm/s，里程单位 mm；Edge Server 解析后通过 GET /api/body
-      和 GET /api/modules 的 edge.body 暴露，同时发布 ROS /odom。
+      $B,<seq>,<uptime_ms>,<fl>,<fr>,<rl>,<rr>,<distance_mm>,<cliff_mask>\n
+      轮速单位 mm/s，里程单位 mm；cliff_mask bit0=左前 PB3、bit1=右前 PB4。
+      Edge Server 兼容旧 8 字段固件，解析后通过 GET /api/body 和
+      GET /api/modules 的 edge.body 暴露，同时发布 ROS /odom 与
+      /body/cliff_status。
   second_byte:
     motion_direct: "0-9/A/B/C/D 命令可带 1 位 PWM：0=停，1..9 对应约 11%..100% 占空比。"
     audio_play: "P 命令可带 1 位曲目索引 1..9；不带则播放 V8_STOP（索引 1）。"
@@ -674,7 +684,7 @@ paths:
         页面实际使用 `http://<host>:8080/stream`。
       operationId: edgeMjpegStream
       servers:
-        - url: "http://192.168.4.1:8080"
+        - url: "http://192.168.3.26:8080"
           description: Edge Server MJPEG 端口
       responses:
         '200':
@@ -703,7 +713,7 @@ paths:
             Location:
               schema:
                 type: string
-              example: "http://192.168.4.1:8080/stream"
+              example: "http://192.168.3.26:8080/stream"
           content:
             text/plain:
               schema:
@@ -939,7 +949,15 @@ paths:
                 encoder_ok: true
                 ros_status: ok
                 ros_ready: true
-                ip: "192.168.4.1"
+                speaker_connected: true
+                speaker_state: connected
+                speaker_device: newmine
+                audio_playing: false
+                mic_available: true
+                mic_recording: false
+                power_status: ok
+                power_ok: true
+                ip: "192.168.3.26"
                 hostname: "rush-mog"
 
   /api/modules:
@@ -967,6 +985,7 @@ paths:
         Pi Edge Server 从 UART 解析 STM32 编码器遥测后缓存的最新帧。
         轮速单位 mm/s，distance_mm 为四轮平均绝对里程。
         `valid=false` 表示从未收到；`stale=true` 表示超过 2s 未更新。
+        `cliff.available=false` 表示 STM32 固件尚未上报第 9 字段 cliff_mask。
       operationId: edgeBody
       responses:
         '200':
@@ -980,6 +999,15 @@ paths:
                   body:
                     type: object
                     properties:
+                      cliff:
+                        type: object
+                        properties:
+                          available: {type: boolean}
+                          mask: {type: integer}
+                          left: {type: boolean}
+                          right: {type: boolean}
+                          triggered: {type: boolean}
+                          state: {type: string}
                       valid: {type: boolean}
                       stale: {type: boolean}
                       source: {type: string, example: stm32}
@@ -993,6 +1021,467 @@ paths:
                         minItems: 4
                         maxItems: 4
                       distance_mm: {type: integer}
+
+  /api/radar:
+    get:
+      tags: [Edge Server]
+      summary: 雷达地图与扫描快照
+      description: |
+        dashboard「雷达地图」数据源：`/map` 降采样栅格（base64，0=未知/1=空闲/2=占据）、
+        `/scan` 极坐标扫描点、`/center/pose` 位姿。各字段 `available=false` 表示尚未订阅到或已超时。
+      operationId: edgeRadar
+      responses:
+        '200':
+          description: 雷达快照
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: {type: boolean}
+                  enabled: {type: boolean}
+                  server_time_ms: {type: integer}
+                  map:
+                    type: object
+                    properties:
+                      available: {type: boolean}
+                      age_ms: {type: integer}
+                      frame_id: {type: string}
+                      width: {type: integer}
+                      height: {type: integer}
+                      source_width: {type: integer}
+                      source_height: {type: integer}
+                      step: {type: integer}
+                      resolution: {type: number}
+                      origin:
+                        type: object
+                        properties:
+                          x: {type: number}
+                          y: {type: number}
+                          yaw: {type: number}
+                      data:
+                        type: string
+                        description: base64 编码的 uint8 栅格，行优先，y 向上
+                  scan:
+                    type: object
+                    properties:
+                      available: {type: boolean}
+                      age_ms: {type: integer}
+                      frame_id: {type: string}
+                      angle_min: {type: number}
+                      angle_increment: {type: number}
+                      range_min: {type: number}
+                      range_max: {type: number}
+                      count: {type: integer}
+                      ranges:
+                        type: array
+                        items:
+                          type: number
+                          nullable: true
+                  pose:
+                    type: object
+                    properties:
+                      available: {type: boolean}
+                      age_ms: {type: integer}
+                      frame_id: {type: string}
+                      x: {type: number}
+                      y: {type: number}
+                      yaw: {type: number}
+        '503':
+          description: 雷达地图功能未启用
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: {type: boolean}
+                  error:
+                    type: object
+                    properties:
+                      code: {type: string}
+                      message: {type: string}
+
+  /api/speaker:
+    get:
+      tags: [Edge Server]
+      summary: 蓝牙音箱与语音播报状态
+      description: |
+        返回当前蓝牙音箱（默认 NewMine，可切到 HONOR AM510）的连接状态、A2DP sink、音量、TTS 后端和播放队列。
+        `status=ok` 表示已连接且音频输出就绪；`degraded` 表示已连接但 sink 未就绪；
+        `starting` 表示搜索/连接中；`error` 表示最近一次连接失败（后台会继续重试）。
+      operationId: edgeSpeakerStatus
+      responses:
+        '200':
+          description: 音箱状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgeSpeakerStatus'
+        '503':
+          description: 音箱功能未启用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /api/speaker/{action}:
+    post:
+      tags: [Edge Server]
+      summary: 音箱操作（连接/播报/播放/音量/停止/切型号）
+      description: |
+        - `connect`：立即触发一次蓝牙连接检查；
+        - `model`：`{"model":"newmine"}` 或 `{"model":"am510"}`，切换型号并重连；
+        - `prepare`：`{"text":"..."}`，提前合成到缓存（不播放），供输入框预合成；
+        - `say`：`{"text":"...","voice":"cmn"}`，走 TTS 后播放；也接受 text/plain；
+        - `play`：`{"file":"prompt.wav"}`，文件必须位于 `edge.speaker.audio_dir`；
+        - `volume`：`{"volume":70}`，0..100；
+        - `stop`：清空队列并停止当前播放。
+      operationId: edgeSpeakerAction
+      parameters:
+        - name: action
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [connect, model, prepare, say, play, volume, stop]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+          text/plain:
+            schema:
+              type: string
+      responses:
+        '200':
+          description: 操作已接受（`speaker` 为最新状态）
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          description: 参数非法（空文本/音量越界/文件越界等）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '404':
+          description: 未知音箱动作
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '503':
+          description: 音箱功能未启用或当前不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /api/microphone:
+    get:
+      tags: [Edge Server]
+      summary: 蓝牙音箱 HFP 麦克风状态
+      description: |
+        返回蓝牙音箱内置麦克风的 HFP 能力、输入源、录音状态、最近录音和音量。
+        `available=true` 表示音箱已连接且 card 提供 `headset-head-unit` profile；
+        录音时临时切到 HFP，`recording=true`；停止后自动恢复 A2DP。
+      operationId: edgeMicrophoneStatus
+      responses:
+        '200':
+          description: 麦克风状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgeMicrophoneStatus'
+        '503':
+          description: 麦克风功能未启用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /api/microphone/{action}:
+    post:
+      tags: [Edge Server]
+      summary: 麦克风操作（开始/停止录音、回放、音量、列表）
+      description: |
+        - `start`：`{"duration":10}` 开始录音；省略 duration 用 `max_duration_sec`；
+        - `stop`：停止录音并恢复 A2DP；
+        - `play`：`{"file":"mic-....wav"}` 回放录音；
+        - `volume`：`{"volume":100}` 麦克风音量 0..100；
+        - `gain`：`{"gain":3.0}` 软件增益 1.0..8.0（HFP 麦克风偏小时使用）；
+        - `list`：返回录音文件列表。
+      operationId: edgeMicrophoneAction
+      parameters:
+        - name: action
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [start, stop, play, volume, gain, list]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 操作已接受（`microphone` 为最新状态）
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          description: 参数非法（时长/音量/文件名等）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '404':
+          description: 未知麦克风动作
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '503':
+          description: 麦克风未启用或音箱不支持 HFP
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /api/microphone/recordings:
+    get:
+      tags: [Edge Server]
+      summary: 录音文件列表
+      operationId: edgeMicrophoneRecordings
+      responses:
+        '200':
+          description: '`{ok,count,recordings,dir}`，按修改时间倒序'
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '503':
+          description: 麦克风功能未启用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /api/microphone/recordings/{name}:
+    get:
+      tags: [Edge Server]
+      summary: 下载 WAV 录音
+      operationId: edgeMicrophoneRecordingDownload
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}\.wav$'
+      responses:
+        '200':
+          description: WAV 文件
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: 录音不存在或文件名非法
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '503':
+          description: 麦克风功能未启用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /api/power:
+    get:
+      tags: [Edge Server]
+      summary: 树莓派电源/欠压监控
+      description: |
+        读取 `vcgencmd get_throttled` 与 `rpi_volt/in0_lcrit_alarm`，代表
+        “电源及转换板”硬件模块状态。当前欠压 → `error`；当前降频/温度限制 →
+        `degraded`；仅历史位 → `status=ok, warning=true`（当前已恢复）。
+      operationId: edgePowerStatus
+      responses:
+        '200':
+          description: 电源状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgePowerStatus'
+        '503':
+          description: 电源监控不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /api/voice:
+    get:
+      tags: [Edge Server]
+      summary: 语音找东西场景状态
+      description: |
+        返回 Edge Server 缓存的 `/center/scenario_status` 最近一帧，以及
+        `/edge/voice_command` 的在线/近一次文本。网页用它在语音寻找时显示
+        “正在找 / 找到了 / 没找到”。
+      operationId: edgeVoiceStatus
+      responses:
+        '200':
+          description: 语音场景状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgeVoiceStatus'
+        '503':
+          description: 语音场景功能未启用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+    post:
+      tags: [Edge Server]
+      summary: 发送语音文本（找东西 / 取消）
+      description: |
+        语音识别在手机/终端完成，这里只接收文本。支持 raw `text/plain`、
+        form `text=...`、JSON `{"text": "..."}` 三种请求体。文本会发布到
+        `/edge/voice_command`，由 `voice_scenario_node` 解析并调用
+        `/center/search_object`；找到后通过 `/body/say` 播报。
+
+        示例：
+        - `帮我找一下拖鞋` → 搜索 `slipper`
+        - `拖鞋在哪` → 搜索 `slipper`
+        - `别找了` / `停止寻找` → 取消当前搜索
+      operationId: edgeVoiceCommand
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+              example: 帮我找一下拖鞋
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: {type: string, example: 帮我找一下拖鞋}
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: {type: string, example: 帮我找一下拖鞋}
+      responses:
+        '200':
+          description: 指令已发送
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgeVoiceCommandResponse'
+        '400':
+          description: 文本为空或过长
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '503':
+          description: 语音场景功能未启用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /api/scenario:
+    get:
+      tags: [Edge Server]
+      summary: 通用场景执行状态
+      description: |
+        返回 `/center/scenario_status` 最近一帧，以及通用场景输入的在线状态和
+        最近一次命令的 `last_source` / `last_dispatch`。与 `/api/voice` 返回同一份
+        场景状态，供 dashboard「实时监控信息」使用。
+      operationId: edgeScenarioStatus
+      responses:
+        '200':
+          description: 场景状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgeVoiceStatus'
+        '503':
+          description: 场景执行接口未启用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /api/scenario/execute:
+    post:
+      tags: [Edge Server]
+      summary: 执行文本场景指令
+      description: |
+        通用场景执行接口的文本适配器。发布 `/edge/scenario_command`（JSON
+        `{text, source, request_id}`），由 `voice_scenario_node` 统一解析：
+        找物/取消进入 `FindObjectScenario`；建图/探索/导航/回家转交
+        `/center/mission_request`。支持 raw `text/plain`、form `text=...`、
+        JSON `{"text": "...", "source": "text"}`。
+      operationId: edgeScenarioExecute
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+              example: 找拖鞋
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: {type: string, example: 找拖鞋}
+                source: {type: string, enum: [text, voice], default: text}
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: {type: string, example: 找拖鞋}
+                source: {type: string, enum: [text, voice], default: text}
+      responses:
+        '200':
+          description: 指令已发送
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgeVoiceCommandResponse'
+        '400':
+          description: 文本为空或过长
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '503':
+          description: 场景执行接口未启用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
 
   /api/modules/report:
     post:
@@ -1027,6 +1516,71 @@ paths:
                 $ref: '#/components/schemas/CenterErrorResponse'
         '507':
           description: 注册表已满（最多 8 个模块）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /api/center/handshake:
+    post:
+      tags: [Edge Server]
+      summary: CENTER 启动/心跳握手
+      description: |
+        Center Server 启动并绑定 HTTP 端口后调用；之后每 `interval_sec`
+        （默认 10s）以 `heartbeat` 续约。Edge 以 TCP 连接来源 IP 为准记录地址，
+        忽略 payload 里的 `ip`，并按端口/路径生成 `infer_url`，供机载
+        `vla_inference_node` 通过 `GET /api/center` 发现。
+
+        也兼容 `POST /api/modules/report`（Center 配置 `handshake.path` 可切换）；
+        本接口等价于强制 `module=center` 的上报。支持 JSON 或表单。
+      operationId: edgeCenterHandshake
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CenterHandshake'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CenterHandshake'
+      responses:
+        '200':
+          description: 已记录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterHandshakeAck'
+        '400':
+          description: 端口/路径/地址非法（必须是本机或内网地址）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '507':
+          description: 注册表已满
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /api/center:
+    get:
+      tags: [Edge Server]
+      summary: CENTER 握手快照（VLA 地址发现）
+      description: |
+        返回最近一次 CENTER 握手记录的 IP、端口、`base_url`、`infer_url`、
+        health/params 地址、模型 `meta` 与新鲜度。未握手时 404；机载客户端
+        应继续使用规则桩，等 Center 下一次 heartbeat。
+      operationId: edgeCenterEndpoint
+      responses:
+        '200':
+          description: CENTER 已握手
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgeCenterEndpoint'
+        '404':
+          description: CENTER 尚未握手
           content:
             application/json:
               schema:
@@ -1344,6 +1898,58 @@ paths:
         '503':
           $ref: '#/components/responses/CenterModelUnavailable'
 
+  /v1/handshake:
+    servers:
+      - url: "http://127.0.0.1:8000"
+        description: Center Server（默认端口）
+    get:
+      tags: [Center Server]
+      summary: Edge 握手状态
+      description: |
+        返回握手目标、连接状态、尝试/成功/失败次数、最近错误与最近一次
+        Edge 响应（含 `infer_url`）。`GET` 只读状态，不触发网络请求。
+      operationId: centerHandshakeStatus
+      security:
+        - {}
+        - centerBearer: []
+        - centerApiKey: []
+      responses:
+        '200':
+          description: 握手状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterHandshakeStatusResponse'
+        '401':
+          $ref: '#/components/responses/CenterUnauthorized'
+    post:
+      tags: [Center Server]
+      summary: 立即重发一次握手
+      description: |
+        手动触发 `POST <edge>/api/center/handshake`（`handshake=manual`），
+        用于 Edge 重启、换网段或排障。握手未配置/不可达时返回 502，
+        不影响推理端点。
+      operationId: centerHandshakeAnnounce
+      security:
+        - {}
+        - centerBearer: []
+        - centerApiKey: []
+      responses:
+        '200':
+          description: 握手成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterHandshakeResult'
+        '401':
+          $ref: '#/components/responses/CenterUnauthorized'
+        '502':
+          description: Edge 不可达或拒绝握手
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterHandshakeResult'
+
   /v1/model:
     servers:
       - url: "http://127.0.0.1:8000"
@@ -1572,7 +2178,7 @@ paths:
         机器健康看 body 的 `status` / `healthy` / `ready`。
 
         同端口（`:8090`）别名：`/v1/health`、`/health`、`/healthcheck`。完整字段、状态语义和
-        Edge Server/dashboard 接入示例见 `software/edge_server/HEALTHCHECK.md`。
+        Edge Server/dashboard 接入示例见 `software/edge_server/docs/HEALTHCHECK.md`。
       operationId: edgeRosHealth
       security:
         - {}
@@ -2026,6 +2632,198 @@ components:
           type: string
           description: 主机名
 
+    EdgePowerStatus:
+      type: object
+      description: 树莓派电源监控（vcgencmd throttled + rpi_volt）
+      required: [ok, enabled, available, status, healthy]
+      properties:
+        ok: {type: boolean, enum: [true]}
+        enabled: {type: boolean}
+        available: {type: boolean}
+        online: {type: boolean}
+        source: {type: string, example: rpi}
+        model: {type: string, example: "Raspberry Pi 4 Model B Rev 1.4"}
+        status:
+          type: string
+          enum: [ok, degraded, error, disabled, unknown]
+        healthy: {type: boolean}
+        undervoltage: {type: boolean}
+        undervoltage_occurred: {type: boolean}
+        frequency_capped: {type: boolean}
+        throttled: {type: boolean}
+        soft_temp_limit: {type: boolean}
+        throttled_occurred: {type: boolean}
+        throttled_raw: {type: string, example: "0x50000"}
+        warning: {type: boolean}
+        warnings:
+          type: array
+          items: {type: string}
+        core_voltage_v: {type: number, nullable: true, example: 0.85}
+        temperature_c: {type: number, nullable: true, example: 39.4}
+        alarm: {type: integer}
+        error: {type: string}
+        checked_ms: {type: integer, format: int64}
+        age_ms: {type: integer}
+
+    EdgeVoiceScenario:
+      type: object
+      description: 语音找东西场景状态（来自 /center/scenario_status）
+      properties:
+        state:
+          type: string
+          enum: [idle, searching, succeeded, failed, canceled]
+        active: {type: boolean}
+        target_label: {type: string, example: slipper}
+        display_name: {type: string, example: 拖鞋}
+        detail: {type: string, example: "explore frontier (1.20, 0.80)"}
+        search_state:
+          type: string
+          example: exploring
+        elapsed_sec: {type: number, example: 12.4}
+        confidence: {type: number, example: 0.87}
+        explored_ratio: {type: number, example: 0.42}
+        last_utterance: {type: string, example: 帮我找一下拖鞋}
+
+    EdgeVoiceStatus:
+      type: object
+      required: [ok, scenario_online]
+      properties:
+        ok: {type: boolean, enum: [true]}
+        topic: {type: string, example: /edge/voice_command}
+        status_topic: {type: string, example: /center/scenario_status}
+        scenario_online: {type: boolean}
+        subscribers: {type: integer}
+        last_text: {type: string, example: 帮我找一下拖鞋}
+        age_ms: {type: integer, example: 120}
+        scenario:
+          allOf:
+            - $ref: '#/components/schemas/EdgeVoiceScenario'
+          nullable: true
+
+    EdgeVoiceCommandResponse:
+      type: object
+      required: [ok, accepted, text]
+      properties:
+        ok: {type: boolean, enum: [true]}
+        accepted: {type: boolean}
+        text: {type: string, example: 帮我找一下拖鞋}
+        message: {type: string, example: 语音指令已发送}
+        scenario_online: {type: boolean}
+        subscribers: {type: integer}
+        scenario:
+          allOf:
+            - $ref: '#/components/schemas/EdgeVoiceScenario'
+          nullable: true
+
+    EdgeMicrophoneStatus:
+      type: object
+      description: 蓝牙 HFP 麦克风状态（NewMine / HONOR AM510）
+      required: [ok, enabled, available, recording]
+      properties:
+        ok: {type: boolean, enum: [true]}
+        enabled: {type: boolean}
+        supported: {type: boolean}
+        available: {type: boolean}
+        online: {type: boolean}
+        recording: {type: boolean}
+        source: {type: string, example: "bluez_input.73_DB_39_F2_15_4B.headset-head-unit"}
+        sample_rate: {type: integer, example: 8000}
+        channels: {type: integer, example: 1}
+        chunk_ms: {type: integer, example: 100}
+        duration_ms: {type: integer}
+        started_ms: {type: integer, format: int64}
+        file: {type: string}
+        file_name: {type: string}
+        last_file: {type: string}
+        last_file_name: {type: string}
+        last_duration_ms: {type: integer}
+        bytes: {type: integer}
+        volume: {type: integer, minimum: 0, maximum: 100}
+        gain: {type: number, minimum: 1.0, maximum: 8.0}
+        max_duration_sec: {type: number}
+        record_dir: {type: string}
+        topic: {type: string, example: "/edge/audio"}
+        status_topic: {type: string, example: "/body/mic_status"}
+        error: {type: string}
+
+    EdgeSpeakerStatus:
+      type: object
+      description: 蓝牙音箱 + TTS 播放状态（默认 NewMine，支持 AM510）
+      required: [ok, enabled, state, connected, audio_ready]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        enabled:
+          type: boolean
+        keepalive:
+          type: boolean
+          description: 是否持续给 A2DP sink 送静音，防止音箱空闲休眠
+        model:
+          type: string
+          example: newmine
+          description: 当前音箱型号 id（newmine / am510 或 config 自定义）
+        models:
+          type: array
+          items:
+            type: object
+            properties:
+              id: {type: string, example: newmine}
+              label: {type: string, example: NewMine}
+              device_name: {type: string, example: newmine}
+              force_a2dp: {type: boolean, example: false}
+        state:
+          type: string
+          enum: [disabled, starting, scanning, connecting, connected, disconnected, error]
+        status:
+          type: string
+          enum: [ok, degraded, starting, error, disabled, unknown]
+        connected:
+          type: boolean
+        audio_ready:
+          type: boolean
+        online:
+          type: boolean
+          description: 已连接且音频输出就绪；health monitor 用该字段判断音箱是否在线
+        device:
+          type: object
+          properties:
+            name: {type: string, example: newmine}
+            mac: {type: string, example: "73:DB:39:F2:15:4B"}
+            paired: {type: boolean}
+            trusted: {type: boolean}
+        sink:
+          type: object
+          properties:
+            name: {type: string, example: "bluez_output.73_DB_39_F2_15_4B.1"}
+            id: {type: integer}
+            ready: {type: boolean}
+            volume: {type: integer, minimum: 0, maximum: 100}
+        tts:
+          type: object
+          properties:
+            backend: {type: string, example: espeak-ng}
+            voice: {type: string, example: cmn}
+            speed: {type: integer}
+            pre_roll_ms: {type: integer, example: 450}
+            playback_latency_ms: {type: integer, example: 250}
+        playback:
+          type: object
+          properties:
+            playing: {type: boolean}
+            queue: {type: integer}
+            last_text: {type: string}
+            last_error: {type: string}
+            last_played_ms: {type: integer, format: int64}
+        last_error:
+          type: string
+        last_connected_ms:
+          type: integer
+          format: int64
+        updated_ms:
+          type: integer
+          format: int64
+
     EdgeModuleReport:
       type: object
       description: CENTER 等外部模块通过 `POST /api/modules/report` 提交的表单（`ros` 为本地保留）
@@ -2069,6 +2867,178 @@ components:
           type: string
           maxLength: 2048
           description: 精简参数 JSON 字符串；Edge Server 原样缓存
+        scheme:
+          type: string
+          enum: [http, https]
+          default: http
+        infer_port:
+          type: integer
+          minimum: 0
+          maximum: 65535
+          description: 推理端口；CENTER 默认取 health_port（8000）
+        infer_path:
+          type: string
+          maxLength: 80
+          default: "/v1/infer"
+        meta_json:
+          type: string
+          maxLength: 2048
+          description: 模型能力/协议等扩展信息 JSON（CENTER 使用）
+
+    CenterHandshake:
+      type: object
+      description: |
+        Center Server 启动/心跳握手负载（`POST /api/center/handshake`）。
+        Edge 只信任 TCP 对端 IP；`ip` 仅供展示。`module` 会被强制为 `center`。
+      required: [health_port, infer_port]
+      properties:
+        module:
+          type: string
+          enum: [center]
+        name:
+          type: string
+          maxLength: 48
+        version:
+          type: string
+          maxLength: 24
+        status:
+          type: string
+          enum: [ok, starting, degraded, error, unknown, offline, disabled]
+        summary:
+          type: string
+          maxLength: 240
+        ip:
+          type: string
+          description: 仅展示；Edge 以连接来源地址为准
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        scheme:
+          type: string
+          enum: [http, https]
+          default: http
+        health_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          default: 8000
+        health_path:
+          type: string
+          maxLength: 80
+          default: "/v1/health"
+        params_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          default: 8000
+        params_path:
+          type: string
+          maxLength: 80
+          default: "/v1/params"
+        infer_port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          default: 8000
+        infer_path:
+          type: string
+          maxLength: 80
+          default: "/v1/infer"
+        params_json:
+          type: string
+          maxLength: 2048
+        meta_json:
+          type: string
+          maxLength: 2048
+        handshake:
+          type: string
+          enum: [startup, heartbeat, manual]
+          default: startup
+        timestamp:
+          type: string
+          format: date-time
+
+    CenterHandshakeAck:
+      type: object
+      required: [ok, module, ip, port, infer_url]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        module:
+          type: string
+          enum: [center]
+        ip:
+          type: string
+          description: Edge 记录的 TCP 对端 IP
+        port:
+          type: integer
+        scheme:
+          type: string
+        health_url:
+          type: string
+        params_url:
+          type: string
+        infer_url:
+          type: string
+        handshake:
+          type: string
+        message:
+          type: string
+
+    EdgeCenterEndpoint:
+      type: object
+      required: [ok, reported, module, ip, port, base_url, infer_url, updated_ms, stale]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        reported:
+          type: boolean
+          enum: [true]
+        module:
+          type: string
+          enum: [center]
+        message:
+          type: string
+        ip:
+          type: string
+        port:
+          type: integer
+        scheme:
+          type: string
+          enum: [http, https]
+        base_url:
+          type: string
+          example: "http://192.168.4.50:8000"
+        infer_url:
+          type: string
+          example: "http://192.168.4.50:8000/v1/infer"
+        health_url:
+          type: string
+        params_url:
+          type: string
+        version:
+          type: string
+        status:
+          type: string
+        summary:
+          type: string
+        handshake:
+          type: string
+          enum: [startup, heartbeat, manual, ""]
+        meta:
+          type: object
+          additionalProperties: true
+        updated_ms:
+          type: integer
+          format: int64
+        age_ms:
+          type: integer
+          format: int64
+        stale:
+          type: boolean
 
     EdgeModule:
       type: object
@@ -2092,6 +3062,21 @@ components:
         health_url:
           type: string
         params_url:
+          type: string
+        port:
+          type: integer
+          description: 推理端口（CENTER 握手记录）
+        scheme:
+          type: string
+          enum: [http, https]
+        base_url:
+          type: string
+        infer_url:
+          type: string
+        meta:
+          type: object
+          additionalProperties: true
+        handshake:
           type: string
         updated_ms:
           type: integer
@@ -2515,11 +3500,102 @@ components:
           example: "rush-mog-center-server"
         version:
           type: string
-          example: "0.1.0"
+          example: "0.2.0"
         uptime_sec:
           type: number
         model:
           $ref: '#/components/schemas/CenterModelInfo'
+        handshake:
+          $ref: '#/components/schemas/CenterHandshakeStatus'
+        request_id:
+          type: string
+
+    CenterHandshakeStatus:
+      type: object
+      required: [enabled, target, connected, attempts, successes, failures]
+      properties:
+        enabled:
+          type: boolean
+          description: 是否启用且配置了 edge_url
+        target:
+          type: string
+          example: "http://192.168.3.26/api/center/handshake"
+        path:
+          type: string
+        host:
+          type: string
+        port:
+          type: integer
+        public_host:
+          type: string
+        interval_sec:
+          type: number
+        retry_sec:
+          type: number
+        max_retry_sec:
+          type: number
+        timeout_sec:
+          type: number
+        auth:
+          type: boolean
+          description: 是否给 Edge 请求带 Bearer
+        attempts:
+          type: integer
+        successes:
+          type: integer
+        failures:
+          type: integer
+        connected:
+          type: boolean
+          description: 最近一次握手是否成功
+        last_error:
+          type: string
+        last_attempt_at:
+          type: string
+          format: date-time
+        last_ok_at:
+          type: string
+          format: date-time
+        last_reason:
+          type: string
+          enum: [startup, heartbeat, manual, ""]
+        last_response:
+          type: object
+          additionalProperties: true
+          description: Edge 最近一次响应的精简副本（含 infer_url）
+
+    CenterHandshakeStatusResponse:
+      type: object
+      required: [ok, handshake, request_id]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        handshake:
+          $ref: '#/components/schemas/CenterHandshakeStatus'
+        request_id:
+          type: string
+
+    CenterHandshakeResult:
+      type: object
+      required: [ok, handshake, request_id]
+      properties:
+        ok:
+          type: boolean
+        result:
+          type: object
+          additionalProperties: true
+          description: 本次发送结果（ok/enabled/reason/error）
+        handshake:
+          $ref: '#/components/schemas/CenterHandshakeStatus'
+        error:
+          type: object
+          description: 仅失败时返回
+          properties:
+            code:
+              type: string
+            message:
+              type: string
         request_id:
           type: string
 
@@ -2677,7 +3753,7 @@ components:
           example: "camera"
         type:
           type: string
-          enum: [camera, lidar, imu, microphone, speaker, arm, base, battery, odometry, other]
+          enum: [camera, lidar, imu, microphone, speaker, arm, base, battery, power, odometry, other]
         status:
           type: string
           enum: [ok, degraded, error, unknown, disabled]

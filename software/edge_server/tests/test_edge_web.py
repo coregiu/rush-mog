@@ -21,6 +21,88 @@ class FakeRuntime:
     def __init__(self):
         self.commands = []
         self.params = {"stream_fps": 10, "motion_keepalive_ms": 200}
+        self.speaker_actions = []
+        self.speaker_payload = {
+            "ok": True,
+            "enabled": True,
+            "state": "connected",
+            "status": "ok",
+            "connected": True,
+            "audio_ready": True,
+            "device": {
+                "name": "newmine",
+                "mac": "73:DB:39:F2:15:4B",
+                "paired": True,
+                "trusted": True,
+            },
+            "sink": {
+                "name": "bluez_output.73_DB_39_F2_15_4B.1",
+                "id": 42,
+                "ready": True,
+                "volume": 70,
+            },
+            "tts": {"backend": "espeak-ng", "voice": "cmn", "speed": 150},
+            "playback": {
+                "playing": False,
+                "queue": 0,
+                "last_text": "",
+                "last_error": "",
+                "last_played_ms": 0,
+            },
+            "last_error": "",
+        }
+        self.microphone_actions = []
+        self.microphone_payload = {
+            "ok": True,
+            "enabled": True,
+            "supported": True,
+            "available": True,
+            "online": True,
+            "recording": False,
+            "source": "bluez_input.73_DB_39_F2_15_4B.headset-head-unit",
+            "sample_rate": 8000,
+            "channels": 1,
+            "duration_ms": 0,
+            "file": "",
+            "file_name": "",
+            "last_file": "",
+            "last_file_name": "",
+            "last_duration_ms": 1200,
+            "volume": 100,
+            "error": "",
+        }
+        self.mic_file = ""
+        self.voice_commands = []
+        self.scenario_commands = []
+        self.voice_status_payload = {
+            "ok": True,
+            "scenario_online": True,
+            "last_text": "帮我找拖鞋",
+            "age_ms": 120,
+            "scenario": {
+                "state": "searching",
+                "target_label": "slipper",
+                "display_name": "拖鞋",
+                "detail": "explore frontier",
+                "elapsed_sec": 3.2,
+            },
+        }
+        self.power_payload = {
+            "ok": True,
+            "enabled": True,
+            "available": True,
+            "source": "rpi",
+            "model": "Raspberry Pi 4 Model B Rev 1.4",
+            "status": "ok",
+            "healthy": True,
+            "online": True,
+            "undervoltage": False,
+            "throttled_raw": "0x50000",
+            "undervoltage_occurred": True,
+            "warning": True,
+            "core_voltage_v": 0.85,
+            "temperature_c": 39.4,
+        }
         self.body_payload = {
             "valid": True,
             "stale": False,
@@ -57,6 +139,15 @@ class FakeRuntime:
 
     def body(self):
         return self.body_payload
+
+    def radar_status(self):
+        return {
+            "ok": True,
+            "enabled": True,
+            "map": {"available": False},
+            "scan": {"available": False},
+            "pose": {"available": False},
+        }
 
     def motion_snapshot(self):
         return {
@@ -119,6 +210,127 @@ class FakeRuntime:
         if message.startswith("button:stop") or message == "raw:0":
             return "0"
         return "1"
+
+    def handle_voice(self, text):
+        text = str(text or "").strip()
+        if not text:
+            raise ValueError("语音文本为空")
+        self.voice_commands.append(text)
+        return {
+            "ok": True,
+            "accepted": True,
+            "text": text,
+            "message": "语音指令已发送",
+            "scenario_online": True,
+            "scenario": self.voice_status_payload["scenario"],
+        }
+
+    def handle_scenario_command(self, text, source="text"):
+        text = str(text or "").strip()
+        if not text:
+            raise ValueError("场景指令为空")
+        self.scenario_commands.append((text, source))
+        return {
+            "ok": True,
+            "accepted": True,
+            "text": text,
+            "source": source,
+            "interface": "scenario",
+            "message": "场景指令已发送",
+            "scenario_online": True,
+            "scenario": self.voice_status_payload["scenario"],
+        }
+
+    def scenario_status(self):
+        return dict(self.voice_status_payload, interface="scenario")
+
+    def voice_status(self):
+        return dict(self.voice_status_payload)
+
+    def speaker_status(self):
+        return dict(self.speaker_payload)
+
+    def handle_speaker(self, action, fields):
+        self.speaker_actions.append((action, dict(fields)))
+        if action == "say":
+            if not str(fields.get("text", "")).strip():
+                raise ValueError("播报文本为空")
+            return {
+                "ok": True,
+                "message": "语音已加入播放队列",
+                "speaker": self.speaker_payload,
+            }
+        if action == "volume":
+            value = int(str(fields.get("volume", "")))
+            if value < 0 or value > 100:
+                raise ValueError("volume 必须在 0..100")
+            self.speaker_payload["sink"]["volume"] = value
+            return {
+                "ok": True,
+                "message": "音量已更新",
+                "speaker": self.speaker_payload,
+            }
+        return {
+            "ok": True,
+            "message": f"{action} ok",
+            "speaker": self.speaker_payload,
+        }
+
+    def power_status(self):
+        return dict(self.power_payload)
+
+    def microphone_status(self):
+        return dict(self.microphone_payload)
+
+    def handle_microphone(self, action, fields):
+        self.microphone_actions.append((action, dict(fields)))
+        if action == "start":
+            self.microphone_payload["recording"] = True
+            return {
+                "ok": True,
+                "message": "录音已开始",
+                "microphone": self.microphone_payload,
+            }
+        if action == "stop":
+            self.microphone_payload["recording"] = False
+            return {
+                "ok": True,
+                "message": "录音已停止",
+                "microphone": self.microphone_payload,
+            }
+        if action == "list":
+            return {
+                "ok": True,
+                "count": 1,
+                "recordings": [
+                    {
+                        "name": "mic-test.wav",
+                        "size": 4,
+                        "duration_ms": 1200,
+                        "modified_ms": 1700000000000,
+                    }
+                ],
+            }
+        if action == "volume":
+            value = int(str(fields.get("volume", "")))
+            if value < 0 or value > 100:
+                raise ValueError("volume 必须在 0..100")
+            self.microphone_payload["volume"] = value
+            return {
+                "ok": True,
+                "message": "麦克风音量已更新",
+                "microphone": self.microphone_payload,
+            }
+        return {
+            "ok": True,
+            "message": f"{action} ok",
+            "microphone": self.microphone_payload,
+        }
+
+    def microphone_recording(self, name):
+        if name != "mic-test.wav" or not self.mic_file:
+            raise ValueError("录音文件不存在")
+        return self.mic_file
 
     def local_modules(self):
         return [
@@ -234,6 +446,12 @@ def test_body_and_modules(web_server):
     payload = json.loads(body)
     assert payload["body"]["wheel_mm_s"] == [10, 20, 30, 40]
     assert payload["motion"]["source"] == "idle"
+
+    status, _, body = request(port, "/api/radar")
+    assert status == 200
+    radar = json.loads(body)
+    assert radar["ok"] is True
+    assert radar["map"]["available"] is False
 
     status, _, body = request(port, "/api/events?limit=5")
     assert status == 200
@@ -407,6 +625,270 @@ def test_stream_redirect(web_server):
         assert response.getheader("Location") == "http://127.0.0.1:18080/stream"
     finally:
         connection.close()
+
+
+def test_power_api(web_server):
+    port, _ = web_server
+    status, _, body = request(port, "/api/power")
+    payload = json.loads(body)
+    assert status == 200
+    assert payload["status"] == "ok"
+    assert payload["model"].startswith("Raspberry Pi 4")
+    assert payload["warning"] is True
+
+
+def test_voice_api(web_server):
+    port, runtime = web_server
+
+    status, _, body = request(
+        port,
+        "/api/voice",
+        method="POST",
+        data="帮我找一下拖鞋",
+        headers={"Content-Type": "text/plain; charset=utf-8"},
+    )
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["accepted"] is True
+    assert payload["text"] == "帮我找一下拖鞋"
+    assert runtime.voice_commands[-1] == "帮我找一下拖鞋"
+
+    status, _, body = request(
+        port,
+        "/api/voice",
+        method="POST",
+        data=json.dumps({"text": "别找了"}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert status == 200
+    assert runtime.voice_commands[-1] == "别找了"
+
+    status, _, _ = request(
+        port,
+        "/api/voice",
+        method="POST",
+        data="text=找拖鞋",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert status == 200
+    assert runtime.voice_commands[-1] == "找拖鞋"
+
+    status, _, body = request(port, "/api/voice")
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["scenario"]["state"] == "searching"
+    assert payload["scenario"]["display_name"] == "拖鞋"
+
+    status, _, body = request(port, "/api/voice", method="POST", data="")
+    assert status == 400
+    assert json.loads(body)["error"]["code"] == "empty_voice_command"
+
+    status, _, body = request(
+        port,
+        "/api/voice",
+        method="POST",
+        data="找" * 201,
+        headers={"Content-Type": "text/plain"},
+    )
+    assert status == 400
+    assert json.loads(body)["error"]["code"] == "voice_command_too_long"
+
+
+def test_scenario_api(web_server):
+    port, runtime = web_server
+
+    status, _, body = request(
+        port,
+        "/api/scenario/execute",
+        method="POST",
+        data="找拖鞋",
+        headers={"Content-Type": "text/plain; charset=utf-8"},
+    )
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["accepted"] is True
+    assert payload["text"] == "找拖鞋"
+    assert runtime.scenario_commands[-1] == ("找拖鞋", "text")
+
+    status, _, body = request(
+        port,
+        "/api/scenario/execute",
+        method="POST",
+        data=json.dumps({"text": "去厨房", "source": "text"}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert status == 200
+    assert runtime.scenario_commands[-1] == ("去厨房", "text")
+
+    status, _, body = request(port, "/api/scenario")
+    assert status == 200
+    assert json.loads(body)["interface"] == "scenario"
+
+    status, _, body = request(
+        port,
+        "/api/scenario/execute",
+        method="POST",
+        data="",
+        headers={"Content-Type": "text/plain"},
+    )
+    assert status == 400
+    assert json.loads(body)["error"]["code"] == "empty_scenario_command"
+
+    status, _, body = request(
+        port,
+        "/api/scenario/execute",
+        method="POST",
+        data="找" * 201,
+        headers={"Content-Type": "text/plain"},
+    )
+    assert status == 400
+    assert json.loads(body)["error"]["code"] == "scenario_command_too_long"
+
+
+def test_microphone_api(web_server, tmp_path):
+    port, runtime = web_server
+    status, _, body = request(port, "/api/microphone")
+    payload = json.loads(body)
+    assert status == 200
+    assert payload["sample_rate"] == 8000
+    assert payload["available"] is True
+
+    status, _, body = request(
+        port,
+        "/api/microphone/start",
+        method="POST",
+        data=json.dumps({"duration": 5}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert status == 200
+    assert json.loads(body)["microphone"]["recording"] is True
+    assert runtime.microphone_actions[-1] == ("start", {"duration": "5"})
+
+    status, _, body = request(port, "/api/microphone/stop", method="POST")
+    assert status == 200
+    assert json.loads(body)["microphone"]["recording"] is False
+
+    status, _, body = request(
+        port,
+        "/api/microphone/volume",
+        method="POST",
+        data=json.dumps({"volume": 80}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert status == 200
+    assert json.loads(body)["microphone"]["volume"] == 80
+
+    status, _, body = request(port, "/api/microphone/recordings")
+    payload = json.loads(body)
+    assert status == 200
+    assert payload["recordings"][0]["name"] == "mic-test.wav"
+
+    recording = tmp_path / "mic-test.wav"
+    recording.write_bytes(b"RIFFtest")
+    runtime.mic_file = str(recording)
+    status, headers, body = request(
+        port, "/api/microphone/recordings/mic-test.wav"
+    )
+    assert status == 200
+    assert body == b"RIFFtest"
+    assert "audio/wav" in headers["Content-Type"]
+    assert "attachment" in headers["Content-Disposition"]
+
+    status, _, _ = request(port, "/api/microphone/recordings/missing.wav")
+    assert status == 404
+
+    status, _, _ = request(port, "/api/microphone/unknown", method="POST")
+    assert status == 404
+
+
+def test_speaker_api(web_server):
+    port, runtime = web_server
+    status, _, body = request(port, "/api/speaker")
+    payload = json.loads(body)
+    assert status == 200
+    assert payload["state"] == "connected"
+    assert payload["device"]["name"] == "newmine"
+    assert payload["sink"]["ready"] is True
+
+    status, _, body = request(
+        port,
+        "/api/speaker/say",
+        method="POST",
+        data=json.dumps({"text": "机器人已启动"}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert status == 200
+    assert json.loads(body)["message"] == "语音已加入播放队列"
+    assert runtime.speaker_actions[-1] == ("say", {"text": "机器人已启动"})
+
+    # 也接受 text/plain，方便 curl
+    status, _, _ = request(
+        port,
+        "/api/speaker/say",
+        method="POST",
+        data="请注意避让",
+        headers={"Content-Type": "text/plain"},
+    )
+    assert status == 200
+    assert runtime.speaker_actions[-1][1]["text"] == "请注意避让"
+
+    status, _, body = request(
+        port,
+        "/api/speaker/volume",
+        method="POST",
+        data=json.dumps({"volume": 55}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert status == 200
+    assert json.loads(body)["speaker"]["sink"]["volume"] == 55
+
+    status, _, body = request(
+        port,
+        "/api/speaker/model",
+        method="POST",
+        data=json.dumps({"model": "am510"}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert status == 200
+    assert runtime.speaker_actions[-1] == ("model", {"model": "am510"})
+
+    status, _, body = request(
+        port,
+        "/api/speaker/say",
+        method="POST",
+        data=json.dumps({"text": ""}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert status == 400
+    assert json.loads(body)["error"]["code"] == "invalid_speaker_request"
+
+    status, _, _ = request(port, "/api/speaker/unknown", method="POST")
+    assert status == 404
+
+
+def test_speaker_api_unavailable():
+    runtime = type(
+        "NoSpeakerRuntime",
+        (),
+        {
+            "started_monotonic": time.monotonic(),
+            "ip_address": "127.0.0.1",
+            "status": lambda self: {},
+            "edge_module": lambda self: {},
+            "body": lambda self: {},
+            "local_modules": lambda self: [],
+        },
+    )()
+    app = EdgeHttpApp(runtime, static_root="", stream_port=18080)
+    server = EdgeHttpServer("127.0.0.1", 0, app)
+    assert server.start(), server.info()
+    try:
+        port = server.info()["port"]
+        status, _, body = request(port, "/api/speaker")
+        assert status == 503
+        assert json.loads(body)["error"]["code"] == "speaker_unavailable"
+    finally:
+        server.stop()
 
 
 def test_mjpeg_available_and_unavailable():

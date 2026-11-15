@@ -6,6 +6,11 @@ server:
   port: 8000
   api_key: ""
 
+# 联调默认不握手；需要验证 Edge 注册时用 --edge-url http://<pi> 或改这里
+handshake:
+  enabled: false
+  edge_url: ""
+
 model:
   backend: "stub"
   stub_action: [0.2, 0.0, 0.0]   # 归一化 vx=0.2 -> 0.1 m/s

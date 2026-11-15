@@ -12,8 +12,9 @@
 |---|---|
 | 代码 | `software/center_server`（纯 Python，标准库 HTTP） |
 | 推理后端 | SmolVLA（LeRobot）+ `stub` 联调后端 |
-| 接口 | HTTP/JSON，`/v1/infer`、`/v1/health`、`/v1/model`、`/v1/params`、`/v1/reset`、`/v1/warmup` |
-| 测试 | `pytest tests -q`：38 passed（无 GPU/torch） |
+| 接口 | HTTP/JSON，`/v1/infer`、`/v1/health`、`/v1/model`、`/v1/params`、`/v1/reset`、`/v1/warmup`、`/v1/handshake` |
+| 发现 | 启动向 Edge `POST /api/center/handshake`，心跳续约；机载经 `GET /api/center` 发现 |
+| 测试 | `pytest tests -q`：57 passed（无 GPU/torch） |
 | 真实权重 | 不随仓库分发；默认 `lerobot/smolvla_base` 或本地微调 checkpoint |
 | 实车验证 | 未做硬件在环；需联调相机、Wi-Fi、GPU 延迟 |
 
@@ -87,6 +88,7 @@
 | `engine.py` | SmolVLA 生命周期与推理 | 懒加载、RLock、processor 兼容、`predict_action_chunk`/`select_action` |
 | `service.py` | 请求校验、图像/状态补齐、响应组装 | 先加载模型确定 schema，再校验图像键/state 维度 |
 | `http_api.py` | 路由、鉴权、CORS、JSON/大小限制 | 纯函数 `dispatch()`，便于单测 |
+| `handshake.py` | 启动/心跳握手 → Edge 注册表 | 后台线程、指数退避、旁路失败、状态快照 |
 | `server.py` | `ThreadingHTTPServer` + CLI/信号 | 每请求独立线程；引擎串行 |
 | `clients/http_client.py` | ROS/调试客户端 | 标准库 urllib；图像自动编码 |
 
@@ -184,6 +186,38 @@ InferenceService.infer
 | `POST /v1/infer` | 否 | 推理；`reset=true` 先清策略队列 |
 | `POST /v1/reset` | 是 | 清策略内部队列/回合状态 |
 | `POST /v1/warmup` | 否 | 空推理；首次会加载模型 |
+| `GET /v1/handshake` | 是 | Edge 握手状态/最近错误，不触发网络 |
+| `POST /v1/handshake` | 否 | 立即重发一次握手（手动重连/排障） |
+
+### 5.2.1 启动握手（Center → Edge）
+
+Center 不假设 ROS 知道自己的地址；启动后由 `handshake.HandshakeAnnouncer`
+后台线程向 Edge 注册：
+
+```text
+server.main()
+  ├─ 配置校验 -> InferenceService 初始化（可选预加载）
+  ├─ 绑定 HTTP 端口（失败则退出，不发握手）
+  ├─ HandshakeAnnouncer.start()
+  │    ├─ POST <edge_url><path>  {ip,port,infer_port,infer_path,meta_json,...}
+  │    ├─ 成功后 sleep interval_sec -> heartbeat（Edge 重启后可自愈）
+  │    └─ 失败：retry_sec ×1.7 指数退避，上限 max_retry_sec
+  └─ serve_forever(); 退出时 stop() 线程
+```
+
+设计约束：
+
+1. **旁路**：握手失败只影响 dashboard 可见性与机载自动发现，不影响
+   `/v1/infer`；线程异常被捕获，不向主线程传播。
+2. **地址可信性**：Edge 以 TCP 对端 IP 为准（防伪造 payload 的 `ip`），
+   端口取 `infer_port`，路径白名单校验；Center 上报的 `public_host`
+   仅用于日志/展示。
+3. **注册表是缓存**：Edge 内存注册表随进程重启清空；heartbeat 负责恢复，
+   因此间隔应显著小于人工排障时间（默认 10s）。
+4. **可观测**：`/v1/health`/`/v1/handshake` 暴露 `attempts/successes/failures/
+   last_error/last_response`；状态读取失败降级为空状态而不是 500。
+5. **不传密钥**：握手不携带 `server.api_key`；Edge 侧如需鉴权，另配
+   `vla_engine.remote.api_key`。
 
 ### 5.3 图像传输
 
@@ -361,6 +395,9 @@ SmolVLA 只输出向量，不携带“这是速度还是关节”的语义。映
 5. **模型代码**：`trust_remote_code` 默认 false；只加载可信 checkpoint。
 6. **控制安全**：服务端限幅不是急停；ROS 必须保留 `safety_manager_node`、
    速度看门狗、硬件急停。网络失败时底盘应自动回零。
+7. **握手信任边界**：Edge 以 TCP 源地址登记，只接受内网/本机地址；握手
+   payload 里的 `ip` 不参与地址构造；握手不携带 API Key。默认明文 HTTP，
+   跨不可信网络时用 WireGuard/反向代理。
 
 ---
 
@@ -373,6 +410,7 @@ SmolVLA 只输出向量，不携带“这是速度还是关节”的语义。映
 | 动作 | 归一化/物理单位/限幅/取反/死区/hybrid/joint/raw/NaN | 否 |
 | 服务 | 图像补齐策略、state 补零/截断、未知相机、chunk 校验 | 否 |
 | HTTP | 路由/鉴权/CORS/405/413/422/503、socket 端到端 | 否 |
+| 握手 | 负载字段、成功/失败状态、指数退避、真实 HTTP 上报、`/v1/handshake` | 否 |
 | 客户端 | health/model/infer/reset、错误码解析 | 否 |
 | 真实模型 | 加载/推理/动作 shape/延迟 | 是（手工/ nightly） |
 
@@ -405,9 +443,14 @@ response: actions[T][D] + base_cmd(第 1 步) + arm_cmd(第 1 步)
 5. HTTP 失败/超时 → 丢弃动作块、停车、回退规则桩；
 6. `confidence` 不由本服务伪造；执行门控由 ROS 基于安全检查/动作一致性实现。
 
-现有 `software/edge_server/edge_server/core/vla_engine.py` 仍是规则桩；正式接入
-建议新增异步 `smolvla_client_node`，保留规则桩作为降级路径，避免在 ROS
-定时器里同步阻塞网络请求。
+机载实现（`software/edge_server`）：
+
+- `core/center_client.py`：HTTP 客户端 + 图像编码（默认 BGR）+ 注册表发现；
+- `core/vla_engine.py`：`backend: auto/remote/stub`，`base_cmd` → 意图映射，
+  失败按 `retry_after_sec` 回退规则桩；
+- `ros_nodes/vla_inference_node.py`：`ThreadPoolExecutor(max_workers=1)` 异步
+  推理，单飞 + 只保留最新帧，避免阻塞 ROS 定时器；急停/切模式后丢弃过期结果；
+- Edge `edge_web.py`：`POST /api/center/handshake` / `GET /api/center` 注册表。
 
 ---
 
@@ -422,3 +465,4 @@ response: actions[T][D] + base_cmd(第 1 步) + arm_cmd(第 1 步)
 6. **多模型/多租户**：模型注册表、按 `model_id` 路由、GPU 配额。
 7. **安全增强**：mTLS、请求签名、审计日志、模型文件校验和。
 8. **实车压测**：Wi-Fi 抖动、相机断流、GPU 降频、急停优先级。
+9. **注册表持久化**：Edge 把最近一次 CENTER 握手落盘，重启后先恢复再等心跳。

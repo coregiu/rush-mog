@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#050914">
-  <title>RUSH-MOG · 数字孪生监控</title>
+  <title>RUSH-MOG · 数字孪生</title>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
-  <link rel="stylesheet" href="dashboard.css?v=20261114g">
+  <link rel="stylesheet" href="dashboard.css?v=20261115j">
 </head>
 <body>
   <div class="ambient ambient-a"></div>
@@ -15,30 +15,30 @@
 
   <header class="topbar">
     <div class="brand">
-      <div class="brand-mark"><img src="favicon.ico?v=20261114g" alt="RUSH-MOG"></div>
+      <div class="brand-mark"><img src="favicon.ico?v=20261114h" alt="RUSH-MOG"></div>
       <div class="brand-copy">
-        <h1>RUSH-MOG <span>// DIGITAL TWIN</span></h1>
+        <h1>RUSH-MOG <span> || DIGITAL TWIN</span></h1>
         <p>上位机监控与配置 · EDGE + ROS 2 / CENTER</p>
       </div>
     </div>
 
     <div class="topbar-status">
-      <div id="overall-pill" class="status-pill status-unknown">
-        <span class="dot"></span><span id="overall-text">等待数据</span>
-      </div>
       <div id="sync-state" class="sync-state">正在连接 Edge Server …</div>
-    </div>
-
-    <nav class="topbar-actions">
+      <a class="btn" href="index.html">手柄控制</a>
       <button id="refresh-btn" class="btn btn-ghost" type="button" title="立即刷新">
         <span class="btn-icon">↻</span> 刷新
       </button>
-      <label class="switch" title="模块 5 秒 / 车身遥测 1 秒自动刷新">
+      <div id="overall-pill" class="status-pill status-unknown">
+        <span class="dot"></span><span id="overall-text">等待数据</span>
+      </div>
+    </div>
+
+    <nav class="topbar-actions">
+      <label class="switch" title="模块 5 秒 / 车身遥测 1 秒 / 雷达 2 秒自动刷新">
         <input id="auto-refresh" type="checkbox" checked>
         <span class="switch-track"><span class="switch-thumb"></span></span>
         <span class="switch-label">自动</span>
       </label>
-      <a class="btn" href="index.html">手柄控制</a>
     </nav>
   </header>
 
@@ -214,7 +214,7 @@
           <g class="hw-node" data-hw="lidar" transform="translate(700,170)">
             <rect class="hw-shell" width="150" height="58" rx="10"/>
             <circle class="hw-dot" cx="14" cy="16" r="4"/>
-            <text class="hw-name" x="26" y="20">雷达</text>
+            <text class="hw-name" x="26" y="20">激光雷达</text>
             <text class="hw-sub" x="14" y="37">D6 / LD19</text>
             <text class="hw-state" x="14" y="51">未知</text>
             <title>2D 激光雷达 · D6 /scan</title>
@@ -222,31 +222,31 @@
           <g class="hw-node" data-hw="camera" transform="translate(700,240)">
             <rect class="hw-shell" width="150" height="58" rx="10"/>
             <circle class="hw-dot" cx="14" cy="16" r="4"/>
-            <text class="hw-name" x="26" y="20">相机</text>
-            <text class="hw-sub" x="14" y="37">Astra Pro</text>
+            <text class="hw-name" x="26" y="20">深度相机</text>
+            <text class="hw-sub" x="14" y="37">Astra Pro · RGB-D</text>
             <text class="hw-state" x="14" y="51">未知</text>
-            <title>深度相机 · Astra Pro /camera/image_raw</title>
+            <title>深度相机 · Astra Pro · RGB + Depth · /camera/color + /camera/depth</title>
           </g>
           <g class="hw-node" data-hw="mic" transform="translate(700,310)">
             <rect class="hw-shell" width="150" height="58" rx="10"/>
             <circle class="hw-dot" cx="14" cy="16" r="4"/>
             <text class="hw-name" x="26" y="20">麦克风</text>
-            <text class="hw-sub" x="14" y="37">USB 全向</text>
+            <text class="hw-sub" x="14" y="37">NewMine / AM510 · HFP</text>
             <text class="hw-state" x="14" y="51">未知</text>
-            <title>全向麦克风 · USB /audio/raw</title>
+            <title>麦克风 · NewMine / AM510 · HFP · /body/mic_status</title>
           </g>
           <g class="hw-node" data-hw="speaker" transform="translate(700,380)">
             <rect class="hw-shell" width="150" height="58" rx="10"/>
             <circle class="hw-dot" cx="14" cy="16" r="4"/>
             <text class="hw-name" x="26" y="20">音箱</text>
-            <text class="hw-sub" x="14" y="37">Bluetooth</text>
+            <text class="hw-sub" x="14" y="37">NewMine / AM510 · A2DP</text>
             <text class="hw-state" x="14" y="51">未知</text>
-            <title>蓝牙音箱 · Bluetooth</title>
+            <title>音箱 · NewMine / AM510 · A2DP · /body/audio_status</title>
           </g>
           <g class="hw-node" data-hw="chassis" transform="translate(700,450)">
             <rect class="hw-shell" width="150" height="58" rx="10"/>
             <circle class="hw-dot" cx="14" cy="16" r="4"/>
-            <text class="hw-name" x="26" y="20">麦轮底盘 / 电机驱动</text>
+            <text class="hw-name" x="26" y="20">电机驱动+编码器</text>
             <text class="hw-sub" x="14" y="37">JGB37-520 ×4 · L298N</text>
             <text class="hw-state" x="14" y="51">未知</text>
             <title>电机 / L298N / JGB37-520 / 编码器 PA0~PA7</title>
@@ -433,15 +433,15 @@
             <!-- hotspots: hardware BOM modules -->
             <g class="hotspot" data-device="lidar" transform="translate(380,188)" tabindex="0">
               <circle class="hotspot-halo" r="22"/><circle class="hotspot-dot" r="3.5"/>
-              <title>雷达 · D6 / LD19 · /scan</title>
+              <title>激光雷达 · D6 / LD19 · /scan</title>
             </g>
             <g class="hotspot" data-device="camera" transform="translate(572,267)" tabindex="0">
               <circle class="hotspot-halo" r="14"/><circle class="hotspot-dot" r="3"/>
-              <title>相机 · Astra Pro · /camera/image_raw</title>
+              <title>深度相机 · Astra Pro · RGB + Depth · /camera/color + /camera/depth</title>
             </g>
             <g class="hotspot" data-device="mic" transform="translate(306,322)" tabindex="0">
               <circle class="hotspot-halo" r="13"/><circle class="hotspot-dot" r="3"/>
-              <title>麦克风 · USB 全向 · /audio/raw</title>
+              <title>麦克风 · NewMine / AM510 · HFP · /body/mic_status</title>
             </g>
             <g class="hotspot" data-device="imu" transform="translate(446,330)" tabindex="0">
               <circle class="hotspot-halo" r="15"/><circle class="hotspot-dot" r="3"/>
@@ -449,7 +449,7 @@
             </g>
             <g class="hotspot" data-device="speaker" transform="translate(226,330)" tabindex="0">
               <circle class="hotspot-halo" r="18"/><circle class="hotspot-dot" r="3"/>
-              <title>音箱 · Bluetooth · /body/audio_status</title>
+              <title>音箱 · NewMine / AM510 · A2DP · /body/audio_status</title>
             </g>
             <g class="hotspot" data-device="pi" transform="translate(367,355)" tabindex="0">
               <circle class="hotspot-halo" r="14"/><circle class="hotspot-dot" r="3"/>
@@ -469,14 +469,14 @@
             </g>
             <g class="hotspot" data-device="chassis" transform="translate(272,386)" tabindex="0">
               <circle class="hotspot-halo" r="20"/><circle class="hotspot-dot" r="3"/>
-              <title>麦轮底盘 / 电机驱动 · JGB37-520 ×4 · L298N · 编码器 PA0~PA7</title>
+              <title>电机驱动+编码器 · JGB37-520 ×4 · L298N · 编码器 PA0~PA7</title>
             </g>
           </g>
 
           <!-- module mini labels under twin -->
           <g class="twin-caption">
-            <text x="380" y="500" text-anchor="middle">RUSH-MOG · PI 4B (EDGE + ROS 2) · STM32 · D6 LIDAR · ASTRA PRO · ICM-20948</text>
-            <text x="380" y="518" text-anchor="middle">EDGE + ROS 2 → STM32 / SENSORS → DIGITAL TWIN</text>
+            <text x="380" y="500" text-anchor="middle">RUSH-MOG · PI 4B (EDGE + ROS 2) · STM32 · D6 LIDAR · ASTRA PRO</text>
+            <text x="380" y="518" text-anchor="middle">ICM-20948 · EDGE + ROS 2 → STM32 / SENSORS → DIGITAL TWIN</text>
           </g>
         </svg>
 
@@ -491,50 +491,105 @@
       <div class="telemetry-row" id="telemetry-row"></div>
     </section>
 
-    <section class="panel ops-panel" id="ops-panel" data-source="idle">
+    <section class="panel monitor-panel" id="ops-panel" data-source="idle">
       <div class="panel-head">
         <div>
-          <span class="eyebrow">MOTION COMMAND · EVENT LOG</span>
-          <h2>当前指令与运行记录</h2>
+          <span class="eyebrow">LIVE MONITOR · COMMAND / VIDEO / LIDAR</span>
+          <h2>实时监控信息</h2>
         </div>
         <div class="panel-meta">
-          <span class="status-chip status-unknown" id="ops-source">空闲</span>
           <span class="led status-unknown" id="ops-led"></span>
           <span id="ops-time">--:--:--</span>
         </div>
       </div>
 
-      <div class="ops-grid">
-        <div class="ops-current">
-          <div class="ops-main">
-            <span class="ops-code" id="ops-code">0</span>
-            <div class="ops-copy">
-              <strong id="ops-label">停止</strong>
-              <span id="ops-sub">等待指令</span>
+      <div class="monitor-grid">
+        <div class="monitor-block monitor-command monitor-current">
+          <div class="monitor-head">
+            <span>当前指令</span>
+            <span class="status-chip status-unknown" id="ops-source">空闲</span>
+          </div>
+          <div class="ops-current">
+            <div class="ops-main">
+              <span class="ops-code" id="ops-code">0</span>
+              <div class="ops-copy">
+                <strong id="ops-label">停止</strong>
+                <span id="ops-sub">等待指令</span>
+              </div>
             </div>
-          </div>
-          <div class="ops-facts">
-            <div><span>来源</span><strong id="ops-fact-source">--</strong></div>
-            <div><span>PWM</span><strong id="ops-fact-pwm">--</strong></div>
-            <div><span>持续</span><strong id="ops-fact-age">--</strong></div>
-            <div><span>串口</span><strong id="ops-fact-serial">--</strong></div>
-          </div>
-          <div class="ops-live">
-            <span>轮速 <b id="ops-wheels">--</b></span>
-            <span>里程 <b id="ops-dist">--</b></span>
-            <span>底盘 <b id="ops-body">--</b></span>
+            <div class="ops-facts">
+              <div><span>来源</span><strong id="ops-fact-source">--</strong></div>
+              <div><span>PWM</span><strong id="ops-fact-pwm">--</strong></div>
+              <div><span>持续</span><strong id="ops-fact-age">--</strong></div>
+              <div><span>串口</span><strong id="ops-fact-serial">--</strong></div>
+            </div>
+            <div class="ops-live">
+              <span>轮速 <b id="ops-wheels">--</b></span>
+              <span>里程 <b id="ops-dist">--</b></span>
+              <span>底盘 <b id="ops-body">--</b></span>
+            </div>
           </div>
         </div>
 
-        <div class="ops-log">
-          <div class="ops-log-head">
-            <span>最近运行记录</span>
-            <span class="muted" id="ops-event-count" title="内存环形缓冲，最多 120 条；服务重启后清空">0 条</span>
+        <div class="monitor-block monitor-video" id="video-panel" data-state="waiting">
+          <div class="monitor-head">
+            <span>视频监控</span>
+            <a href="/stream" target="_blank" rel="noopener">打开 MJPEG</a>
           </div>
-          <ol class="ops-events" id="ops-events">
-            <li class="ops-empty">暂无运行记录</li>
-          </ol>
+          <div class="video-frame">
+            <img id="video-stream" alt="Edge 相机视频流">
+            <div class="video-empty" id="video-empty">
+              <span>等待视频流</span>
+              <small>/camera/color/image_raw · MJPEG</small>
+            </div>
+          </div>
+          <div class="monitor-foot">
+            <span id="video-state">等待相机</span>
+            <span>EDGE MJPEG</span>
+          </div>
         </div>
+
+        <div class="monitor-block monitor-radar" id="radar-panel" data-state="waiting">
+          <div class="monitor-head">
+            <span>雷达地图</span>
+            <span class="monitor-tag" id="radar-state">等待</span>
+          </div>
+          <div class="radar-frame">
+            <canvas id="radar-canvas" aria-label="雷达地图"></canvas>
+            <div class="radar-empty" id="radar-empty">
+              <span>等待 /map 或 /scan</span>
+              <small>SLAM/导航启动后自动叠加地图与扫描</small>
+            </div>
+          </div>
+          <div class="radar-legend">
+            <span><i class="legend-occupied"></i>占据</span>
+            <span><i class="legend-free"></i>空闲</span>
+            <span><i class="legend-unknown"></i>未知</span>
+            <span><i class="legend-scan"></i>扫描</span>
+            <span><i class="legend-robot"></i>机器人</span>
+            <span id="radar-meta">--</span>
+          </div>
+        </div>
+
+        <div class="monitor-block monitor-command monitor-scenario">
+          <form id="scenario-form" class="scenario-exec" autocomplete="off">
+              <div class="scenario-head">
+                <span>执行场景指令</span>
+                <span class="monitor-tag" id="scenario-result">待执行</span>
+              </div>
+              <div class="scenario-input">
+                <input id="scenario-text" type="text" maxlength="200"
+                      placeholder="输入指令，例如：找拖鞋 / 去厨房 / 建图 / 别找了">
+                <button class="btn btn-primary" type="submit">执行</button>
+              </div>
+              <div class="scenario-quick" id="scenario-quick">
+                <button type="button" class="scenario-chip" data-text="找拖鞋">找拖鞋</button>
+                <button type="button" class="scenario-chip" data-text="别找了">别找了</button>
+                <button type="button" class="scenario-chip" data-text="去厨房">去厨房</button>
+                <button type="button" class="scenario-chip" data-text="建图">建图</button>
+              </div>
+            </form>
+          </div>
       </div>
     </section>
 
@@ -629,6 +684,81 @@
       </div>
     </section>
 
+    <section class="panel speaker-panel" id="speaker-panel" data-status="unknown">
+      <div class="panel-head">
+        <div>
+          <span class="eyebrow">AUDIO · BLUETOOTH SPEAKER</span>
+          <h2>蓝牙音箱与语音播报</h2>
+        </div>
+        <div class="panel-meta">
+          <span class="status-chip status-unknown" id="speaker-state">未知</span>
+          <span class="led status-unknown" id="speaker-led"></span>
+          <span id="speaker-device">--</span>
+        </div>
+      </div>
+
+      <div class="speaker-grid">
+        <div class="speaker-facts">
+          <div class="speaker-fact"><span>设备</span><strong id="speaker-name">--</strong></div>
+          <div class="speaker-fact"><span>MAC</span><strong id="speaker-mac">--</strong></div>
+          <div class="speaker-fact"><span>音频输出</span><strong id="speaker-sink">--</strong></div>
+          <div class="speaker-fact"><span>播放状态</span><strong id="speaker-playing">--</strong></div>
+        </div>
+
+        <div class="speaker-controls">
+          <div class="speaker-actions">
+            <button id="speaker-connect" class="btn btn-ghost" type="button">连接音箱</button>
+            <button id="speaker-stop" class="btn btn-ghost" type="button">停止播放</button>
+            <label class="speaker-model" for="speaker-model">
+              <span>型号</span>
+              <select id="speaker-model" title="切换后立即重连；重启服务回到 config 的 model">
+                <option value="newmine">NewMine</option>
+                <option value="am510">HONOR AM510</option>
+              </select>
+            </label>
+            <label class="speaker-volume" for="speaker-volume">
+              <span>音量</span>
+              <input id="speaker-volume" type="range" min="0" max="100" step="5" value="70">
+              <strong id="speaker-volume-label">70%</strong>
+            </label>
+          </div>
+
+          <div class="speaker-say-block">
+            <span class="speaker-section-title">语音播报</span>
+            <form id="speaker-form" class="speaker-say" autocomplete="off">
+              <input id="speaker-text" type="text" maxlength="120"
+                     placeholder="输入要播报的文字，例如：机器人已到达目标点">
+              <button class="btn btn-primary" type="submit">语音播报</button>
+            </form>
+
+            <div class="speaker-quick" id="speaker-quick">
+              <button type="button" class="speaker-chip" data-text="机器人已启动">机器人已启动</button>
+              <button type="button" class="speaker-chip" data-text="已到达目标点">已到达目标点</button>
+              <button type="button" class="speaker-chip" data-text="请注意避让">请注意避让</button>
+              <button type="button" class="speaker-chip" data-text="任务完成">任务完成</button>
+            </div>
+          </div>
+
+          <div class="mic-block" id="mic-block" data-status="unknown">
+            <div class="mic-head">
+              <span class="eyebrow">HFP MICROPHONE · BLUETOOTH</span>
+              <span class="status-chip status-unknown" id="mic-state">未知</span>
+            </div>
+            <div class="mic-actions">
+              <button id="mic-start" class="btn btn-ghost" type="button">开始录音</button>
+              <button id="mic-stop" class="btn btn-ghost" type="button">停止录音</button>
+              <span class="mic-duration" id="mic-duration">00:00</span>
+              <a id="mic-download" class="btn btn-ghost" href="#" hidden>下载录音</a>
+              <button id="mic-play" class="btn btn-ghost" type="button" disabled>播放最近录音</button>
+            </div>
+            <p class="speaker-hint" id="mic-hint">等待麦克风状态…</p>
+          </div>
+
+          <p class="speaker-hint" id="speaker-hint">等待音箱状态…</p>
+        </div>
+      </div>
+    </section>
+
     <aside class="panel modules-panel">
       <div class="panel-head">
         <div>
@@ -650,12 +780,25 @@
       </div>
       <div id="device-grid" class="device-grid"></div>
     </section>
+
+    <section class="panel log-panel" id="ops-log-panel">
+      <div class="panel-head">
+        <div>
+          <span class="eyebrow">EVENT LOG · RING BUFFER 120</span>
+          <h2>最近运行记录</h2>
+        </div>
+        <span class="muted" id="ops-event-count" title="内存环形缓冲，最多 120 条；服务重启后清空">0 条</span>
+      </div>
+      <ol class="ops-events" id="ops-events">
+        <li class="ops-empty">暂无运行记录</li>
+      </ol>
+    </section>
   </main>
 
   <footer class="footer">
-    <span>RUSH-MOG · EDGE DIGITAL TWIN CONSOLE</span>
+    <span>RUSH-MOG · EDGE DIGITAL TWIN CONSOLE · LAYOUT 20261115j</span>
     <span id="footer-status">DISCONNECTED</span>
-    <span>API: /api/modules · /api/body · /ros/health · /v1/health</span>
+    <span>API: /api/modules · /api/body · /api/radar · /api/scenario · /api/speaker · /ros/health</span>
   </footer>
 
   <div id="scrim" class="scrim" hidden></div>
@@ -683,6 +826,6 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="dashboard.js?v=20261114g"></script>
+  <script src="dashboard.js?v=20261115j"></script>
 </body>
 </html>

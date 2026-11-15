@@ -1,6 +1,8 @@
 /* RUSH-MOG digital twin dashboard
  * 数据源：
  *   GET  /api/modules                       Edge Server 模块注册表 + ROS 子系统
+ *   GET  /api/radar                         /map + /scan + /center/pose 雷达地图快照
+ *   GET  /stream                            MJPEG 相机流（302 -> :8080/stream）
  *   GET  /api/modules/{id}/health           Edge Server 代理 ROS/Center 健康接口
  *   GET  /api/modules/{id}/params           Edge Server 代理/本地参数描述
  *   POST /api/modules/{id}/params           参数修改
@@ -14,6 +16,14 @@ const API = {
   edgeHealth: '/api/modules/edge/health',
   edgeParams: '/api/modules/edge/params',
   body: '/api/body',
+  radar: '/api/radar',
+  scenario: '/api/scenario/execute',
+  scenarioStatus: '/api/scenario',
+  speaker: '/api/speaker',
+  speakerAction: (action) => `/api/speaker/${encodeURIComponent(action)}`,
+  microphone: '/api/microphone',
+  microphoneAction: (action) => `/api/microphone/${encodeURIComponent(action)}`,
+  power: '/api/power',
   module: (id) => `/api/modules/${encodeURIComponent(id)}`,
   health: (id) => `/api/modules/${encodeURIComponent(id)}/health`,
   params: (id) => `/api/modules/${encodeURIComponent(id)}/params`,
@@ -25,18 +35,18 @@ const MODULE_META = {
   center: { name: 'CENTER SERVER', subtitle: 'SmolVLA · 推理中心', glyph: 'C', order: 2 },
 };
 
-// hardware/README.md 的 BOM 清单（10 项；麦轮底盘与电机驱动合并）
+// hardware/README.md 的 BOM 清单（按功能合并展示；音箱/麦克风为 NewMine / AM510 可选）
 const HARDWARE_MODULES = [
   { id: 'pi', name: '板载计算机', model: 'Raspberry Pi 4B', glyph: 'PI' },
   { id: 'stm32', name: 'STM 控制板', model: 'STM32F103C8T6', glyph: 'MCU' },
-  { id: 'lidar', name: '雷达', model: 'D6 / LD19', glyph: 'LID' },
-  { id: 'camera', name: '相机', model: 'Astra Pro', glyph: 'CAM' },
+  { id: 'lidar', name: '激光雷达', model: 'D6 / LD19', glyph: 'LID' },
+  { id: 'camera', name: '深度相机', model: 'Astra Pro · RGB-D', glyph: 'CAM' },
   { id: 'imu', name: '陀螺仪', model: 'ICM-20948', glyph: 'IMU' },
   { id: 'cliff', name: '悬崖传感器', model: 'TCRT5000 ×2', glyph: 'CLF' },
-  { id: 'chassis', name: '麦轮底盘 / 电机驱动', model: 'JGB37-520 ×4 · L298N', glyph: 'CHS' },
+  { id: 'chassis', name: '电机驱动+编码器', model: 'JGB37-520 ×4 · L298N', glyph: 'CHS' },
   { id: 'power', name: '电源及转换板', model: '12V → 5V / 3.3V', glyph: 'PWR' },
-  { id: 'mic', name: '麦克风', model: 'USB 全向', glyph: 'MIC' },
-  { id: 'speaker', name: '音箱', model: 'Bluetooth', glyph: 'SPK' },
+  { id: 'mic', name: '麦克风', model: 'NewMine / AM510 · HFP', glyph: 'MIC' },
+  { id: 'speaker', name: '音箱', model: 'NewMine / AM510 · A2DP', glyph: 'SPK' },
 ];
 
 const COMMAND_LABELS = {
@@ -63,7 +73,10 @@ const EVENT_KIND_LABELS = {
   system: 'SYS',
   serial: 'LINK',
   safety: 'SAFE',
+  cliff: 'CLIFF',
   error: 'ERR',
+  voice: 'VOICE',
+  scenario: 'SCEN',
 };
 
 const BODY_MOTORS = [
@@ -115,6 +128,29 @@ const state = {
   eventTotal: 0,
   eventsPolling: false,
   eventsTimer: null,
+  speaker: null,
+  speakerPolling: false,
+  speakerTimer: null,
+  speakerVolumeEditing: false,
+  speakerError: '',
+  microphone: null,
+  microphonePolling: false,
+  microphoneTimer: null,
+  microphoneError: '',
+  radar: null,
+  radarError: '',
+  radarPolling: false,
+  radarTimer: null,
+  scenario: null,
+  scenarioError: '',
+  scenarioSending: false,
+  scenarioPolling: false,
+  scenarioTimer: null,
+  videoReady: false,
+  power: null,
+  powerPolling: false,
+  powerTimer: null,
+  powerError: '',
   body: {
     lastOdom: null,
     sessionDistance: 0,
@@ -845,6 +881,8 @@ function renderAll() {
   renderTelemetry();
   renderOpsCurrent();
   renderOpsEvents();
+  renderScenarioStatus();
+  renderRadar();
   renderSyncTime();
 }
 
@@ -991,6 +1029,16 @@ function rosDevice(id) {
   return devices.find((device) => device && device.id === id) || null;
 }
 
+// 麦克风与音箱是同一台蓝牙设备，优先显示实际连接名。
+function speakerDeviceLabel() {
+  const speaker = state.speaker;
+  const device = (speaker && speaker.device) || {};
+  const models = (speaker && speaker.models) || [];
+  const current = models.find((item) => item.id === (speaker && speaker.model));
+  return String(device.name || '').trim()
+    || String((current && current.label) || 'NewMine');
+}
+
 function deviceMetricChips(device) {
   const chips = [];
   if (!device) return chips;
@@ -1014,7 +1062,7 @@ function deviceDetail(device, fallback) {
   return detail;
 }
 
-// hardware/README.md 的 10 个 BOM 模块（底盘+电机驱动已合并）-> 状态 / 描述 / 指标
+// hardware/README.md 的 11 个 BOM 模块（底盘+电机驱动已合并）-> 状态 / 描述 / 指标
 function hardwareState(id) {
   const p = (state.edge && state.edge.params) || {};
   const body = state.body.latest || {};
@@ -1060,30 +1108,100 @@ function hardwareState(id) {
       };
     }
     case 'camera': {
-      const device = rosDevice('camera');
+      // Astra Pro 的 RGB 与 Depth 是同一个物理模块，合并为一张「深度相机」卡片。
+      const rgb = rosDevice('camera');
+      const depth = rosDevice('depth_camera');
       const streaming = Boolean(p.camera);
-      const chips = deviceMetricChips(device);
-      if (!device && streaming) chips.unshift('MJPEG OK');
-      return {
-        status: device ? device.status : (streaming ? 'ok' : 'unknown'),
-        detail: deviceDetail(device, streaming ? 'MJPEG 可用' : '未接入 · 等待 /camera/image_raw'),
-        chips,
+      const statuses = [rgb, depth]
+        .map((device) => (device ? device.status : ''))
+        .filter((status) => status && status !== 'unknown' && status !== 'disabled');
+      const okCount = statuses.filter((status) => status === 'ok').length;
+      let status = 'unknown';
+      if (rgb && depth && rgb.status === 'ok' && depth.status === 'ok') {
+        status = 'ok';
+      } else if (statuses.length === 0) {
+        status = streaming ? 'degraded' : 'unknown';
+      } else if (statuses.length > 0 && statuses.every((value) => value === 'error')) {
+        status = 'error';
+      } else if (okCount > 0) {
+        status = 'degraded';
+      } else if (statuses.length > 0) {
+        status = 'degraded';
+      }
+
+      const streamChip = (label, device) => {
+        if (!device) return `${label} --`;
+        if (device.status === 'ok' && device.rate_hz != null) {
+          return `${label} ${fmtNumber(device.rate_hz)}Hz`;
+        }
+        return `${label} ${statusLabel(device.status)}`;
       };
+      const chips = [
+        streamChip('RGB', rgb),
+        streamChip('DEP', depth),
+        streaming ? 'MJPEG OK' : 'RGB-D',
+      ];
+      let detail = 'Astra Pro RGB-D · 640×480@10Hz · /camera/color + /camera/depth';
+      if (!rgb && !depth) {
+        detail = '未接入 · 等待 /camera/color/image_raw + /camera/depth/image_raw';
+      } else if (!rgb) {
+        detail = '深度已接入，彩色缺失 · 等待 /camera/color/image_raw';
+      } else if (!depth) {
+        detail = '彩色已接入，深度缺失 · 等待 /camera/depth/image_raw';
+      } else if (status === 'ok') {
+        detail = 'Astra Pro RGB + Depth · 640×480@10Hz · 深度对齐彩色';
+      } else {
+        detail = 'Astra Pro RGB-D · 至少一路异常，见 ROS health';
+      }
+      return { status, detail, chips };
     }
     case 'imu': {
       const device = rosDevice('imu');
+      const chips = deviceMetricChips(device);
+      const metrics = (device && device.metrics) || {};
+      if (metrics.accel_norm != null) chips.push(`ACC ${fmtNumber(metrics.accel_norm, 2)}`);
+      if (metrics.gyro_norm != null) chips.push(`GYRO ${fmtNumber(metrics.gyro_norm, 2)}`);
+      if (metrics.has_mag === true) chips.push('MAG OK');
+      else if (device) chips.push('MAG --');
       return {
         status: device ? device.status : 'unknown',
-        detail: deviceDetail(device, '未接入 · 等待 /imu/data'),
-        chips: deviceMetricChips(device),
+        detail: device
+          ? `${deviceDetail(device, 'ok')} · I2C1 0x68 · /imu/data`
+          : '未接入 · 等待 /imu/data（I2C1 0x68/0x69）',
+        chips,
       };
     }
-    case 'cliff':
+    case 'cliff': {
+      const cliff = (body && body.cliff) || {};
+      const device = rosDevice('cliff');
+      const available = cliff.available === true;
+      const triggered = cliff.triggered === true;
+      const stale = Boolean(body && body.stale);
+      let status = 'unknown';
+      if (triggered) status = 'error';
+      else if (available) status = stale ? 'degraded' : 'ok';
+      else if (device && device.status === 'ok') status = 'ok';
+      else if (device && (device.status === 'error' || device.status === 'degraded')) status = 'degraded';
+      const left = cliff.left === true;
+      const right = cliff.right === true;
+      const side = [left ? '左' : '', right ? '右' : ''].filter(Boolean).join('+');
+      const detail = available
+        ? (triggered
+          ? `悬崖触发：${side || '未知'} · 已封锁前进/横移，仅允许 STOP/BACK`
+          : `TCRT5000 ×2 · PB3/PB4 · 左右均未触发${stale ? ' · 数据超时' : ''}`)
+        : 'TCRT5000 ×2 · PB3/PB4 · 无悬崖遥测（需刷入带 cliff_mask 的 STM32 固件）';
       return {
-        status: 'unknown',
-        detail: 'TCRT5000 ×2 · PB3/PB4 · 固件已启用，无独立回传',
-        chips: ['2 路', 'STOP/BACK', '无遥测'],
+        status,
+        detail,
+        chips: available
+          ? [
+            `LEFT ${left ? 'CLIFF' : 'CLEAR'}`,
+            `RIGHT ${right ? 'CLIFF' : 'CLEAR'}`,
+            `MASK ${Number.isFinite(Number(cliff.mask)) ? Number(cliff.mask) : 0}`,
+          ]
+          : ['2 路', 'STOP/BACK', '无遥测'],
       };
+    }
     case 'chassis': {
       const live = Boolean(body.bodyLive);
       const serial = Boolean(p.serial_connected);
@@ -1101,6 +1219,40 @@ function hardwareState(id) {
       };
     }
     case 'power': {
+      const power = state.power;
+      if (power) {
+        let status = 'unknown';
+        if (power.enabled === false) status = 'disabled';
+        else if (power.status === 'ok') status = 'ok';
+        else if (power.status === 'degraded') status = 'degraded';
+        else if (power.status === 'error') status = 'error';
+        let detail = '树莓派电源监控不可用';
+        if (power.status === 'ok') {
+          detail = power.warning
+            ? '树莓派电源正常 · 历史欠压已恢复'
+            : '树莓派电源正常 · 5V/3.3V 输出正常';
+        } else if (power.status === 'error') {
+          detail = `电源异常 · ${power.error || '当前欠压/降频'} (${power.throttled_raw || '--'})`;
+        } else if (power.status === 'degraded') {
+          detail = `电源降级 · ${power.throttled_raw || '--'}`;
+        } else if (power.enabled === false) {
+          detail = '树莓派电源监控未启用';
+        }
+        if (power.model) detail += ` · ${power.model}`;
+        return {
+          status,
+          detail,
+          chips: [
+            `THR ${power.throttled_raw || '--'}`,
+            power.core_voltage_v != null
+              ? `CORE ${fmtNumber(power.core_voltage_v, 2)}V`
+              : 'CORE --',
+            power.temperature_c != null
+              ? `TEMP ${fmtNumber(power.temperature_c, 1)}°C`
+              : 'TEMP --',
+          ],
+        };
+      }
       const percent = numberOrNull(body.percent);
       const voltage = numberOrNull(body.voltage);
       const device = rosDevice('battery');
@@ -1108,7 +1260,9 @@ function hardwareState(id) {
         status: percent != null
           ? (percent < 20 ? 'degraded' : 'ok')
           : (device ? device.status : 'unknown'),
-        detail: '12V → 5V / 3.3V · 电压未上报',
+        detail: state.powerError
+          ? `树莓派电源监控不可用：${state.powerError}`
+          : '12V → 5V / 3.3V · 等待树莓派电源监控',
         chips: [
           voltage != null ? `VOLT ${fmtNumber(voltage, 2)}V` : 'VOLT --',
           percent != null ? `BAT ${fmtNumber(percent)}%` : 'BAT --',
@@ -1117,15 +1271,50 @@ function hardwareState(id) {
       };
     }
     case 'mic': {
+      const mic = state.microphone;
+      if (mic) {
+        const status = mic.enabled === false
+          ? 'disabled'
+          : (mic.recording || mic.available
+            ? 'ok'
+            : (mic.error ? 'error' : 'degraded'));
+        const detail = mic.recording
+          ? `HFP 录音中 · ${fmtDuration((mic.duration_ms || 0) / 1000)}`
+          : (mic.available
+            ? `${speakerDeviceLabel()} HFP 麦克风就绪（录音时自动切 HFP）`
+            : (mic.error || '音箱未连接或不支持 HFP 麦克风'));
+        return {
+          status,
+          detail,
+          chips: [
+            mic.recording ? 'REC' : (mic.available ? 'HFP READY' : 'HFP --'),
+            `${mic.sample_rate || '--'} Hz`,
+            mic.last_file_name ? `FILE ${mic.last_file_name}` : '无录音',
+          ],
+        };
+      }
       const device = rosDevice('microphone');
       return {
         status: device ? device.status : 'unknown',
-        detail: deviceDetail(device, '未接入 · USB 全向麦克风'),
+        detail: deviceDetail(device, `未接入 · ${speakerDeviceLabel()} HFP 麦克风`),
         chips: deviceMetricChips(device),
       };
     }
     case 'speaker': {
       const device = rosDevice('speaker');
+      const speaker = state.speaker;
+      if (speaker && speaker.enabled !== false && !speaker.connected) {
+        const reason = String(speaker.last_error || '').trim();
+        return {
+          status: speaker.status === 'error' ? 'error' : 'degraded',
+          detail: reason || '音箱未连接，后台每 20s 自动重试',
+          chips: [
+            String(speaker.state || 'offline').toUpperCase(),
+            'A2DP --',
+            'RETRY 20s',
+          ],
+        };
+      }
       return {
         status: device ? device.status : 'unknown',
         detail: deviceDetail(device, '未接入 · 蓝牙音箱'),
@@ -1333,6 +1522,431 @@ function renderOpsEvents() {
       <span class="ops-event-code">${escapeHtml(codeText)}</span>
     </li>`;
   }).join('');
+}
+
+
+/* ------------------------------------------------------------ radar map */
+const radarView = { mapKey: '', mapCanvas: null };
+
+function decodeRadarCells(encoded) {
+  try {
+    const binary = atob(String(encoded || ''));
+    const cells = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) cells[i] = binary.charCodeAt(i);
+    return cells;
+  } catch (error) {
+    return null;
+  }
+}
+
+function radarMapBitmap(map) {
+  if (radarView.mapKey === map.data && radarView.mapCanvas) return radarView.mapCanvas;
+  const cells = decodeRadarCells(map.data);
+  if (!cells || cells.length < map.width * map.height) return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = map.width;
+  canvas.height = map.height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  const image = ctx.createImageData(map.width, map.height);
+  for (let y = 0; y < map.height; y += 1) {
+    const source = y * map.width;
+    const target = (map.height - 1 - y) * map.width;
+    for (let x = 0; x < map.width; x += 1) {
+      const value = cells[source + x];
+      if (!value) continue;
+      const index = (target + x) * 4;
+      if (value === 2) {
+        image.data[index] = 148;
+        image.data[index + 1] = 163;
+        image.data[index + 2] = 184;
+        image.data[index + 3] = 235;
+      } else {
+        image.data[index] = 34;
+        image.data[index + 1] = 211;
+        image.data[index + 2] = 238;
+        image.data[index + 3] = 26;
+      }
+    }
+  }
+  ctx.putImageData(image, 0, 0);
+  radarView.mapKey = map.data;
+  radarView.mapCanvas = canvas;
+  return canvas;
+}
+
+function radarMapView(map, width, height) {
+  const resolution = Number(map.resolution) || 0.05;
+  const mapW = Math.max(0.01, Number(map.width) * resolution);
+  const mapH = Math.max(0.01, Number(map.height) * resolution);
+  const pad = 10;
+  const scale = Math.min((width - pad * 2) / mapW, (height - pad * 2) / mapH);
+  return {
+    kind: 'map',
+    scale,
+    ox: (width - mapW * scale) / 2,
+    oy: (height - mapH * scale) / 2,
+    minX: Number(map.origin && map.origin.x) || 0,
+    maxY: (Number(map.origin && map.origin.y) || 0) + mapH,
+    mapW,
+    mapH,
+  };
+}
+
+function radarScanView(scan, width, height) {
+  const values = (scan.ranges || []).filter((value) => value != null);
+  const maxRange = values.length ? Math.max.apply(null, values) : 0;
+  const rangeMax = Math.max(1, Math.min(Number(scan.range_max) || 12, maxRange * 1.15 || 6));
+  const pad = 14;
+  const scale = Math.max(4, (Math.min(width, height) / 2 - pad) / rangeMax);
+  return { kind: 'scan', cx: width / 2, cy: height / 2, scale, rangeMax };
+}
+
+function drawRadarPolar(ctx, view) {
+  ctx.strokeStyle = 'rgba(125, 211, 252, 0.12)';
+  ctx.lineWidth = 1;
+  const step = view.rangeMax > 8 ? 2 : 1;
+  for (let r = step; r <= view.rangeMax; r += step) {
+    ctx.beginPath();
+    ctx.arc(view.cx, view.cy, r * view.scale, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.moveTo(view.cx - 8, view.cy);
+  ctx.lineTo(view.cx + 8, view.cy);
+  ctx.moveTo(view.cx, view.cy - 8);
+  ctx.lineTo(view.cx, view.cy + 8);
+  ctx.stroke();
+}
+
+function drawRadarScan(ctx, scan, mapMode, pose, view) {
+  const ranges = scan.ranges || [];
+  const angleMin = Number(scan.angle_min) || 0;
+  const increment = Number(scan.angle_increment) || 0;
+  ctx.fillStyle = 'rgba(34, 211, 238, 0.9)';
+  ctx.beginPath();
+  for (let i = 0; i < ranges.length; i += 1) {
+    const range = Number(ranges[i]);
+    if (!Number.isFinite(range) || range <= 0) continue;
+    const angle = angleMin + i * increment;
+    let px;
+    let py;
+    if (mapMode && pose) {
+      const wx = Number(pose.x) + Math.cos(Number(pose.yaw) + angle) * range;
+      const wy = Number(pose.y) + Math.sin(Number(pose.yaw) + angle) * range;
+      px = view.ox + (wx - view.minX) * view.scale;
+      py = view.oy + (view.maxY - wy) * view.scale;
+    } else {
+      px = view.cx + Math.sin(angle) * range * view.scale;
+      py = view.cy - Math.cos(angle) * range * view.scale;
+    }
+    ctx.moveTo(px, py);
+    ctx.arc(px, py, 1.5, 0, Math.PI * 2);
+  }
+  ctx.fill();
+}
+
+function drawRadarRobot(ctx, pose, view, mapMode) {
+  let x;
+  let y;
+  let yaw = 0;
+  if (mapMode) {
+    if (!pose) return;
+    x = view.ox + (Number(pose.x) - view.minX) * view.scale;
+    y = view.oy + (view.maxY - Number(pose.y)) * view.scale;
+    yaw = Number(pose.yaw) || 0;
+  } else {
+    x = view.cx;
+    y = view.cy;
+  }
+  ctx.save();
+  ctx.translate(x, y);
+  if (mapMode) {
+    ctx.rotate(-yaw);
+    ctx.beginPath();
+    ctx.moveTo(11, 0);
+    ctx.lineTo(-7, 7);
+    ctx.lineTo(-4, 0);
+    ctx.lineTo(-7, -7);
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(0, -11);
+    ctx.lineTo(7, 7);
+    ctx.lineTo(0, 4);
+    ctx.lineTo(-7, 7);
+  }
+  ctx.closePath();
+  ctx.fillStyle = '#f59e0b';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function renderRadar() {
+  const panel = $('#radar-panel');
+  const canvas = $('#radar-canvas');
+  if (!panel || !canvas) return;
+  const empty = $('#radar-empty');
+  const stateEl = $('#radar-state');
+  const meta = $('#radar-meta');
+  const data = state.radar;
+  const map = data && data.map && data.map.available ? data.map : null;
+  const scan = data && data.scan && data.scan.available ? data.scan : null;
+  const pose = data && data.pose && data.pose.available ? data.pose : null;
+  const ready = Boolean(map || scan);
+  let status = 'waiting';
+  let label = '等待';
+  if (state.radarError) {
+    status = 'error';
+    label = '离线';
+  } else if (map && scan) {
+    status = 'live';
+    label = 'LIVE';
+  } else if (map) {
+    status = 'live';
+    label = 'MAP';
+  } else if (scan) {
+    status = 'live';
+    label = 'SCAN';
+  }
+  panel.dataset.state = status;
+  if (stateEl) stateEl.textContent = label;
+  if (empty) empty.hidden = ready;
+  if (meta) {
+    const bits = [];
+    if (map) bits.push(`MAP ${map.width}×${map.height} @ ${Number(map.resolution).toFixed(2)}m`);
+    if (scan) bits.push(`SCAN ${scan.count || (scan.ranges || []).length}pts`);
+    if (pose) bits.push(`POSE ${Number(pose.x).toFixed(2)},${Number(pose.y).toFixed(2)}`);
+    meta.textContent = bits.length ? bits.join(' · ') : '--';
+  }
+  if (!ready) return;
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width < 20 || rect.height < 20) return;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const pixelW = Math.max(1, Math.round(rect.width * dpr));
+  const pixelH = Math.max(1, Math.round(rect.height * dpr));
+  if (canvas.width !== pixelW || canvas.height !== pixelH) {
+    canvas.width = pixelW;
+    canvas.height = pixelH;
+  }
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const width = rect.width;
+  const height = rect.height;
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = '#03070d';
+  ctx.fillRect(0, 0, width, height);
+  const view = map ? radarMapView(map, width, height) : radarScanView(scan, width, height);
+  if (map) {
+    const bitmap = radarMapBitmap(map);
+    if (bitmap) {
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(bitmap, view.ox, view.oy, view.mapW * view.scale, view.mapH * view.scale);
+    }
+  } else {
+    drawRadarPolar(ctx, view);
+  }
+  if (scan && (!map || pose)) drawRadarScan(ctx, scan, Boolean(map), pose, view);
+  drawRadarRobot(ctx, pose, view, Boolean(map));
+}
+
+async function pollRadar() {
+  if (state.radarPolling) return;
+  state.radarPolling = true;
+  try {
+    state.radar = await fetchJson(API.radar, {}, 3500);
+    state.radarError = '';
+  } catch (error) {
+    state.radar = null;
+    state.radarError = error && error.message ? error.message : String(error);
+  } finally {
+    state.radarPolling = false;
+    renderRadar();
+  }
+}
+
+/* --------------------------------------------------------------- video */
+const videoState = { img: null, empty: null, panel: null, label: null, retryTimer: null };
+
+function setVideoState(label, kind) {
+  if (videoState.label) videoState.label.textContent = label;
+  if (videoState.panel) videoState.panel.dataset.state = kind;
+}
+
+function connectVideo() {
+  const img = videoState.img;
+  if (!img) return;
+  setVideoState('连接中', 'waiting');
+  if (videoState.empty) videoState.empty.hidden = false;
+  img.classList.remove('is-live');
+  img.removeAttribute('src');
+  img.src = `/stream?t=${Date.now()}`;
+}
+
+function scheduleVideoRetry() {
+  if (videoState.retryTimer) return;
+  videoState.retryTimer = window.setTimeout(() => {
+    videoState.retryTimer = null;
+    connectVideo();
+  }, 8000);
+}
+
+function initVideo() {
+  videoState.img = $('#video-stream');
+  videoState.empty = $('#video-empty');
+  videoState.panel = $('#video-panel');
+  videoState.label = $('#video-state');
+  const img = videoState.img;
+  if (!img) return;
+  img.addEventListener('load', () => {
+    img.classList.add('is-live');
+    if (videoState.empty) videoState.empty.hidden = true;
+    setVideoState('LIVE', 'live');
+  });
+  img.addEventListener('error', () => {
+    img.classList.remove('is-live');
+    if (videoState.empty) videoState.empty.hidden = false;
+    setVideoState('等待相机', 'waiting');
+    scheduleVideoRetry();
+  });
+  window.setInterval(() => {
+    if (!videoState.img || videoState.img.classList.contains('is-live')) return;
+    if (videoState.img.naturalWidth > 0) {
+      videoState.img.classList.add('is-live');
+      if (videoState.empty) videoState.empty.hidden = true;
+      setVideoState('LIVE', 'live');
+    }
+  }, 2000);
+  connectVideo();
+}
+
+function initRadarCanvas() {
+  const canvas = $('#radar-canvas');
+  if (!canvas) return;
+  if (window.ResizeObserver) {
+    const observer = new ResizeObserver(() => renderRadar());
+    observer.observe(canvas.parentElement || canvas);
+  } else {
+    window.addEventListener('resize', () => renderRadar());
+  }
+}
+
+
+/* --------------------------------------------------------- scenario exec */
+function setScenarioResult(text, kind = '') {
+  const el = $('#scenario-result');
+  if (!el) return;
+  el.textContent = text;
+  el.className = `monitor-tag${kind ? ` is-${kind}` : ''}`;
+}
+
+function renderScenarioStatus() {
+  const payload = state.scenario;
+  if (state.scenarioSending) return;
+  if (state.scenarioError) {
+    setScenarioResult('离线', 'error');
+    return;
+  }
+  if (!payload) {
+    setScenarioResult('待执行');
+    return;
+  }
+  const online = payload.scenario_online !== false;
+  const scenario = payload.scenario || {};
+  const stateName = String(scenario.state || '');
+  const target = scenario.display_name || scenario.target_label || '';
+  const dispatch = String(scenario.last_dispatch || '');
+  const result = $('#scenario-result');
+  if (!online) {
+    setScenarioResult('节点离线', 'warn');
+  } else if (stateName === 'searching') {
+    setScenarioResult(`搜索中${target ? ` · ${target}` : ''}`, 'ok');
+  } else if (stateName === 'succeeded') {
+    setScenarioResult(`已找到${target ? ` · ${target}` : ''}`, 'ok');
+  } else if (stateName === 'failed') {
+    setScenarioResult('未找到', 'warn');
+  } else if (dispatch === 'mission') {
+    setScenarioResult('任务已下发', 'ok');
+  } else if (dispatch === 'mission_offline') {
+    setScenarioResult('任务管理未在线', 'warn');
+  } else if (dispatch === 'emergency') {
+    setScenarioResult('急停中', 'error');
+  } else if (dispatch === 'ignored') {
+    setScenarioResult('不支持', 'warn');
+  } else if (stateName === 'canceled') {
+    setScenarioResult('已取消', 'warn');
+  } else {
+    setScenarioResult('待执行');
+  }
+  if (result) {
+    const command = scenario.last_command || payload.last_text || '';
+    const source = scenario.last_source || '';
+    result.title = command ? `${command}${source ? ` · ${source}` : ''}` : '';
+  }
+}
+
+async function pollScenarioStatus() {
+  if (state.scenarioPolling) return;
+  state.scenarioPolling = true;
+  try {
+    state.scenario = await fetchJson(API.scenarioStatus, {}, 3500);
+    state.scenarioError = '';
+  } catch (error) {
+    state.scenario = null;
+    state.scenarioError = error && error.message ? error.message : String(error);
+  } finally {
+    state.scenarioPolling = false;
+    renderScenarioStatus();
+  }
+}
+
+async function executeScenario(text) {
+  const command = String(text || '').trim();
+  if (!command || state.scenarioSending) return;
+  const input = $('#scenario-text');
+  if (input) input.value = command;
+  state.scenarioSending = true;
+  setScenarioResult('执行中…', 'warn');
+  try {
+    const payload = await fetchJson(API.scenario, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: command, source: 'text' }),
+    }, 6000);
+    if (payload && payload.scenario_online === false) {
+      setScenarioResult('节点未在线', 'warn');
+    } else {
+      setScenarioResult('已发送', 'ok');
+      toast(`场景指令已发送：${command}`, 'ok');
+    }
+    window.setTimeout(() => { pollScenarioStatus(); }, 700);
+  } catch (error) {
+    setScenarioResult('执行失败', 'error');
+    toast(error.message || '场景指令失败', 'error');
+  } finally {
+    state.scenarioSending = false;
+  }
+}
+
+function bindScenarioEvents() {
+  const form = $('#scenario-form');
+  if (form) {
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      executeScenario($('#scenario-text') ? $('#scenario-text').value : '');
+    });
+  }
+  const quick = $('#scenario-quick');
+  if (quick) {
+    quick.addEventListener('click', (event) => {
+      const button = event.target.closest('button[data-text]');
+      if (!button) return;
+      executeScenario(button.dataset.text);
+    });
+  }
 }
 
 function telemetryCard(label, value, sub) {
@@ -1722,6 +2336,418 @@ async function pollEvents() {
   }
 }
 
+function speakerPanelStatus(speaker) {
+  if (!speaker || speaker.enabled === false) return 'disabled';
+  const raw = String(speaker.status || '');
+  if (raw === 'ok') return 'ok';
+  if (raw === 'degraded') return 'degraded';
+  if (raw === 'error') return 'error';
+  if (raw === 'starting') return 'starting';
+  if (raw === 'disabled') return 'disabled';
+  if (speaker.connected) return speaker.audio_ready ? 'ok' : 'degraded';
+  if (speaker.state === 'error') return 'error';
+  if (speaker.state === 'scanning' || speaker.state === 'connecting') return 'starting';
+  return 'unknown';
+}
+
+function speakerStateLabel(speaker, status) {
+  if (!speaker) return '未知';
+  if (speaker.enabled === false) return '禁用';
+  if (speaker.connected && speaker.audio_ready) return '已连接';
+  if (speaker.connected) return '已连接 · 音频未就绪';
+  switch (speaker.state) {
+    case 'scanning': return '搜索中';
+    case 'connecting': return '连接中';
+    case 'disconnected': return '已断开';
+    case 'error': return '连接失败';
+    case 'starting': return '启动中';
+    default: return STATUS_LABEL[status] || '未知';
+  }
+}
+
+function renderSpeaker() {
+  const panel = $('#speaker-panel');
+  if (!panel) return;
+  const speaker = state.speaker;
+  const status = speakerPanelStatus(speaker);
+  panel.dataset.status = status;
+
+  const stateChip = $('#speaker-state');
+  if (stateChip) {
+    stateChip.textContent = speakerStateLabel(speaker, status);
+    stateChip.className = `status-chip status-${status}`;
+  }
+  const led = $('#speaker-led');
+  if (led) led.className = `led status-${status}`;
+
+  const device = (speaker && speaker.device) || {};
+  const sink = (speaker && speaker.sink) || {};
+  const playback = (speaker && speaker.playback) || {};
+  const tts = (speaker && speaker.tts) || {};
+
+  const setText = (selector, value) => {
+    const el = $(selector);
+    if (el) el.textContent = value == null || value === '' ? '--' : String(value);
+  };
+  setText('#speaker-device', device.name || '蓝牙音箱');
+  setText('#speaker-name', device.name || '--');
+  setText('#speaker-mac', device.mac || '--');
+  setText('#speaker-sink', sink.ready ? (sink.name || 'ready') : (sink.name || '未就绪'));
+  setText(
+    '#speaker-playing',
+    playback.playing ? '播放中' : (playback.last_text ? `空闲 · ${playback.last_text}` : '空闲')
+  );
+
+  const connectBtn = $('#speaker-connect');
+  if (connectBtn) {
+    connectBtn.disabled = !speaker || speaker.enabled === false;
+    connectBtn.textContent = speaker && speaker.connected ? '重新连接' : '连接音箱';
+  }
+  const stopBtn = $('#speaker-stop');
+  if (stopBtn) stopBtn.disabled = !speaker || speaker.enabled === false;
+
+  const modelSelect = $('#speaker-model');
+  if (modelSelect) {
+    const models = speaker && Array.isArray(speaker.models) ? speaker.models : [];
+    const signature = models.map((item) => `${item.id}:${item.label}`).join('|');
+    if (models.length && modelSelect.dataset.signature !== signature) {
+      modelSelect.innerHTML = models.map((item) =>
+        `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label || item.id)}</option>`
+      ).join('');
+      modelSelect.dataset.signature = signature;
+    }
+    if (speaker && speaker.model) modelSelect.value = speaker.model;
+    modelSelect.disabled = !speaker || speaker.enabled === false;
+  }
+
+  const volume = $('#speaker-volume');
+  if (volume && !state.speakerVolumeEditing) {
+    const value = numberOrNull(sink.volume);
+    if (value != null) volume.value = String(clamp(Math.round(value), 0, 100));
+  }
+  const volumeLabel = $('#speaker-volume-label');
+  if (volumeLabel && volume) volumeLabel.textContent = `${volume.value}%`;
+
+  const hint = $('#speaker-hint');
+  if (hint) {
+    if (!speaker) {
+      hint.textContent = state.speakerError
+        ? `音箱接口不可用：${state.speakerError}`
+        : '等待音箱状态…';
+    } else if (speaker.enabled === false) {
+      hint.textContent = '音箱功能未启用（edge.speaker.enabled=false）';
+    } else {
+      const bits = [];
+      if (speaker.last_error) bits.push(speaker.last_error);
+      if (playback.last_error) bits.push(`播放：${playback.last_error}`);
+      if (tts.backend) bits.push(`TTS ${tts.backend} / ${tts.voice || '--'}`);
+      if (playback.queue) bits.push(`队列 ${playback.queue}`);
+      hint.textContent = bits.join(' · ') || '音箱已就绪，可输入文字播报。';
+    }
+  }
+}
+
+async function pollSpeaker() {
+  if (state.speakerPolling) return;
+  state.speakerPolling = true;
+  try {
+    state.speaker = await fetchJson(API.speaker, {}, 3000);
+    state.speakerError = '';
+  } catch (error) {
+    state.speaker = null;
+    state.speakerError = error && error.message ? error.message : String(error);
+  } finally {
+    state.speakerPolling = false;
+    renderSpeaker();
+  }
+}
+
+async function speakerAction(action, payload = {}) {
+  const data = await fetchJson(
+    API.speakerAction(action),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+    8000
+  );
+  if (data && data.speaker) {
+    state.speaker = data.speaker;
+    state.speakerError = '';
+    renderSpeaker();
+  }
+  toast((data && data.message) || '操作成功', 'ok');
+  return data;
+}
+
+async function speakText(text) {
+  const value = String(text || '').trim();
+  if (!value) {
+    toast('请输入播报内容', 'error');
+    return;
+  }
+  try {
+    await speakerAction('say', { text: value });
+  } catch (error) {
+    toast(`语音播报失败：${error.message}`, 'error');
+  }
+}
+
+function bindSpeakerEvents() {
+  const form = $('#speaker-form');
+  if (form) {
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const input = $('#speaker-text');
+      speakText(input ? input.value : '');
+    });
+  }
+
+  // 输入停顿后提前合成，点击“语音播报”时直接命中缓存。
+  const textInput = $('#speaker-text');
+  if (textInput) {
+    let prepareTimer = null;
+    textInput.addEventListener('input', () => {
+      clearTimeout(prepareTimer);
+      const value = textInput.value.trim();
+      if (!value) return;
+      prepareTimer = setTimeout(() => {
+        fetchJson(API.speakerAction('prepare'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: value }),
+        }, 8000).catch(() => {});
+      }, 450);
+    });
+  }
+
+  const quick = $('#speaker-quick');
+  if (quick) {
+    quick.addEventListener('click', (event) => {
+      const button = event.target.closest('button[data-text]');
+      if (!button) return;
+      const input = $('#speaker-text');
+      if (input) input.value = button.dataset.text || '';
+      speakText(button.dataset.text || '');
+    });
+  }
+
+  const connect = $('#speaker-connect');
+  if (connect) {
+    connect.addEventListener('click', async () => {
+      try {
+        await speakerAction('connect');
+      } catch (error) {
+        toast(`连接音箱失败：${error.message}`, 'error');
+      }
+    });
+  }
+
+  const stop = $('#speaker-stop');
+  if (stop) {
+    stop.addEventListener('click', async () => {
+      try {
+        await speakerAction('stop');
+      } catch (error) {
+        toast(`停止播放失败：${error.message}`, 'error');
+      }
+    });
+  }
+
+  const model = $('#speaker-model');
+  if (model) {
+    model.addEventListener('change', async () => {
+      const target = model.value;
+      model.disabled = true;
+      try {
+        await speakerAction('model', { model: target });
+      } catch (error) {
+        toast(`切换音箱型号失败：${error.message}`, 'error');
+        if (state.speaker && state.speaker.model) model.value = state.speaker.model;
+      } finally {
+        model.disabled = false;
+      }
+    });
+  }
+
+  const volume = $('#speaker-volume');
+  if (volume) {
+    volume.addEventListener('input', () => {
+      state.speakerVolumeEditing = true;
+      const label = $('#speaker-volume-label');
+      if (label) label.textContent = `${volume.value}%`;
+    });
+    volume.addEventListener('change', async () => {
+      state.speakerVolumeEditing = false;
+      try {
+        await speakerAction('volume', { volume: Number(volume.value) });
+      } catch (error) {
+        toast(`设置音量失败：${error.message}`, 'error');
+      }
+    });
+  }
+}
+
+function microphonePanelStatus(mic) {
+  if (!mic) return 'unknown';
+  if (mic.enabled === false) return 'disabled';
+  if (mic.recording) return 'ok';
+  if (mic.available) return 'ok';
+  if (mic.error) return 'error';
+  return 'degraded';
+}
+
+function renderMicrophone() {
+  const block = $('#mic-block');
+  if (!block) return;
+  const mic = state.microphone;
+  const status = microphonePanelStatus(mic);
+  block.dataset.status = status;
+
+  const chip = $('#mic-state');
+  let label = '未知';
+  if (!mic) label = '未知';
+  else if (mic.enabled === false) label = '禁用';
+  else if (mic.recording) label = '录音中';
+  else if (mic.available) label = '就绪';
+  else if (mic.error) label = '不可用';
+  else label = '未就绪';
+  if (chip) {
+    chip.textContent = label;
+    chip.className = `status-chip status-${status}`;
+  }
+
+  const duration = mic ? Number(mic.duration_ms || 0) : 0;
+  const durationEl = $('#mic-duration');
+  if (durationEl) durationEl.textContent = fmtDuration(duration / 1000);
+  const maxEl = $('#mic-hint');
+
+  const start = $('#mic-start');
+  if (start) start.disabled = !mic || mic.enabled === false || !mic.available || Boolean(mic.recording);
+  const stop = $('#mic-stop');
+  if (stop) stop.disabled = !mic || !mic.recording;
+
+  const play = $('#mic-play');
+  if (play) play.disabled = !mic || !mic.last_file_name || Boolean(mic.recording);
+  const download = $('#mic-download');
+  if (download) {
+    if (mic && mic.last_file_name) {
+      download.hidden = false;
+      download.href = `${API.microphone}/recordings/${encodeURIComponent(mic.last_file_name)}`;
+      download.setAttribute('download', mic.last_file_name);
+      download.textContent = `下载 ${mic.last_file_name}`;
+    } else {
+      download.hidden = true;
+      download.removeAttribute('href');
+    }
+  }
+
+  if (maxEl) {
+    if (!mic) {
+      maxEl.textContent = state.microphoneError
+        ? `麦克风接口不可用：${state.microphoneError}`
+        : '等待麦克风状态…';
+    } else if (mic.enabled === false) {
+      maxEl.textContent = '麦克风功能未启用（edge.speaker.microphone.enabled=false）';
+    } else if (mic.recording) {
+      maxEl.textContent = `HFP 录音中 · ${mic.source || '--'} · 最长 ${fmtNumber(mic.max_duration_sec, 0)}s · 停止后自动恢复 A2DP`;
+    } else if (mic.available) {
+      maxEl.textContent = `${speakerDeviceLabel()} HFP 麦克风就绪 · ${mic.sample_rate || '--'} Hz / ${mic.channels || 1}ch`
+        + (mic.last_file_name ? ` · 最近 ${mic.last_file_name}` : '');
+    } else {
+      maxEl.textContent = mic.error || '音箱未连接或不支持 HFP 麦克风';
+    }
+  }
+}
+
+async function pollMicrophone() {
+  if (state.microphonePolling) return;
+  state.microphonePolling = true;
+  try {
+    state.microphone = await fetchJson(API.microphone, {}, 3000);
+    state.microphoneError = '';
+  } catch (error) {
+    state.microphone = null;
+    state.microphoneError = error && error.message ? error.message : String(error);
+  } finally {
+    state.microphonePolling = false;
+    renderMicrophone();
+    renderHardware();
+  }
+}
+
+async function microphoneAction(action, payload = {}) {
+  const data = await fetchJson(
+    API.microphoneAction(action),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+    15000
+  );
+  if (data && data.microphone) {
+    state.microphone = data.microphone;
+    state.microphoneError = '';
+    renderMicrophone();
+    renderHardware();
+  }
+  toast((data && data.message) || '操作成功', 'ok');
+  await pollMicrophone();
+  return data;
+}
+
+function bindMicrophoneEvents() {
+  const start = $('#mic-start');
+  if (start) {
+    start.addEventListener('click', async () => {
+      try {
+        await microphoneAction('start');
+      } catch (error) {
+        toast(`开始录音失败：${error.message}`, 'error');
+      }
+    });
+  }
+  const stop = $('#mic-stop');
+  if (stop) {
+    stop.addEventListener('click', async () => {
+      try {
+        await microphoneAction('stop');
+      } catch (error) {
+        toast(`停止录音失败：${error.message}`, 'error');
+      }
+    });
+  }
+  const play = $('#mic-play');
+  if (play) {
+    play.addEventListener('click', async () => {
+      const name = state.microphone && state.microphone.last_file_name;
+      if (!name) return;
+      try {
+        await microphoneAction('play', { file: name });
+      } catch (error) {
+        toast(`播放录音失败：${error.message}`, 'error');
+      }
+    });
+  }
+}
+
+async function pollPower() {
+  if (state.powerPolling) return;
+  state.powerPolling = true;
+  try {
+    state.power = await fetchJson(API.power, {}, 3000);
+    state.powerError = '';
+  } catch (error) {
+    state.power = null;
+    state.powerError = error && error.message ? error.message : String(error);
+  } finally {
+    state.powerPolling = false;
+    renderHardware();
+  }
+}
+
 function startPolling() {
   stopPolling();
   state.bodyFailures = 0;
@@ -1734,8 +2760,28 @@ function startPolling() {
   state.eventsTimer = setInterval(() => {
     if (!document.hidden) pollEvents();
   }, 3000);
+  state.speakerTimer = setInterval(() => {
+    if (!document.hidden) pollSpeaker();
+  }, 3000);
+  state.microphoneTimer = setInterval(() => {
+    if (!document.hidden) pollMicrophone();
+  }, 3000);
+  state.powerTimer = setInterval(() => {
+    if (!document.hidden) pollPower();
+  }, 3000);
+  state.radarTimer = setInterval(() => {
+    if (!document.hidden) pollRadar();
+  }, 2000);
+  state.scenarioTimer = setInterval(() => {
+    if (!document.hidden) pollScenarioStatus();
+  }, 3000);
   pollBody();
   pollEvents();
+  pollSpeaker();
+  pollMicrophone();
+  pollPower();
+  pollRadar();
+  pollScenarioStatus();
   poll();
 }
 
@@ -1746,11 +2792,24 @@ function stopPolling() {
   state.bodyPollTimer = null;
   if (state.eventsTimer) clearInterval(state.eventsTimer);
   state.eventsTimer = null;
+  if (state.speakerTimer) clearInterval(state.speakerTimer);
+  state.speakerTimer = null;
+  if (state.microphoneTimer) clearInterval(state.microphoneTimer);
+  state.microphoneTimer = null;
+  if (state.powerTimer) clearInterval(state.powerTimer);
+  state.powerTimer = null;
+  if (state.radarTimer) clearInterval(state.radarTimer);
+  state.radarTimer = null;
+  if (state.scenarioTimer) clearInterval(state.scenarioTimer);
+  state.scenarioTimer = null;
 }
 
 function bindEvents() {
   const refresh = $('#refresh-btn');
-  if (refresh) refresh.addEventListener('click', () => { pollBody(); pollEvents(); poll(); });
+  if (refresh) refresh.addEventListener('click', () => { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); pollPower(); pollRadar(); pollScenarioStatus(); connectVideo(); poll(); });
+  bindSpeakerEvents();
+  bindMicrophoneEvents();
+  bindScenarioEvents();
 
   const auto = $('#auto-refresh');
   if (auto) {
@@ -1788,16 +2847,18 @@ function bindEvents() {
   });
 
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) { pollBody(); pollEvents(); poll(); }
+    if (!document.hidden) { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); pollPower(); pollRadar(); pollScenarioStatus(); poll(); }
   });
 
-  window.addEventListener('online', () => { pollBody(); pollEvents(); poll(); });
+  window.addEventListener('online', () => { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); pollPower(); pollRadar(); pollScenarioStatus(); connectVideo(); poll(); });
 }
 
 function init() {
   bindEvents();
   initGauge();
   initMotorCards();
+  initVideo();
+  initRadarCanvas();
   state.clockTimer = setInterval(updateSyncText, 1000);
   startPolling();
 }

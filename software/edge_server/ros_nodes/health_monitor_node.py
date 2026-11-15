@@ -4,7 +4,7 @@
     发布  /center/health          custom_msgs/HealthStatus（TRANSIENT_LOCAL，1 Hz）
     服务  /center/healthcheck     custom_msgs/HealthCheck
     HTTP  /ros/health 等         供同机 Edge Server/dashboard 等非 ROS 调用方使用
-                                 契约见 software/edge_server/HEALTHCHECK.md
+                                 契约见 software/edge_server/docs/HEALTHCHECK.md
 
 监控范围：
     - 传感器/执行器：相机、雷达、IMU、麦克风、音箱、机械臂、底盘、电池、里程计；
@@ -404,7 +404,7 @@ class HealthMonitorNode(Node):
                 error = "non-finite odometry"
         elif isinstance(msg, String):
             metrics["bytes"] = len(msg.data)
-            if spec.kind in {"base", "speaker"}:
+            if spec.kind in {"base", "speaker", "microphone", "power", "cliff"}:
                 try:
                     data = json.loads(msg.data)
                 except Exception:  # noqa: BLE001
@@ -422,6 +422,36 @@ class HealthMonitorNode(Node):
                         if spec.kind == "speaker" and data.get("online") is False:
                             invalid = True
                             error = "speaker offline"
+                        if spec.kind == "microphone" and data.get("online") is False:
+                            invalid = True
+                            error = "microphone offline"
+                        if spec.kind == "power":
+                            if data.get("online") is False:
+                                invalid = True
+                                error = "power monitor offline"
+                            elif data.get("status") in {"error", "degraded"}:
+                                invalid = True
+                                error = (
+                                    "power "
+                                    + str(data.get("status"))
+                                    + ": "
+                                    + str(data.get("error") or data.get("throttled_raw") or "")
+                                )
+                        if spec.kind == "cliff":
+                            if data.get("available") is False:
+                                invalid = True
+                                error = "cliff telemetry unavailable (STM32 firmware needs update)"
+                            elif data.get("triggered") is True:
+                                side = []
+                                if data.get("left"):
+                                    side.append("left")
+                                if data.get("right"):
+                                    side.append("right")
+                                invalid = True
+                                error = "cliff detected: " + ("+".join(side) or "unknown")
+                            elif data.get("online") is False:
+                                invalid = True
+                                error = "cliff sensor offline"
         else:
             metrics["message_class"] = type(msg).__name__
 

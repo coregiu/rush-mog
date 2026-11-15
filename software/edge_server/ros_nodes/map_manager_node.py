@@ -33,9 +33,14 @@ from custom_msgs.msg import Frontier, FrontierList, MapInfo
 from custom_msgs.srv import MapControl
 
 try:  # slam_toolbox 是可选的：只影响“优先用 slam_toolbox 存图”
-    from slam_toolbox.srv import DeserializeMap, Reset, SaveMap, SerializeMap
+    from slam_toolbox.srv import (
+        Clear,
+        DeserializePoseGraph,
+        SaveMap,
+        SerializePoseGraph,
+    )
 except ImportError:  # pragma: no cover - 基础 Humble 环境没有 slam_toolbox
-    DeserializeMap = SaveMap = SerializeMap = Reset = None
+    Clear = DeserializePoseGraph = SaveMap = SerializePoseGraph = None
 
 
 class MapManagerNode(Node):
@@ -104,17 +109,19 @@ class MapManagerNode(Node):
                 SaveMap, "/slam_toolbox/save_map", callback_group=self._cb_group
             )
             self.slam_serialize = self.create_client(
-                SerializeMap,
+                SerializePoseGraph,
                 "/slam_toolbox/serialize_map",
                 callback_group=self._cb_group,
             )
             self.slam_deserialize = self.create_client(
-                DeserializeMap,
+                DeserializePoseGraph,
                 "/slam_toolbox/deserialize_map",
                 callback_group=self._cb_group,
             )
             self.slam_reset = self.create_client(
-                Reset, "/slam_toolbox/reset", callback_group=self._cb_group
+                Clear,
+                "/slam_toolbox/clear_changes",
+                callback_group=self._cb_group,
             )
             self.get_logger().info(
                 "slam_toolbox services available; map save/load prefers them"
@@ -253,9 +260,11 @@ class MapManagerNode(Node):
         if self.slam_save is not None and self.prefer_slam_toolbox:
             try:
                 req = SaveMap.Request()
-                req.name = path
+                # SaveMap 的 name 是 std_msgs/String，不是普通 str。
+                req.name.data = path
                 result = self._call_service(self.slam_save, req, timeout=5.0)
-                if result is not None and bool(getattr(result, "result", True)):
+                # slam_toolbox 的 RESULT_SUCCESS == 0；不能用 bool(result)。
+                if result is not None and int(getattr(result, "result", 1)) == 0:
                     saved = path + ".yaml" if not path.endswith(".yaml") else path
                     self.status = "saved"
                     self.map_file = saved
@@ -311,7 +320,7 @@ class MapManagerNode(Node):
         if self.slam_reset is None:
             return
         try:
-            self._call_service(self.slam_reset, Reset.Request(), timeout=3.0)
+            self._call_service(self.slam_reset, Clear.Request(), timeout=3.0)
         except Exception as exc:  # noqa: BLE001
             self.get_logger().warn(f"slam_toolbox reset failed: {exc}")
 

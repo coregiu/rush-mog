@@ -11,3 +11,7 @@ __pycache__/
 ago-backups
 *.lck
 ~*
+
+# 本地部署产物（模型权重 / 离线 wheel，不入库）
+models/
+wheels/

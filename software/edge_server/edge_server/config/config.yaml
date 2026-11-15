@@ -5,6 +5,10 @@ edge_server:
   # ======================================================================
   vla_engine:
     model_name: "vla_policy_v1"
+    # auto：优先 Center Server 的真实 SmolVLA（通过 Edge 注册表发现），
+    #       未握手/超时/报错时回退规则桩；remote：只用远程，失败停车；
+    #       stub：只用规则桩（无网络依赖）。
+    backend: "auto"
     inference_rate: 10
     confidence_threshold: 0.6
     # 当前实现未加载真实模型，仅使用规则桩；有 GPU 且接入模型后可改为 cuda
@@ -12,6 +16,28 @@ edge_server:
     max_queue_size: 5
     default_linear_speed: 0.3
     default_angular_speed: 0.5
+    remote:
+      enabled: true
+      # Edge Server 上 CENTER 的握手注册表；Center 启动后自动填入地址
+      discovery_url: "http://127.0.0.1:8081/api/center"
+      discovery_interval_sec: 5.0
+      discovery_timeout_sec: 1.0
+      # 静态回退（注册表不可用/直连调试）；留空则只用发现结果
+      host: ""
+      port: 8000
+      api_key: ""
+      timeout_sec: 1.5
+      # 单次远程推理最长占用；配合 max_rate_hz 防止控制循环被拖慢
+      max_rate_hz: 5.0
+      chunk_size: 1
+      image_key: "front"
+      color_order: "bgr"          # cv_bridge bgr8 帧；RGB 相机改 rgb
+      state_joint_names: []       # 空=按 JointState 顺序拼到 [x,y,yaw] 之后
+      confidence: 0.9             # SmolVLA 不提供校准置信度
+      turn_threshold: 0.15        # rad/s
+      linear_threshold: 0.02      # m/s
+      retry_after_sec: 5.0        # 失败后多久再试 Center
+      fallback_to_rules: true
 
   instruction:
     object_labels:
@@ -20,8 +46,33 @@ edge_server:
       person: ["人", "人员", "person"]
       box: ["盒子", "箱子", "box"]
       ball: ["球", "小球", "ball"]
+      slipper: ["拖鞋", "鞋子", "鞋", "slipper", "slippers", "shoe", "shoes"]
+      remote: ["遥控器", "遥控", "remote", "remote control"]
+      keys: ["钥匙", "key", "keys"]
+      bag: ["包", "背包", "书包", "bag", "backpack"]
+      phone: ["手机", "phone", "cell phone"]
+      tissue: ["纸巾", "抽纸", "tissue"]
     waypoints: {}
     home_pose: [0.0, 0.0, 0.0]
+
+  # 语音找东西场景（L3：voice_scenario_node）
+  # 只负责“听懂 -> 调搜索能力 -> 播报”，具体探索/导航/检测在能力层。
+  scenario:
+    voice_topic: "/edge/voice_command"          # 兼容：外部 ASR/旧接口
+    command_topic: "/edge/scenario_command"  # 通用场景指令（JSON: text/source/request_id）
+    mission_request_topic: "/center/mission_request"
+    search_action: "/center/search_object"
+    say_topic: "/body/say"
+    status_topic: "/center/scenario_status"
+    status_rate_hz: 1.0
+    max_duration_sec: 300.0
+    min_confidence: 0.5
+    standoff_distance: 0.6
+    explore_if_not_found: true
+    save_map: false
+    announce_start: true
+    announce_milestones: true
+    announce_progress_sec: 30.0
 
   action_generator:
     max_linear_speed: 0.8
@@ -112,6 +163,29 @@ edge_server:
     imu: "/imu/data"
 
   # 仿真默认不连串口；实车 robot.yaml 中 enabled: true
+  # ---------------------------------------------------------------- 2D 激光雷达
+  lidar:
+    enabled: false
+    port: "/dev/rush_lidar"
+    baud: 230400
+    protocol: "ld19"
+    topic: "/scan"
+    status_topic: "/lidar/status"
+    frame_id: "laser_link"
+    bins: 360
+    angle_min_deg: -180.0
+    angle_max_deg: 180.0
+    range_min: 0.02
+    range_max: 12.0
+    min_points: 30
+    reconnect_sec: 2.0
+    status_rate_hz: 1.0
+    publish_tf: false
+    tf_parent: "base_link"
+    tf_x: 0.0
+    tf_y: 0.0
+    tf_z: 0.18
+    tf_yaw_deg: 0.0
   base:
     enabled: false
     port: "/dev/ttyUSB0"
@@ -146,6 +220,7 @@ edge_server:
     accel_fs: 1        # ±4g
     gyro_fs: 2         # ±1000dps
     dlpf: 3
+    retry_sec: 2.0
     expected_rate_hz: 100.0
     max_gap_sec: 0.2
     mag_norm_min_ut: 10.0
@@ -209,6 +284,15 @@ edge_server:
   perception:
     enabled: false
     image_topic: "/camera/image_raw"
+    camera_info_topic: ""
+    depth_topic: ""                 # 仿真无深度图；实车 robot.yaml 用 Astra Pro
+    depth_timeout_sec: 1.0
+    depth_scale: 0.001
+    depth_roi_ratio: 0.6
+    depth_min_m: 0.15
+    depth_max_m: 8.0
+    depth_min_pixels: 5
+    prefer_depth: true
     detector: "color"      # color / yolo / none
     publish_rate: 10.0
     min_confidence: 0.5
@@ -274,10 +358,75 @@ edge_server:
       topic: "/camera/image_raw"
       fps: 10
       quality: 70
+    # dashboard「雷达地图」：缓存 /map + /scan + /center/pose，由 /api/radar 提供。
+    radar:
+      enabled: true
+      map_topic: "/map"
+      scan_topic: "/scan"
+      pose_topic: "/center/pose"
+      max_cells: 240                # 地图降采样上限（宽/高）
     motion:
       keepalive_ms: 200
       raw_lease_sec: 1.0
       resend_manual: false
+    # 蓝牙音箱/麦克风：默认 NewMine，dashboard/API 可切到 AM510。
+    # 仿真默认关闭；实车 robot.yaml/deploy.yaml 打开。
+    speaker:
+      enabled: false
+      model: "newmine"               # newmine | am510
+      models:
+        newmine:
+          label: "NewMine"
+          device_name: "newmine"
+          device_mac: ""             # 留空=按名称扫描；建议填实际 MAC
+          force_a2dp: false
+        am510:
+          label: "HONOR AM510"
+          device_name: "HONOR AM510"
+          device_mac: ""
+          force_a2dp: true
+      keepalive: true                 # 持续给 A2DP 送静音，避免音箱空闲休眠掉线
+      auto_connect: true
+      connect_interval_sec: 20
+      scan_timeout_sec: 10
+      connect_timeout_sec: 20
+      sink_wait_sec: 8
+      volume: 70
+      audio_dir: "~/.local/share/rush-mog/audio"
+      say_topic: "/body/say"
+      status_topic: "/body/audio_status"
+      status_rate_hz: 1.0
+      # paplay 请求的缓冲；蓝牙链路抖动时可适当加大
+      playback_latency_ms: 250
+      # 同一台音箱的 HFP 麦克风；录音时临时切 HFP，停止后恢复 A2DP
+      microphone:
+        enabled: false
+        record_dir: ""            # 空 = <audio_dir>/mic
+        sample_rate: 8000
+        channels: 1
+        chunk_ms: 100
+        max_duration_sec: 60
+        volume: 100
+        gain: 3.0
+        topic: "/edge/audio"
+        status_topic: "/body/mic_status"
+        status_rate_hz: 1.0
+      tts:
+        backend: "auto"           # auto/espeak-ng/edge-tts/none
+        voice: "cmn"              # espeak-ng 中文；英文可用 en-us
+        speed: 150
+        pitch: 50
+        max_chars: 200
+        pre_roll_ms: 450
+    # 树莓派电源监控：vcgencmd get_throttled + rpi_volt，正常即代表电源及转换板正常
+    power:
+      enabled: false
+      sample_interval_sec: 2.0
+      status_rate_hz: 1.0
+      status_topic: "/body/power_status"
+      model_path: "/proc/device-tree/model"
+      alarm_path: ""              # 空=自动查找 rpi_volt hwmon
+      vcgencmd: "vcgencmd"
     ros_health_url: "http://127.0.0.1:8090/ros/health"
     ros_params_url: "http://127.0.0.1:8090/ros/params"
     state_file: "~/.config/rush-mog/edge_params.json"
@@ -286,7 +435,7 @@ edge_server:
   # 健康检查（health_monitor_node）
   #   GET  http://127.0.0.1:8090/ros/health   -> Edge Server / dashboard
   #   ROS  /center/health + /center/healthcheck
-  # 接口契约与字段语义见 software/edge_server/HEALTHCHECK.md。
+  # 接口契约与字段语义见 software/edge_server/docs/HEALTHCHECK.md。
   # 仿真默认：camera/lidar/odom/arm 由 fake_edge_publisher 提供；
   # imu/microphone/speaker 为可选；base/battery 关闭。
   # ======================================================================
@@ -307,6 +456,7 @@ edge_server:
       - reverse_operation_node
       - safety_manager_node
       - task_manager_node
+      - voice_scenario_node
       - health_monitor_node
     http:
       enabled: true
@@ -338,17 +488,18 @@ edge_server:
         required: false
       microphone:
         type: microphone
-        topic: "/edge/audio"
-        message_type: "custom_msgs/msg/AudioData"
-        expected_rate_hz: 10.0
-        timeout_sec: 2.0
+        topic: "/body/mic_status"
+        message_type: "std_msgs/msg/String"
+        expected_rate_hz: 1.0
+        timeout_sec: 3.0
         required: false
+        description: "Bluetooth speaker HFP microphone status"
       speaker:
         type: speaker
         topic: "/body/audio_status"
         message_type: "std_msgs/msg/String"
-        expected_rate_hz: 0.0
-        timeout_sec: 2.0
+        expected_rate_hz: 1.0
+        timeout_sec: 3.0
         required: false
       arm:
         type: arm
@@ -358,6 +509,15 @@ edge_server:
         expected_rate_hz: 10.0
         timeout_sec: 2.0
         required: true
+      power:
+        enabled: false
+        type: power
+        topic: "/body/power_status"
+        message_type: "std_msgs/msg/String"
+        expected_rate_hz: 1.0
+        timeout_sec: 3.0
+        required: false
+        description: "Raspberry Pi power monitor (vcgencmd throttled + rpi_volt)"
       odom:
         type: odometry
         topic: "/robot/odometry"
@@ -373,6 +533,14 @@ edge_server:
         expected_rate_hz: 1.0
         timeout_sec: 3.0
         required: true
+      cliff:
+        enabled: false
+        type: cliff
+        topic: "/body/cliff_status"
+        message_type: "std_msgs/msg/String"
+        expected_rate_hz: 1.0
+        timeout_sec: 3.0
+        required: false
       battery:
         enabled: false
         type: battery

@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import time
 
+import numpy as np
 import rclpy
 import cv_bridge
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import Image, LaserScan
+from sensor_msgs.msg import CameraInfo, Image, LaserScan
 
 from edge_server.core.object_detector import make_detector
 from edge_server.core.pose_utils import pose_from_msg
@@ -36,6 +37,17 @@ class TargetDetectorNode(Node):
         self.frame_id = str(self.perception_cfg.get("position_frame", "map"))
         self.publish_rate = max(1.0, float(self.perception_cfg.get("publish_rate", 10.0)))
         self.min_confidence = float(self.perception_cfg.get("min_confidence", 0.5))
+        self.depth_topic = str(
+            self.perception_cfg.get("depth_topic", "/camera/depth/image_raw") or ""
+        )
+        self.camera_info_topic = str(
+            self.perception_cfg.get("camera_info_topic", "/camera/color/camera_info")
+            or ""
+        )
+        self.depth_timeout_sec = float(
+            self.perception_cfg.get("depth_timeout_sec", 1.0)
+        )
+        self.depth_scale = float(self.perception_cfg.get("depth_scale", 0.001))
 
         self.pub_targets = self.create_publisher(
             TargetList, "/center/target_detections", 10
@@ -47,6 +59,9 @@ class TargetDetectorNode(Node):
             max_age_sec=float(self.perception_cfg.get("track_max_age_sec", 1.0)),
         )
         self.latest_scan: LaserScan | None = None
+        self.latest_depth = None
+        self.latest_depth_time = 0.0
+        self.latest_depth_scale = self.depth_scale
         self.latest_pose = None
         self.latest_pose_time = 0.0
         self.latest_task_id = ""
@@ -67,6 +82,12 @@ class TargetDetectorNode(Node):
             targets_cfg=self.perception_cfg.get("targets", {}),
             lidar_window_deg=float(self.perception_cfg.get("lidar_window_deg", 6.0)),
             prefer_lidar=bool(self.perception_cfg.get("prefer_lidar", True)),
+            prefer_depth=bool(self.perception_cfg.get("prefer_depth", True)),
+            depth_scale=self.depth_scale,
+            depth_roi_ratio=float(self.perception_cfg.get("depth_roi_ratio", 0.6)),
+            depth_min_m=float(self.perception_cfg.get("depth_min_m", 0.15)),
+            depth_max_m=float(self.perception_cfg.get("depth_max_m", 8.0)),
+            depth_min_pixels=int(self.perception_cfg.get("depth_min_pixels", 5)),
         )
         self.cv_bridge = cv_bridge.CvBridge()
 
@@ -74,6 +95,17 @@ class TargetDetectorNode(Node):
         self.create_subscription(
             Image, image_topic, self.on_image, qos_profile_sensor_data
         )
+        if self.depth_topic:
+            self.create_subscription(
+                Image, self.depth_topic, self.on_depth, qos_profile_sensor_data
+            )
+        if self.camera_info_topic:
+            self.create_subscription(
+                CameraInfo,
+                self.camera_info_topic,
+                self.on_camera_info,
+                10,
+            )
         self.create_subscription(
             LaserScan, "/scan", self.on_scan, qos_profile_sensor_data
         )
@@ -88,12 +120,38 @@ class TargetDetectorNode(Node):
         self.create_timer(1.0 / self.publish_rate, self.on_timer, clock=self._steady_clock)
         self.get_logger().info(
             f"target_detector_node started (image={image_topic}, "
+            f"depth={self.depth_topic or 'off'}, "
             f"detector={self.perception_cfg.get('detector', 'color')})"
         )
 
     # ------------------------------------------------------------- callbacks
     def on_scan(self, msg: LaserScan):
         self.latest_scan = msg
+
+    def on_depth(self, msg: Image):
+        try:
+            depth = self.cv_bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
+            self.latest_depth = np.array(depth, copy=True)
+            self.latest_depth_time = time.monotonic()
+            # 16UC1 通常是毫米；32FC1 是米。优先按 numpy dtype 判断，兼容
+            # 部分驱动把 encoding 写成 mono16 的情况。
+            self.latest_depth_scale = (
+                0.001 if depth.dtype.kind in {"u", "i"} else 1.0
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().warn(f"depth conversion failed: {exc}")
+
+    def on_camera_info(self, msg: CameraInfo):
+        if self.localizer is None:
+            return
+        self.localizer.set_camera_info(
+            int(msg.width),
+            int(msg.height),
+            float(msg.k[0]),
+            float(msg.k[4]),
+            float(msg.k[2]),
+            float(msg.k[5]),
+        )
 
     def on_pose(self, msg: PoseWithCovarianceStamped):
         self.latest_pose = pose_from_msg(msg)
@@ -135,8 +193,20 @@ class TargetDetectorNode(Node):
         for det in detections:
             if det.confidence < self.min_confidence:
                 continue
+            depth = None
+            if (
+                self.latest_depth is not None
+                and (time.monotonic() - self.latest_depth_time) <= self.depth_timeout_sec
+            ):
+                depth = self.latest_depth
             est = self.localizer.estimate(
-                det.label, det.confidence, det.bbox, scan=scan, robot_pose=pose
+                det.label,
+                det.confidence,
+                det.bbox,
+                scan=scan,
+                robot_pose=pose,
+                depth=depth,
+                depth_scale=self.latest_depth_scale,
             )
             inputs.append(
                 DetectionInput(

@@ -12,6 +12,24 @@ server:
   cors_allow_origin: "*"
   request_timeout_sec: 30.0
 
+# 启动后主动向 Edge Server 握手：上报本机 IP、推理端口和模型能力。
+# Edge Server 记录后，机载 VLA 节点通过 GET /api/center 发现本服务地址。
+# 握手失败只影响可见性/自动发现，不影响 /v1/infer 本身。
+# 现场拓扑（Rush-MOG 实验室）：
+#   Center Server  192.168.3.25:8000（Windows / Linux GPU 主机）
+#   Edge Server    192.168.3.26:80   （树莓派，/api/center 注册表）
+handshake:
+  enabled: true
+  edge_url: "http://192.168.3.26"  # Edge Server 基地址；按现场网络修改
+  path: "/api/center/handshake"    # 兼容旧版 Edge 时可用 /api/modules/report
+  interval_sec: 10.0               # 成功后的心跳间隔（Edge 重启后自动重连）
+  retry_sec: 2.0                   # 失败后的首次重试间隔
+  max_retry_sec: 30.0              # 指数退避上限
+  timeout_sec: 3.0
+  api_key: ""                      # Edge 启用鉴权时填写
+  public_host: "192.168.3.25"      # 空=自动探测；本机固定 IP 更利于排障
+  service_name: "SmolVLA Center Server"
+
 model:
   backend: "smolvla"              # smolvla | stub（stub 仅联调）
   path: "lerobot/smolvla_base"    # HF 仓库名或本地 checkpoint 目录

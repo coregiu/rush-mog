@@ -34,9 +34,16 @@ _PUBLIC_PATHS = {"/v1/health", "/v1/healthz", "/v1/ready"}
 
 
 class HttpApi:
-    def __init__(self, service: InferenceService, config: Mapping[str, Any]) -> None:
+    def __init__(
+        self,
+        service: InferenceService,
+        config: Mapping[str, Any],
+        *,
+        handshake: Any | None = None,
+    ) -> None:
         self.service = service
         self.server_cfg = dict(config.get("server") or {})
+        self.handshake = handshake
         self.api_key = str(self.server_cfg.get("api_key") or "")
         self.max_body_bytes = int(
             self.server_cfg.get("max_body_bytes", 16 * 1024 * 1024)
@@ -143,6 +150,7 @@ class HttpApi:
                     "infer": "POST /v1/infer",
                     "reset": "POST /v1/reset",
                     "warmup": "POST /v1/warmup",
+                    "handshake": "GET/POST /v1/handshake",
                 },
             }
 
@@ -165,7 +173,39 @@ class HttpApi:
         if path in {"/health", "/v1/health", "/v1/healthz"}:
             self._require_method(method, {"GET"})
             status = self.service.status()
+            status["handshake"] = self._handshake_status()
             return 200, status
+
+        if path == "/v1/handshake":
+            if method == "GET":
+                return 200, {
+                    "ok": True,
+                    "handshake": self._handshake_status(),
+                }
+            if method == "POST":
+                # 握手不需要请求体；忽略 Content-Type，允许 curl -X POST 直接触发
+                announcer = self.handshake
+                if announcer is None:
+                    return 200, {
+                        "ok": False,
+                        "message": "握手未启用",
+                        "handshake": self._handshake_status(),
+                    }
+                result = announcer.announce_now("manual")
+                status = announcer.status()
+                ok = bool(result.get("ok"))
+                payload: dict[str, Any] = {
+                    "ok": ok,
+                    "result": result,
+                    "handshake": status,
+                }
+                if not ok:
+                    payload["error"] = {
+                        "code": "handshake_failed",
+                        "message": result.get("error") or "无法连接 Edge Server",
+                    }
+                return 200 if ok else 502, payload
+            self._require_method(method, {"GET", "POST"})
 
         if path == "/v1/model":
             self._require_method(method, {"GET"})
@@ -197,6 +237,26 @@ class HttpApi:
         raise NotFound(f"未知路径: {path}")
 
     # ----------------------------------------------------------------- helpers
+    def _handshake_status(self) -> dict[str, Any]:
+        announcer = self.handshake
+        if announcer is None:
+            return {
+                "enabled": False,
+                "target": "",
+                "connected": False,
+                "last_error": "握手未配置",
+            }
+        try:
+            return announcer.status()
+        except Exception:  # noqa: BLE001 - 状态异常不应影响健康探针
+            LOGGER.exception("handshake status failed")
+            return {
+                "enabled": False,
+                "target": "",
+                "connected": False,
+                "last_error": "握手状态读取失败",
+            }
+
     def _is_protected(self, path: str) -> bool:
         if not self.api_key:
             return False
@@ -241,6 +301,13 @@ class HttpApi:
                 details={"received": len(body), "max": self.max_body_bytes},
             )
 
+        if not body:
+            # 空请求体（如 curl -X POST /v1/warmup）不校验 Content-Type：
+            # 客户端常自动带 form 类型，实际没有 JSON 负载可解析。
+            if allow_empty:
+                return {}
+            raise BadRequest("请求体为空", code="empty_body")
+
         content_type = headers.get("content-type", "").split(";", 1)[0].strip()
         if content_type and content_type.lower() != "application/json":
             raise UnsupportedMediaType(
@@ -248,10 +315,6 @@ class HttpApi:
                 details={"received": content_type},
             )
 
-        if not body:
-            if allow_empty:
-                return {}
-            raise BadRequest("请求体为空", code="empty_body")
         try:
             return json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:

@@ -14,7 +14,7 @@ Use a phone as a PS2 emulator to drive the car forward, backward, turn left, tur
 Monitor, automatically identify, and classify objects through the onboard camera, and view the live feed in real time on the phone-based PS2 controller interface.
 
 #### (3) SLAM Mapping, Autonomous Navigation, and Automatic Target Seeking
-Build a 2D occupancy grid with a 2D LiDAR + wheel encoders + ICM-20948, and localize with AMCL/EKF. Navigate to goals with Nav2 or the built-in direct controller. Search for target objects using camera detection + LiDAR ranging + frontier exploration, return the target pose, and approach it while maintaining a configured standoff distance. Map save/load, mapping missions, exploration missions, and target-search missions are supported.
+Build a 2D occupancy grid with a 2D LiDAR + wheel encoders + ICM-20948, and localize with AMCL/EKF. Navigate to goals with Nav2 or the built-in direct controller. Search for target objects using camera detection + LiDAR ranging + frontier exploration, return the target pose, and approach it while maintaining a configured standoff distance. Map save/load, mapping missions, exploration missions, and target-search missions are supported. Voice-initiated search is supported: say "find my slippers", the scenario layer invokes the search capability, and the robot announces "found the slippers" over TTS; say "stop looking" to cancel. See [design and architecture](software/edge_server/docs/design/DESIGN.md).
 
 #### (4) Object Handling
 Use the VLA model to control vehicle movement: search for, lock onto, and track target objects. Use the robotic arm to grasp, transfer, and place objects within a designated area, implementing object transport. Transport paths can be planned or learned automatically.
@@ -45,7 +45,7 @@ Open `http://192.168.4.1/dashboard.html` (or tap **RUSH-MOG TWIN** on the contro
 | **Vehicle control interface** | uart | Edge Server | BodyControl | Executes car motion commands; reads car speed and odometry status. |
 | **Center Server interface** | http | Edge Server / ROS | Center Server | Provides VLA inference execution. |
 
-> ROS 2 runs on the same Raspberry Pi Edge Server; its health gateway `:8090` is proxied by the Edge Server for the dashboard. See [HEALTHCHECK.md](software/edge_server/HEALTHCHECK.md).
+> ROS 2 runs on the same Raspberry Pi Edge Server; its health gateway `:8090` is proxied by the Edge Server for the dashboard. See [HEALTHCHECK.md](software/edge_server/docs/HEALTHCHECK.md).
 
 #### Hardware Architecture
 - DIY car built with 97 mm omnidirectional wheels and JGB37-520 motors (with hall encoders), driven by an L298N driver board (4WD, or two 2WD boards). For navigation, a 4-channel independent PWM driver (TB6612/DRV8871/BTS7960) is recommended.
@@ -62,8 +62,8 @@ For details, see: [Hardware Design Notes](hardware/README.md) and [SLAM/Navigati
 - The software is divided into a vehicle control subsystem and a center inference/navigation subsystem.
 - The vehicle control subsystem runs on the STM32 board, driving the car motors, robotic arm, and audio output, and executes commands received from the onboard computer/bridge.
 - The onboard Linux subsystem runs ROS2 drivers, `edge_server_node`, ICM-20948, EKF, slam_toolbox, Nav2, target detection, and target search.
-- The onboard ROS package `edge_server` (`software/edge_server`) adds SLAM map management, localization health gating, autonomous navigation, target detection/search/approach, velocity arbitration, and the STM32 serial bridge. See [ROS package design](software/edge_server/DESIGN.md).
-- `edge_server_node` on the Pi serves the web UI/API (`:80`), MJPEG (`:8080`), the STM32 ASCII UART bridge, and proxies ROS health; `health_monitor_node` exposes ROS and per-device health over HTTP (`:8090/ros/health`); see [healthcheck contract](software/edge_server/HEALTHCHECK.md).
+- The onboard ROS package `edge_server` (`software/edge_server`) adds SLAM map management, localization health gating, autonomous navigation, target detection/search/approach, velocity arbitration, and the STM32 serial bridge. See [ROS package design](software/edge_server/docs/design/DESIGN.md).
+- `edge_server_node` on the Pi serves the web UI/API (`:80`), MJPEG (`:8080`), the STM32 ASCII UART bridge, and proxies ROS health; `health_monitor_node` exposes ROS and per-device health over HTTP (`:8090/ros/health`); see [healthcheck contract](software/edge_server/docs/HEALTHCHECK.md).
 - The independently deployed [Center Server SmolVLA inference service](software/center_server/README.md) provides VLA inference to ROS over HTTP; see the [service design](software/center_server/DESIGN.md).
 
 ![](software/architechture.png)

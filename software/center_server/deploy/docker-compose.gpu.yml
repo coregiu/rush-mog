@@ -1,0 +1,14 @@
+# GPU 叠加文件：需要宿主机安装 NVIDIA Container Toolkit 并重启 docker。
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.gpu.yml up -d --build
+services:
+  center:
+    environment:
+      CENTER_SERVER_DEVICE: ${CENTER_DEVICE:-cuda}
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

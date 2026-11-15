@@ -14,7 +14,7 @@ ssid: "RUSH-MOG"
 password: ""
 
 # 旧 ESP32-S3 AP 网关（legacy；新架构请用 Pi Edge Server）
-edge_url: "http://192.168.4.1"
+edge_url: "http://192.168.3.26"
 
 # 本机健康/参数接口（edge_link 自己调用 localhost）
 health_url: "http://127.0.0.1:8090/ros/health"

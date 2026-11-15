@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import math
 import os
@@ -30,17 +31,25 @@ from collections import deque
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import rclpy
-from geometry_msgs.msg import TransformStamped, Twist
-from nav_msgs.msg import Odometry
+from geometry_msgs.msg import PoseWithCovarianceStamped, TransformStamped, Twist
+from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import Image, JointState
+from rclpy.qos import (
+    DurabilityPolicy,
+    QoSProfile,
+    ReliabilityPolicy,
+    qos_profile_sensor_data,
+)
+from sensor_msgs.msg import Image, JointState, LaserScan
 from std_msgs.msg import String
 from tf2_ros import TransformBroadcaster
 
 from edge_server.core.body_drive import BodyDriveConfig, twist_to_body_command
+from edge_server.core.microphone import MicrophoneManager
 from edge_server.core.odometry import MecanumGeometry, WheelOdometry, wheel_names
+from edge_server.core.power import PowerMonitor
+from edge_server.core.speaker import SpeakerError, SpeakerManager
 from edge_server.edge_control import (
     BodyTelemetry,
     MotionState,
@@ -50,7 +59,7 @@ from edge_server.edge_control import (
 from edge_server.edge_web import EdgeHttpApp, EdgeHttpServer, MjpegServer
 from edge_server.utils.clock import create_steady_clock
 from edge_server.utils.config import load_config
-from custom_msgs.msg import SafetyState
+from custom_msgs.msg import AudioData, SafetyState
 
 try:  # 相机/图传是可降级能力，缺失时网页仍可用
     import cv2  # type: ignore
@@ -70,6 +79,11 @@ def _local_ip() -> str:
     finally:
         sock.close()
 
+
+
+def _yaw_from_quaternion(x: float, y: float, z: float, w: float) -> float:
+    """四元数 -> 平面航向（rad）。"""
+    return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
 
 def _free_memory_bytes() -> int:
     try:
@@ -212,6 +226,9 @@ class EdgeServerNode(Node):
         web_cfg = dict(edge_cfg.get("web") or {})
         camera_cfg = dict(edge_cfg.get("camera") or {})
         motion_cfg = dict(edge_cfg.get("motion") or {})
+        speaker_cfg = dict(edge_cfg.get("speaker") or {})
+        mic_cfg = dict(speaker_cfg.get("microphone") or {})
+        power_cfg = dict(edge_cfg.get("power") or {})
 
         self.started_monotonic = time.monotonic()
         self.hostname = socket.gethostname()
@@ -225,6 +242,7 @@ class EdgeServerNode(Node):
 
         self.telemetry = BodyTelemetry()
         self._last_uptime_ms: Optional[int] = None
+        self._last_cliff_mask: Optional[int] = None
         self._telemetry_mono = 0.0
         self._serial_connected = False
         self._estop = False
@@ -238,6 +256,23 @@ class EdgeServerNode(Node):
         self._jpeg_bytes: Optional[bytes] = None
         self._jpeg_at = 0.0
         self._jpeg_warned = False
+        # 语音场景（L3）：网页/外部 HTTP 文本 -> /edge/voice_command；
+        # 场景节点把 /center/scenario_status 发回来供 GET /api/voice 使用。
+        scenario_cfg = dict(self.cfg.get("scenario") or {})
+        self.scenario_voice_topic = str(
+            scenario_cfg.get("voice_topic", "/edge/voice_command")
+        )
+        self.scenario_command_topic = str(
+            scenario_cfg.get("command_topic", "/edge/scenario_command")
+        )
+        self.scenario_status_topic = str(
+            scenario_cfg.get("status_topic", "/center/scenario_status")
+        )
+        self._voice_lock = threading.Lock()
+        self._voice_status: Optional[dict] = None
+        self._voice_status_mono = 0.0
+        self._voice_last_text = ""
+        self._voice_last_state = ""
 
         state_file = str(
             edge_cfg.get("state_file", "~/.config/rush-mog/edge_params.json")
@@ -254,6 +289,12 @@ class EdgeServerNode(Node):
                 ),
             ),
         )
+        if "speaker_volume" in saved:
+            speaker_cfg["volume"] = saved.get("speaker_volume")
+        if "microphone_volume" in saved:
+            mic_cfg["volume"] = saved.get("microphone_volume")
+        if "microphone_gain" in saved:
+            mic_cfg["gain"] = saved.get("microphone_gain")
         keepalive_ms = _int_or(
             saved.get("motion_keepalive_ms"),
             _int_or(motion_cfg.get("keepalive_ms"), 200),
@@ -270,6 +311,83 @@ class EdgeServerNode(Node):
         self._event_last_at = 0.0
         self._event_last_key = ""
         self._last_ros_event_command = ""
+
+        # 蓝牙音箱：自动连接 + 语音播报；配置缺失/禁用时不影响底盘控制。
+        try:
+            self.speaker = SpeakerManager(
+                speaker_cfg,
+                on_event=self._on_speaker_event,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().error(f"初始化音箱服务失败，已禁用: {exc}")
+            self.speaker = SpeakerManager({"enabled": False})
+        self.create_subscription(
+            String,
+            self.speaker.say_topic,
+            self.on_say,
+            10,
+        )
+        self.pub_audio_status = self.create_publisher(
+            String,
+            self.speaker.status_topic,
+            10,
+        )
+        try:
+            self.microphone = MicrophoneManager(
+                mic_cfg,
+                speaker=self.speaker,
+                on_event=self._on_speaker_event,
+                on_audio_chunk=self._on_mic_chunk,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().error(f"初始化麦克风服务失败，已禁用: {exc}")
+            self.microphone = MicrophoneManager(
+                {"enabled": False}, speaker=self.speaker
+            )
+        self.pub_microphone = self.create_publisher(
+            AudioData,
+            self.microphone.topic,
+            qos_profile_sensor_data,
+        )
+        self.pub_mic_status = self.create_publisher(
+            String,
+            self.microphone.status_topic,
+            10,
+        )
+        self.pub_voice_command = self.create_publisher(
+            String,
+            self.scenario_voice_topic,
+            10,
+        )
+        self.pub_scenario_command = self.create_publisher(
+            String,
+            self.scenario_command_topic,
+            10,
+        )
+        voice_status_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self.create_subscription(
+            String,
+            self.scenario_status_topic,
+            self.on_scenario_status,
+            voice_status_qos,
+        )
+        self.power = PowerMonitor(power_cfg)
+        self.power_status_topic = str(
+            power_cfg.get("status_topic", "/body/power_status")
+            or "/body/power_status"
+        )
+        self.power_status_rate_hz = max(
+            0.1, float(power_cfg.get("status_rate_hz", 1.0))
+        )
+        self.pub_power_status = self.create_publisher(
+            String,
+            self.power_status_topic,
+            10,
+        )
 
         self.odom_frame = str(base_cfg.get("odom_frame", "odom"))
         self.base_frame = str(base_cfg.get("base_frame", "base_link"))
@@ -316,6 +434,7 @@ class EdgeServerNode(Node):
         self.pub_odom = self.create_publisher(Odometry, "/odom", 20)
         self.pub_joint = self.create_publisher(JointState, "/joint_states", 20)
         self.pub_status = self.create_publisher(String, "/base/status", 10)
+        self.pub_cliff = self.create_publisher(String, "/body/cliff_status", 10)
         self.create_subscription(Twist, "/cmd_vel", self.on_cmd_vel, 10)
         self.create_subscription(
             SafetyState, "/center/safety_state", self.on_safety, 10
@@ -382,6 +501,45 @@ class EdgeServerNode(Node):
                 )
                 self.get_logger().info(f"camera stream topic: {self.camera_topic}")
 
+        # 雷达地图：/map + /scan + /center/pose 聚合给 dashboard（可选，缺失不影响控制）
+        radar_cfg = dict(edge_cfg.get("radar") or {})
+        self.radar_enabled = bool(radar_cfg.get("enabled", True))
+        self.radar_max_cells = max(64, min(400, _int_or(radar_cfg.get("max_cells"), 240)))
+        self._radar_lock = threading.Lock()
+        self._radar_map: Optional[dict] = None
+        self._radar_map_at = 0.0
+        self._radar_scan: Optional[dict] = None
+        self._radar_scan_at = 0.0
+        self._radar_pose: Optional[dict] = None
+        self._radar_pose_at = 0.0
+        if self.radar_enabled:
+            # 订阅用 VOLATILE，兼容 slam_toolbox（VOLATILE）与 map_server
+            # （TRANSIENT_LOCAL）两种发布端。
+            map_qos = QoSProfile(
+                depth=1,
+                reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.VOLATILE,
+            )
+            self.create_subscription(
+                OccupancyGrid,
+                str(radar_cfg.get("map_topic", "/map") or "/map"),
+                self.on_radar_map,
+                map_qos,
+            )
+            self.create_subscription(
+                LaserScan,
+                str(radar_cfg.get("scan_topic", "/scan") or "/scan"),
+                self.on_radar_scan,
+                qos_profile_sensor_data,
+            )
+            self.create_subscription(
+                PoseWithCovarianceStamped,
+                str(radar_cfg.get("pose_topic", "/center/pose") or "/center/pose"),
+                self.on_radar_pose,
+                10,
+            )
+            self.get_logger().info("radar map: /map + /scan -> /api/radar")
+
         self._steady_clock = create_steady_clock()
         self._odom_timer = self.create_timer(
             1.0 / max(5.0, float(base_cfg.get("odom_rate_hz", 20.0))),
@@ -398,6 +556,17 @@ class EdgeServerNode(Node):
             self.on_keepalive_timer,
             clock=self._steady_clock,
         )
+        self._speaker_timer = self.create_timer(
+            1.0 / max(0.1, self.speaker.status_rate_hz),
+            self.on_speaker_timer,
+            clock=self._steady_clock,
+        )
+        self._power_timer = self.create_timer(
+            1.0 / self.power_status_rate_hz,
+            self.on_power_timer,
+            clock=self._steady_clock,
+        )
+        self.speaker.start()
 
         self.get_logger().info(
             f"edge_server_node started: web={self.http.info()}, "
@@ -434,6 +603,9 @@ class EdgeServerNode(Node):
         payload = {
             "motion_keepalive_ms": self.motion.keepalive_ms,
             "stream_fps": self.stream_fps,
+            "speaker_volume": self.speaker.volume,
+            "microphone_volume": self.microphone.volume,
+            "microphone_gain": self.microphone.gain,
         }
         try:
             directory = os.path.dirname(self._state_file)
@@ -526,6 +698,334 @@ class EdgeServerNode(Node):
             "server_time_ms": int(time.time() * 1000.0),
         }
 
+    # ------------------------------------------------------------- speaker
+    def _on_speaker_event(self, kind: str, text: str, status: str) -> None:
+        self._record_event(
+            str(kind or "speaker"),
+            str(text),
+            source="speaker",
+            status=str(status or "info"),
+        )
+
+    def _on_mic_chunk(self, pcm: bytes, sample_rate: int, channels: int) -> None:
+        """麦克风采集线程回调：发布 ``custom_msgs/AudioData``。"""
+        try:
+            msg = AudioData()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.format = "pcm_s16le"
+            msg.sample_rate = int(sample_rate)
+            msg.data = bytes(pcm)
+            self.pub_microphone.publish(msg)
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().warn(f"publish microphone frame failed: {exc}")
+
+    def on_say(self, msg: String) -> None:
+        """ROS ``/body/say``：文本 -> TTS -> 蓝牙音箱。"""
+        text = str(msg.data or "").strip()
+        if not text:
+            return
+        try:
+            self.speaker.say(text)
+        except (SpeakerError, ValueError) as exc:
+            self.get_logger().warn(f"say failed: {exc}")
+            self._record_event(
+                "speaker", f"语音播报被拒绝: {exc}", source="ros", status="warn"
+            )
+            return
+        self._record_event(
+            "speaker",
+            f"ROS 语音播报: {text[:60]}",
+            source="ros",
+            status="ok",
+        )
+
+    # ------------------------------------------------------------- voice
+    def on_scenario_status(self, msg: String) -> None:
+        """``/center/scenario_status``：缓存场景状态供 ``GET /api/voice``。"""
+        try:
+            payload = json.loads(str(msg.data or "{}"))
+        except (TypeError, ValueError):
+            return
+        if not isinstance(payload, dict):
+            return
+        state = str(payload.get("state", "") or "")
+        with self._voice_lock:
+            previous = self._voice_last_state
+            self._voice_status = payload
+            self._voice_status_mono = time.monotonic()
+            self._voice_last_state = state
+        if state and state != previous:
+            display = str(
+                payload.get("display_name")
+                or payload.get("target_label")
+                or ""
+            )
+            detail = str(payload.get("detail") or "")
+            self._record_event(
+                "voice",
+                f"寻找场景 {state} {display} {detail}".strip(),
+                source="scenario",
+                status="info",
+            )
+
+    def handle_voice(self, text: str) -> dict:
+        """``POST /api/voice``：语音输入适配器 -> 通用场景执行接口。"""
+        return self._execute_scenario_command(text, "voice")
+
+    def handle_scenario_command(self, text: str, source: str = "text") -> dict:
+        """``POST /api/scenario/execute``：文本输入适配器 -> 通用场景执行接口。"""
+        return self._execute_scenario_command(text, source)
+
+    def _execute_scenario_command(self, text: str, source: str) -> dict:
+        """发布通用场景指令；``source`` 只用于区分 voice/text 入口。"""
+        cleaned = str(text or "").strip()
+        if not cleaned:
+            raise ValueError("场景指令为空")
+        if len(cleaned) > 200:
+            raise ValueError("场景指令过长（>200）")
+        normalized_source = (
+            "voice" if str(source or "").strip().lower() == "voice" else "text"
+        )
+        request_id = f"scenario_{normalized_source}_{int(time.time() * 1000)}"
+        payload = {
+            "text": cleaned,
+            "source": normalized_source,
+            "request_id": request_id,
+        }
+        generic_subs = int(self.pub_scenario_command.get_subscription_count())
+        legacy_subs = int(self.pub_voice_command.get_subscription_count())
+        try:
+            # 新场景节点订阅通用 topic；老版本只订阅 voice topic 时自动降级。
+            if generic_subs <= 0 and legacy_subs > 0:
+                self.pub_voice_command.publish(String(data=cleaned))
+                channel = self.scenario_voice_topic
+            else:
+                self.pub_scenario_command.publish(
+                    String(data=json.dumps(payload, ensure_ascii=False))
+                )
+                channel = self.scenario_command_topic
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"发布场景指令失败: {exc}") from exc
+        with self._voice_lock:
+            self._voice_last_text = cleaned
+            status_payload = dict(self._voice_status) if self._voice_status else None
+            status_age = (
+                time.monotonic() - self._voice_status_mono
+                if self._voice_status is not None
+                else None
+            )
+        subscribers = max(generic_subs, legacy_subs)
+        scenario_online = subscribers > 0 or (
+            status_age is not None and status_age <= 5.0
+        )
+        label = "语音指令" if normalized_source == "voice" else "场景指令"
+        message = f"{label}已发送"
+        if not scenario_online:
+            message = f"{label}已发送，但场景节点未在线（指令可能未处理）"
+        self._record_event(
+            "voice" if normalized_source == "voice" else "scenario",
+            f"{label}: {cleaned[:60]}",
+            source="api",
+            status="ok" if scenario_online else "warn",
+        )
+        return {
+            "ok": True,
+            "accepted": True,
+            "text": cleaned,
+            "source": normalized_source,
+            "request_id": request_id,
+            "interface": "scenario",
+            "channel": channel,
+            "message": message,
+            "scenario_online": scenario_online,
+            "subscribers": subscribers,
+            "scenario": status_payload,
+        }
+
+    def voice_status(self) -> dict:
+        """``GET /api/voice``：最近一次场景状态 + 指令文本。"""
+        with self._voice_lock:
+            payload = dict(self._voice_status) if self._voice_status else None
+            last_text = self._voice_last_text
+            status_age = (
+                time.monotonic() - self._voice_status_mono
+                if self._voice_status is not None
+                else None
+            )
+        subscribers = int(self.pub_voice_command.get_subscription_count())
+        scenario_online = subscribers > 0 or (
+            status_age is not None and status_age <= 5.0
+        )
+        return {
+            "ok": True,
+            "interface": "voice",
+            "topic": self.scenario_voice_topic,
+            "command_topic": self.scenario_command_topic,
+            "status_topic": self.scenario_status_topic,
+            "scenario_online": scenario_online,
+            "subscribers": subscribers,
+            "last_text": last_text,
+            "age_ms": int(status_age * 1000.0) if status_age is not None else -1,
+            "scenario": payload,
+        }
+
+    def scenario_status(self) -> dict:
+        """``GET /api/scenario``：通用场景接口状态（含语音兼容 topic）。"""
+        payload = self.voice_status()
+        payload["interface"] = "scenario"
+        payload["voice_topic"] = self.scenario_voice_topic
+        return payload
+
+    def on_speaker_timer(self) -> None:
+        # 未启用时不必伪造在线状态；health monitor 会报 unknown（可选设备）。
+        if not self.speaker.enabled:
+            return
+        payload = self.speaker.status()
+        if payload.get("connected") and not self.microphone.supported:
+            self.microphone.refresh_capabilities()
+        mic_payload = self.microphone.status()
+        payload["microphone"] = mic_payload
+        self.pub_audio_status.publish(
+            String(data=json.dumps(payload, ensure_ascii=False))
+        )
+        if self.microphone.enabled:
+            self.pub_mic_status.publish(
+                String(data=json.dumps(mic_payload, ensure_ascii=False))
+            )
+
+    def on_power_timer(self) -> None:
+        if not self.power.enabled:
+            return
+        payload = self.power.status()
+        self.pub_power_status.publish(
+            String(data=json.dumps(payload, ensure_ascii=False))
+        )
+
+    def power_status(self) -> dict:
+        return self.power.status()
+
+    def speaker_status(self) -> dict:
+        return self.speaker.status()
+
+    def microphone_status(self) -> dict:
+        return self.microphone.status()
+
+    def microphone_recording(self, name: str) -> str:
+        return self.microphone.recording_path(name)
+
+    def handle_microphone(self, action: str, fields: Mapping[str, Any]) -> dict:
+        """``/api/microphone/*`` 的动作分发。"""
+        name = str(action or "").strip().lower()
+        if name == "start":
+            status = self.microphone.start(fields.get("duration", ""))
+            self._record_event(
+                "microphone",
+                f"开始录音 {status.get('file_name', '')}",
+                source="api",
+                status="ok",
+            )
+            return {"ok": True, "message": "录音已开始", "microphone": status}
+        if name == "stop":
+            status = self.microphone.stop()
+            self._record_event(
+                "microphone", "停止录音", source="api", status="info"
+            )
+            return {"ok": True, "message": "录音已停止", "microphone": status}
+        if name == "play":
+            file_name = fields.get("file", fields.get("name", ""))
+            status = self.microphone.play_recording(file_name)
+            self._record_event(
+                "microphone",
+                f"回放录音: {str(file_name)[:60]}",
+                source="api",
+                status="ok",
+            )
+            return {"ok": True, "message": "录音已加入播放队列", "speaker": status}
+        if name == "volume":
+            value = fields.get("volume", fields.get("value", ""))
+            status = self.microphone.set_volume(value)
+            return {"ok": True, "message": "麦克风音量已更新", "microphone": status}
+        if name == "gain":
+            value = fields.get("gain", fields.get("value", ""))
+            status = self.microphone.set_gain(value)
+            self._save_state()
+            return {"ok": True, "message": "麦克风增益已更新", "microphone": status}
+        if name == "list":
+            return self.microphone.recordings()
+        raise ValueError(f"未知麦克风动作: {name}")
+
+    def handle_speaker(self, action: str, fields: Mapping[str, Any]) -> dict:
+        """``/api/speaker/*`` 的动作分发；异常由 HTTP 层转成 4xx/5xx。"""
+        name = str(action or "").strip().lower()
+        if name == "connect":
+            self.speaker.reconnect()
+            self._record_event(
+                "speaker", "手动触发蓝牙音箱连接", source="api", status="info"
+            )
+            return {
+                "ok": True,
+                "message": "已触发音箱连接",
+                "speaker": self.speaker.status(),
+            }
+        if name in {"model", "select"}:
+            model = fields.get("model", fields.get("value", ""))
+            status = self.speaker.select_model(model)
+            self._record_event(
+                "speaker",
+                f"切换音箱型号: {str(model)[:32]}",
+                source="api",
+                status="info",
+            )
+            return {
+                "ok": True,
+                "message": f"已切换音箱型号: {str(model)[:32]}",
+                "speaker": status,
+            }
+        if name in {"prepare", "warm"}:
+            payload = self.speaker.prepare(
+                fields.get("text", fields.get("message", "")),
+                voice=str(fields.get("voice", "") or ""),
+            )
+            return payload
+        if name == "say":
+            text = fields.get("text", fields.get("message", ""))
+            try:
+                status = self.speaker.say(
+                    text, voice=str(fields.get("voice", "") or "")
+                )
+            except SpeakerError:
+                raise
+            except ValueError as exc:
+                raise ValueError(str(exc))
+            self._record_event(
+                "speaker",
+                f"语音播报已排队: {str(text)[:60]}",
+                source="api",
+                status="ok",
+            )
+            return {"ok": True, "message": "语音已加入播放队列", "speaker": status}
+        if name == "play":
+            status = self.speaker.play_file(fields.get("file", ""))
+            self._record_event(
+                "speaker",
+                f"音频播放已排队: {str(fields.get('file', ''))[:60]}",
+                source="api",
+                status="ok",
+            )
+            return {"ok": True, "message": "音频已加入播放队列", "speaker": status}
+        if name == "volume":
+            value = fields.get("volume", fields.get("value", ""))
+            status = self.speaker.set_volume(value)
+            self._save_state()
+            return {"ok": True, "message": "音量已更新", "speaker": status}
+        if name == "stop":
+            status = self.speaker.stop_playback()
+            self._record_event(
+                "speaker", "停止语音播放", source="api", status="info"
+            )
+            return {"ok": True, "message": "已停止播放", "speaker": status}
+        raise ValueError(f"未知音箱动作: {name}")
+
     # ------------------------------------------------------------- serial
     def _on_serial_state(self, connected: bool) -> None:
         self._serial_connected = bool(connected)
@@ -559,6 +1059,30 @@ class EdgeServerNode(Node):
             self.telemetry = telemetry
             self._last_uptime_ms = telemetry.uptime_ms
             self._telemetry_mono = now
+        if telemetry.cliff_available:
+            previous_mask = self._last_cliff_mask
+            mask = int(telemetry.cliff_mask)
+            if mask != previous_mask:
+                if mask:
+                    sides = []
+                    if mask & 0x01:
+                        sides.append("左前")
+                    if mask & 0x02:
+                        sides.append("右前")
+                    self._record_event(
+                        "cliff",
+                        "悬崖触发：" + "+".join(sides) + "，已封锁前进/横移",
+                        source="cliff",
+                        status="error",
+                    )
+                elif previous_mask:
+                    self._record_event(
+                        "cliff",
+                        "悬崖解除，恢复运动控制",
+                        source="cliff",
+                        status="ok",
+                    )
+                self._last_cliff_mask = mask
         dt = 0.0
         if previous_uptime is not None:
             delta_ms = int(telemetry.uptime_ms) - int(previous_uptime)
@@ -711,6 +1235,7 @@ class EdgeServerNode(Node):
                 if self._telemetry_mono > 0.0
                 else -1
             )
+            body_payload = telemetry.to_dict(now)
             payload = {
                 "source": "pi",
                 "seq": int(telemetry.seq),
@@ -725,8 +1250,25 @@ class EdgeServerNode(Node):
                 ),
                 "uptime_ms": int(telemetry.uptime_ms),
                 "serial_connected": bool(self._serial_connected),
+                "cliff": body_payload["cliff"],
+            }
+            cliff_payload = {
+                "source": "stm32",
+                "online": bool(fresh and body_payload["cliff"]["available"]),
+                "available": bool(body_payload["cliff"]["available"]),
+                "triggered": bool(body_payload["cliff"]["triggered"]),
+                "left": bool(body_payload["cliff"]["left"]),
+                "right": bool(body_payload["cliff"]["right"]),
+                "mask": int(body_payload["cliff"]["mask"]),
+                "state": str(body_payload["cliff"]["state"]),
+                "seq": int(telemetry.seq),
+                "age_ms": age_ms,
+                "stale": bool(body_payload["stale"]),
             }
         self.pub_status.publish(String(data=json.dumps(payload, ensure_ascii=False)))
+        self.pub_cliff.publish(
+            String(data=json.dumps(cliff_payload, ensure_ascii=False))
+        )
 
     def on_keepalive_timer(self) -> None:
         command = self.motion.tick()
@@ -781,6 +1323,165 @@ class EdgeServerNode(Node):
                 and (time.monotonic() - self._jpeg_at) <= 2.0
             )
 
+
+    # ------------------------------------------------------------- radar
+    def on_radar_map(self, msg: OccupancyGrid) -> None:
+        """缓存 /map，降采样后供 ``/api/radar``（字节：0=未知，1=空闲，2=占据）。"""
+        now = time.monotonic()
+        if (now - self._radar_map_at) < 0.8:
+            return
+        try:
+            width = int(msg.info.width)
+            height = int(msg.info.height)
+            if width <= 0 or height <= 0:
+                return
+            data = list(msg.data)
+            if len(data) < width * height:
+                return
+            step = max(1, int(math.ceil(max(width, height) / float(self.radar_max_cells))))
+            out_w = (width + step - 1) // step
+            out_h = (height + step - 1) // step
+            cells = bytearray(out_w * out_h)
+            for oy in range(out_h):
+                y0 = oy * step
+                y1 = min(y0 + step, height)
+                for ox in range(out_w):
+                    x0 = ox * step
+                    x1 = min(x0 + step, width)
+                    occupied = False
+                    free = 0
+                    known = 0
+                    for y in range(y0, y1):
+                        base = y * width
+                        for x in range(x0, x1):
+                            value = data[base + x]
+                            if value < 0:
+                                continue
+                            known += 1
+                            if value >= 65:
+                                occupied = True
+                            elif value <= 50:
+                                free += 1
+                    if occupied:
+                        cells[oy * out_w + ox] = 2
+                    elif known and free * 2 >= known:
+                        cells[oy * out_w + ox] = 1
+            origin = msg.info.origin
+            payload = {
+                "available": True,
+                "frame_id": str(msg.header.frame_id or "map"),
+                "width": out_w,
+                "height": out_h,
+                "source_width": width,
+                "source_height": height,
+                "step": step,
+                "resolution": float(msg.info.resolution) * step,
+                "origin": {
+                    "x": float(origin.position.x),
+                    "y": float(origin.position.y),
+                    "yaw": _yaw_from_quaternion(
+                        float(origin.orientation.x),
+                        float(origin.orientation.y),
+                        float(origin.orientation.z),
+                        float(origin.orientation.w),
+                    ),
+                },
+                "data": base64.b64encode(bytes(cells)).decode("ascii"),
+            }
+            with self._radar_lock:
+                self._radar_map = payload
+                self._radar_map_at = now
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().warn(f"radar map convert failed: {exc}")
+
+    def on_radar_scan(self, msg: LaserScan) -> None:
+        """缓存 /scan，限制点数后供 ``/api/radar``。"""
+        try:
+            values = list(msg.ranges)
+            if not values:
+                return
+            step = max(1, int(math.ceil(len(values) / 720.0)))
+            if step > 1:
+                values = values[::step]
+            ranges: List[Optional[float]] = []
+            for value in values:
+                distance = float(value)
+                ranges.append(round(distance, 3) if math.isfinite(distance) and distance > 0.01 else None)
+            payload = {
+                "available": True,
+                "frame_id": str(msg.header.frame_id or "laser_link"),
+                "angle_min": float(msg.angle_min),
+                "angle_increment": float(msg.angle_increment) * step,
+                "range_min": float(msg.range_min),
+                "range_max": float(msg.range_max),
+                "count": len(ranges),
+                "ranges": ranges,
+            }
+            with self._radar_lock:
+                self._radar_scan = payload
+                self._radar_scan_at = time.monotonic()
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().warn(f"radar scan convert failed: {exc}")
+
+    def on_radar_pose(self, msg: PoseWithCovarianceStamped) -> None:
+        """缓存 /center/pose，供地图上的机器人位姿叠加。"""
+        pose = msg.pose.pose
+        payload = {
+            "x": float(pose.position.x),
+            "y": float(pose.position.y),
+            "yaw": _yaw_from_quaternion(
+                float(pose.orientation.x),
+                float(pose.orientation.y),
+                float(pose.orientation.z),
+                float(pose.orientation.w),
+            ),
+            "frame_id": str(msg.header.frame_id or "map"),
+        }
+        with self._radar_lock:
+            self._radar_pose = payload
+            self._radar_pose_at = time.monotonic()
+
+    def radar_status(self) -> dict:
+        """``GET /api/radar`` 的快照：地图/扫描/位姿各自带新鲜度。"""
+        now = time.monotonic()
+        lock = getattr(self, "_radar_lock", None)
+        if lock is None:
+            return {
+                "ok": True,
+                "enabled": False,
+                "server_time_ms": int(time.time() * 1000.0),
+                "map": {"available": False},
+                "scan": {"available": False},
+                "pose": {"available": False},
+            }
+        with lock:
+            map_payload = dict(self._radar_map) if self._radar_map else None
+            map_at = self._radar_map_at
+            scan_payload = dict(self._radar_scan) if self._radar_scan else None
+            scan_at = self._radar_scan_at
+            pose_payload = dict(self._radar_pose) if self._radar_pose else None
+            pose_at = self._radar_pose_at
+
+        def aged(payload: Optional[dict], stamp: float, limit: float) -> dict:
+            if payload is None:
+                return {"available": False}
+            age = max(0.0, now - stamp)
+            if age > limit:
+                return {"available": False}
+            out = dict(payload)
+            out["available"] = True
+            out["age_ms"] = int(age * 1000.0)
+            return out
+
+        return {
+            "ok": True,
+            "enabled": bool(self.radar_enabled),
+            "server_time_ms": int(time.time() * 1000.0),
+            "map": aged(map_payload, map_at, 600.0),
+            "scan": aged(scan_payload, scan_at, 2.0),
+            "pose": aged(pose_payload, pose_at, 5.0),
+        }
+
     # ------------------------------------------------------------- runtime API
     def status(self) -> dict:
         now = time.monotonic()
@@ -791,6 +1492,9 @@ class EdgeServerNode(Node):
                 and (now - self._telemetry_mono) <= 2.0
             )
         health = self._ros_health()
+        speaker = self.speaker.status()
+        microphone = self.microphone.status()
+        power = self.power.status()
         return {
             "uptime_ms": int((now - self.started_monotonic) * 1000.0),
             "free_heap": int(_free_memory_bytes()),
@@ -803,6 +1507,21 @@ class EdgeServerNode(Node):
             "encoder_ok": bool(fresh),
             "ros_status": str((health or {}).get("status", "unknown")),
             "ros_ready": bool((health or {}).get("ready", False)),
+            "speaker": speaker,
+            "speaker_connected": bool(speaker["connected"]),
+            "speaker_state": str(speaker["state"]),
+            "speaker_device": str((speaker.get("device") or {}).get("name", "")),
+            "audio_playing": bool((speaker.get("playback") or {}).get("playing", False)),
+            "microphone": microphone,
+            "mic_available": bool(microphone["available"]),
+            "mic_recording": bool(microphone["recording"]),
+            "mic_source": str(microphone["source"]),
+            "power": power,
+            "power_status": str(power["status"]),
+            "power_ok": bool(power["healthy"]),
+            "undervoltage": bool(power["undervoltage"]),
+            "core_voltage_v": power["core_voltage_v"],
+            "temperature_c": power["temperature_c"],
             "ip": self.ip_address,
             "hostname": self.hostname,
         }
@@ -895,6 +1614,11 @@ class EdgeServerNode(Node):
         now = time.monotonic()
         motion = self.motion.snapshot(now)
         health = self._ros_health() or {}
+        speaker = self.speaker.status()
+        microphone = self.microphone.status()
+        power = self.power.status()
+        body = self.body()
+        cliff = body.get("cliff") or {}
         return {
             "motion_keepalive_ms": int(motion["keepalive_ms"]),
             "stream_fps": self.stream_fps,
@@ -914,6 +1638,33 @@ class EdgeServerNode(Node):
             "serial_baud": self.serial.baud,
             "ros_status": str(health.get("status", "unknown")),
             "ros_ready": bool(health.get("ready", False)),
+            "speaker_enabled": bool(speaker["enabled"]),
+            "speaker_connected": bool(speaker["connected"]),
+            "speaker_state": str(speaker["state"]),
+            "speaker_device": str((speaker.get("device") or {}).get("name", "")),
+            "speaker_volume": int((speaker.get("sink") or {}).get("volume", 0)),
+            "speaker_sink": str((speaker.get("sink") or {}).get("name", "")),
+            "audio_playing": bool((speaker.get("playback") or {}).get("playing", False)),
+            "mic_enabled": bool(microphone["enabled"]),
+            "mic_available": bool(microphone["available"]),
+            "mic_recording": bool(microphone["recording"]),
+            "mic_source": str(microphone["source"]),
+            "mic_last_file": str(microphone["last_file_name"]),
+            "mic_volume": int(microphone["volume"]),
+            "mic_gain": float(microphone["gain"]),
+            "power_status": str(power["status"]),
+            "power_model": str(power["model"]),
+            "power_throttled": str(power["throttled_raw"]),
+            "power_undervoltage": bool(power["undervoltage"]),
+            "power_history_warning": bool(power["warning"]),
+            "power_core_voltage_v": power["core_voltage_v"],
+            "power_temperature_c": power["temperature_c"],
+            "cliff_available": bool(cliff.get("available", False)),
+            "cliff_triggered": bool(cliff.get("triggered", False)),
+            "cliff_left": bool(cliff.get("left", False)),
+            "cliff_right": bool(cliff.get("right", False)),
+            "cliff_mask": int(cliff.get("mask", 0)),
+            "cliff_state": str(cliff.get("state", "unknown")),
             "hostname": self.hostname,
             "ip": self.ip_address,
             "platform": self.platform_name,
@@ -928,6 +1679,12 @@ class EdgeServerNode(Node):
             status = "degraded"
         elif not serial_ok:
             status = "degraded"
+        elif params["power_status"] == "error":
+            status = "error"
+        elif params["power_status"] == "degraded":
+            status = "degraded"
+        elif params["cliff_triggered"]:
+            status = "degraded"
         elif ros_status == "ok":
             status = "ok"
         elif ros_status in {"degraded", "starting", "unknown"}:
@@ -938,7 +1695,10 @@ class EdgeServerNode(Node):
             f"serial={'on' if serial_ok else 'off'}, "
             f"ros={ros_status}, "
             f"camera={'on' if params['camera'] else 'off'}, "
-            f"base={'on' if params['motion_active'] else 'idle'}"
+            f"base={'on' if params['motion_active'] else 'idle'}, "
+            f"speaker={'on' if params['speaker_connected'] else params['speaker_state']}, "
+            f"power={params['power_status']}, "
+            f"cliff={params['cliff_state']}"
         )
         return {
             "id": "edge",
@@ -989,6 +1749,58 @@ class EdgeServerNode(Node):
                    "bool", "运行状态", False, "", "", "", ""),
             _param("motion_active", "运动保活中", _bool_literal(values["motion_active"]),
                    "bool", "运行状态", False, "", "", "", ""),
+            _param("speaker_connected", "蓝牙音箱连接",
+                   _bool_literal(values["speaker_connected"]),
+                   "bool", "音频", False, "", "", "", ""),
+            _param("speaker_state", "音箱状态", json.dumps(values["speaker_state"]),
+                   "string", "音频", False, "", "", "", ""),
+            _param("speaker_device", "音箱设备", json.dumps(values["speaker_device"]),
+                   "string", "音频", False, "", "", "", ""),
+            _param("speaker_sink", "音频输出", json.dumps(values["speaker_sink"]),
+                   "string", "音频", False, "", "", "", ""),
+            _param("speaker_volume", "音箱音量", values["speaker_volume"],
+                   "int", "音频", True, "%", "0", "100", "5"),
+            _param("audio_playing", "语音播放中", _bool_literal(values["audio_playing"]),
+                   "bool", "音频", False, "", "", "", ""),
+            _param("mic_enabled", "麦克风启用", _bool_literal(values["mic_enabled"]),
+                   "bool", "音频", False, "", "", "", ""),
+            _param("mic_available", "麦克风可用", _bool_literal(values["mic_available"]),
+                   "bool", "音频", False, "", "", "", ""),
+            _param("mic_recording", "录音中", _bool_literal(values["mic_recording"]),
+                   "bool", "音频", False, "", "", "", ""),
+            _param("mic_source", "麦克风输入", json.dumps(values["mic_source"]),
+                   "string", "音频", False, "", "", "", ""),
+            _param("mic_last_file", "最近录音", json.dumps(values["mic_last_file"]),
+                   "string", "音频", False, "", "", "", ""),
+            _param("mic_volume", "麦克风音量", values["mic_volume"],
+                   "int", "音频", True, "%", "0", "100", "5"),
+            _param("mic_gain", "麦克风增益", values["mic_gain"],
+                   "float", "音频", True, "x", "1", "8", "1"),
+            _param("power_status", "电源状态", json.dumps(values["power_status"]),
+                   "string", "电源", False, "", "", "", ""),
+            _param("power_model", "树莓派型号", json.dumps(values["power_model"]),
+                   "string", "电源", False, "", "", "", ""),
+            _param("power_throttled", "欠压/降频标志", json.dumps(values["power_throttled"]),
+                   "string", "电源", False, "", "", "", ""),
+            _param("power_undervoltage", "当前欠压",
+                   _bool_literal(values["power_undervoltage"]),
+                   "bool", "电源", False, "", "", "", ""),
+            _param("power_history_warning", "历史欠压",
+                   _bool_literal(values["power_history_warning"]),
+                   "bool", "电源", False, "", "", "", ""),
+            _param("power_core_voltage_v", "核心电压",
+                   values["power_core_voltage_v"] if values["power_core_voltage_v"] is not None else "null",
+                   "float", "电源", False, "V", "", "", ""),
+            _param("power_temperature_c", "SoC 温度",
+                   values["power_temperature_c"] if values["power_temperature_c"] is not None else "null",
+                   "float", "电源", False, "°C", "", "", ""),
+            _param("cliff_available", "悬崖遥测",
+                   _bool_literal(values["cliff_available"]),
+                   "bool", "安全", False, "", "", "", ""),
+            _param("cliff_state", "悬崖状态", json.dumps(values["cliff_state"]),
+                   "string", "安全", False, "", "", "", ""),
+            _param("cliff_mask", "悬崖掩码", values["cliff_mask"],
+                   "int", "安全", False, "", "", "", ""),
         ]
         return {
             "ok": True,
@@ -1017,6 +1829,30 @@ class EdgeServerNode(Node):
                 with self._params_lock:
                     self._stream_fps = value
                 changed[name] = value
+            elif name == "speaker_volume":
+                value = _int_or(raw, -1)
+                if value < 0 or value > 100:
+                    raise ValueError("speaker_volume 必须在 0..100")
+                try:
+                    self.speaker.set_volume(value)
+                except SpeakerError as exc:
+                    raise ValueError(str(exc))
+                changed[name] = value
+            elif name == "mic_volume":
+                value = _int_or(raw, -1)
+                if value < 0 or value > 100:
+                    raise ValueError("mic_volume 必须在 0..100")
+                self.microphone.set_volume(value)
+                changed[name] = value
+            elif name == "mic_gain":
+                try:
+                    gain = float(str(raw).strip())
+                except (TypeError, ValueError):
+                    raise ValueError("mic_gain 必须是 1.0..8.0")
+                if gain < 1.0 or gain > 8.0:
+                    raise ValueError("mic_gain 必须在 1.0..8.0")
+                self.microphone.set_gain(gain)
+                changed[name] = gain
             else:
                 raise ValueError(f"参数不可修改: {name}")
         if not changed:
@@ -1045,6 +1881,14 @@ class EdgeServerNode(Node):
     def destroy_node(self) -> None:
         try:
             self._send_command("0", force=True)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self.microphone.stop()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self.speaker.stop()
         except Exception:  # noqa: BLE001
             pass
         try:

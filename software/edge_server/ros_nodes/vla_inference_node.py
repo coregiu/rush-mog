@@ -5,6 +5,8 @@
 """
 
 import math
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import cv_bridge
 import rclpy
@@ -81,11 +83,26 @@ class VLAInferenceNode(Node):
         self._last_gate = None
 
         rate = max(1.0, float(vla_cfg.get("inference_rate", 10)))
+        self._infer_executor = None
+        self._infer_busy = False
+        self._infer_lock = threading.Lock()
+        center_status = self.vla.center_status()
+        if center_status["remote_enabled"]:
+            # 远程推理可能 >100 ms：单线程执行 + 只保留最新帧，避免阻塞
+            # ROS 定时器/订阅回调；推理慢时自然丢帧，而不是排队。
+            remote_cfg = dict(vla_cfg.get("remote") or {})
+            max_rate = max(1.0, float(remote_cfg.get("max_rate_hz", 5.0)))
+            rate = min(rate, max_rate)
+            self._infer_executor = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="vla-center"
+            )
         self._steady_clock = create_steady_clock()
         self.timer = self.create_timer(
             1.0 / rate, self.on_timer, clock=self._steady_clock
         )
-        self.get_logger().info(f"vla_inference_node started ({rate:.1f} Hz)")
+        self.get_logger().info(
+            f"vla_inference_node started ({rate:.1f} Hz), center={center_status}"
+        )
 
     # ------------------------------------------------------------- callbacks
     def on_synced(self, msg: SyncedSensorData):
@@ -168,6 +185,10 @@ class VLAInferenceNode(Node):
             self.get_logger().info("inference resumed")
             self._last_gate = None
 
+        # 远程推理在后台执行：只保留最新帧，进行中的请求不排队
+        if self._infer_executor is not None and self._infer_busy:
+            return
+
         # 定时器与传感器频率可能交错触发，没有新帧时直接等待，不应视为故障
         if self.latest_data is None:
             return
@@ -224,8 +245,51 @@ class VLAInferenceNode(Node):
             task_id=task.task_id,
             instruction=instruction,
         )
-        intent_dto = self.vla.predict(dto)
+        # Center/SmolVLA 需要原始分辨率相机帧，而不是 224x224 预处理图
+        dto.image_raw = cv_image
 
+        if self._infer_executor is not None:
+            with self._infer_lock:
+                if self._infer_busy:
+                    return
+                self._infer_busy = True
+            try:
+                self._infer_executor.submit(self._infer_remote, dto, instruction)
+            except RuntimeError as exc:  # executor 已关闭（节点退出中）
+                with self._infer_lock:
+                    self._infer_busy = False
+                self.get_logger().warn(f"submit VLA inference failed: {exc}")
+            return
+
+        self._handle_intent(self.vla.predict(dto), instruction)
+
+    def _infer_remote(self, dto, instruction: str) -> None:
+        """后台线程：调用 Center Server 并把结果发布到动作意图话题。"""
+
+        intent_dto = None
+        try:
+            intent_dto = self.vla.predict(dto)
+        except Exception as exc:  # noqa: BLE001 - 远程异常不能拖垮节点
+            self.get_logger().error(f"remote VLA inference failed: {exc}")
+            self._publish(
+                ActionIntentDTO(
+                    task_id=getattr(dto, "task_id", ""),
+                    intent="stop",
+                    confidence=0.0,
+                    source="center",
+                ),
+                "error",
+                f"inference_error: {exc}",
+            )
+        else:
+            # 推理期间可能急停/切模式/换任务，结果过期就不再执行
+            if self._gate_reason() is None:
+                self._handle_intent(intent_dto, instruction)
+        finally:
+            with self._infer_lock:
+                self._infer_busy = False
+
+    def _handle_intent(self, intent_dto: ActionIntentDTO, instruction: str) -> None:
         if intent_dto.confidence < self.confidence_threshold:
             # DESIGN.md 11：置信度低时停止执行并请求确认
             stop_dto = ActionIntentDTO(
@@ -246,12 +310,22 @@ class VLAInferenceNode(Node):
         self._publish(
             intent_dto,
             "running",
-            f"intent={intent_dto.intent} instruction={instruction!r}",
+            f"source={intent_dto.source} intent={intent_dto.intent} "
+            f"instruction={instruction!r}",
         )
         self.get_logger().debug(
-            f"intent={intent_dto.intent} value={intent_dto.value:.2f} "
+            f"source={intent_dto.source} intent={intent_dto.intent} "
+            f"value={intent_dto.value:.2f} "
             f"confidence={intent_dto.confidence:.2f}"
         )
+
+    def close(self) -> None:
+        executor = self._infer_executor
+        self._infer_executor = None
+        if executor is not None:
+            # 等待在途请求结束（受 remote.timeout_sec 限制），避免 destroy_node
+            # 之后工作线程还 publish。
+            executor.shutdown(wait=True, cancel_futures=True)
 
 
 def main(args=None):
@@ -262,6 +336,7 @@ def main(args=None):
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
+        node.close()
         node.vla.unload()
         node.destroy_node()
         if rclpy.ok():

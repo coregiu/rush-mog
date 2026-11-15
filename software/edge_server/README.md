@@ -1,10 +1,8 @@
 # edge_server（ROS2：Pi Edge Server + VLA + SLAM + 导航 + 目标搜索 + 健康检查）
 
-设计文档：[`docs/DESIGN.md`](docs/DESIGN.md)。
-代码结构与调用链：[`docs/CODE_MAP.md`](docs/CODE_MAP.md)。
+设计、架构与代码地图：[`docs/design/DESIGN.md`](docs/design/DESIGN.md)。
 健康检查接口契约：[`docs/HEALTHCHECK.md`](docs/HEALTHCHECK.md)。
-部署与发布说明：[`docs/DEPLOY.md`](docs/DEPLOY.md)。
-**实机启停/日志/排障：[`docs/OPERATIONS.md`](docs/OPERATIONS.md)。**
+部署、发布、启停与排障：[`docs/deploy/DEPLOY.md`](docs/deploy/DEPLOY.md)。
 硬件方案与缺口分析：[`hardware/SLAM_NAV.md`](../../hardware/SLAM_NAV.md)。
 
 本包在 v1 的 VLA 推理/安全/反向操作之上，补齐：
@@ -13,10 +11,28 @@
 - **定位**：ICM-20948 + 轮式里程计 EKF、AMCL/TF、定位健康度与初始位姿；
 - **自主导航**：Nav2 或内置直航，目标校验、停滞检测、超时/急停；
 - **目标搜索**：颜色/YOLO 检测、激光测距、map 投影、前沿探索、确认、接近；
+- **语音找东西（场景编排层）**：网页/HTTP 语音文本 → `voice_scenario_node`（L3）
+  → `/center/search_object`（L2）→ 自主探索/确认/接近 → `/body/say` 播报
+  “找到拖鞋了”；支持“别找了”取消、目标切换、急停取消；
+- **分层架构**：基础能力层（`core/*` + ROS 能力节点）与场景编排层
+  （`core/scenarios/*` + `voice_scenario_node`）解耦，新增场景只写编排。
+  详见设计文档 [`docs/design/DESIGN.md`](docs/design/DESIGN.md) §2.3；
 - **速度仲裁**：VLA/Nav2/反向/安全统一到唯一 `/cmd_vel`；
+- **远程 VLA 推理**：Center Server（`software/center_server`）启动时向 Edge 握手，
+  Edge 在 `/api/center` 记录其 IP/端口；`vla_inference_node` 从注册表自动发现并
+  调用 `/v1/infer`，无 Center/超时/报错时回退规则桩（`vla_engine.backend` 可配
+  `auto`/`remote`/`stub`）；
 - **Pi Edge Server**：80 端口网页/API、8080 MJPEG、树莓派直连 STM32 USART3（115200 ASCII）、
   网页手动控制与 ROS `/cmd_vel` 共用串口出口；旧 ESP32 HTTP 桥仅保留历史兼容；
-- **健康检查**：ROS 节点/话题 + 相机/雷达/IMU/麦克风/音箱/机械臂等设备，
+- **蓝牙音箱/麦克风（NewMine / HONOR AM510 可选）**：默认 `newmine`，可切 `am510`
+  （BlueZ + PipeWire A2DP），TTS（espeak-ng 中文）与本地音频排队播放；
+  录音时切 HFP、停止后恢复 A2DP，
+  提供 `/api/speaker/*`、`/api/microphone/*`、`/body/say`、`/body/audio_status`、
+  `/body/mic_status`、`/edge/audio`，dashboard 可直接播报/录音和切换型号；
+- **树莓派电源监控**：`vcgencmd get_throttled` + `rpi_volt` 欠压告警，
+  驱动 dashboard“电源及转换板”模块，当前正常即报 `ok`，欠压/降频报
+  `degraded`/`error`，`/api/power` 可直接查询；
+- **健康检查**：ROS 节点/话题 + 相机/雷达/IMU/麦克风/音箱/机械臂/电源等设备，
   HTTP 供 Pi 上的 Edge Server/dashboard 代理，另有 ROS 话题/服务。
 
 验证状态（ROS2 Humble，本仓库）：
@@ -24,11 +40,13 @@
 | 项目 | 结果 |
 |---|---|
 | `colcon build --packages-select custom_msgs edge_server` | 通过 |
-| `pytest tests -q` | 94 passed |
+| `pytest tests -q` | 180 passed（含 26 项远程 VLA/握手 + 9 项场景 + 2 项场景 HTTP） |
 | `tests/end_to_end_check.py` | 7/7 passed |
 | `tests/slam_nav_check.py` + `fake_slam_robot.py` | 6/6 passed |
+| `tests/voice_scenario_check.py` + `fake_slam_robot.py` | 3/3 passed（找到/取消/状态链） |
 
-> VLA 仍是规则桩（无模型权重）；当前 STM32 ASCII 固件已由 `edge_server_node` 直连，若需二进制闭环再按 `DESIGN.md §6.13` 的 legacy 小节升级；
+> VLA 默认 `backend: auto`：Center Server 在线时走真实 SmolVLA，离线时回退规则桩；
+> 当前 STM32 ASCII 固件已由 `edge_server_node` 直连，若需二进制闭环再按设计文档 §8.4 的 legacy 小节升级；
 > Nav2/建图参数是起步值，需实车标定。
 
 ---
@@ -42,6 +60,8 @@
   `python3-numpy`、`python3-opencv`、`python3-yaml`、`python3-serial`
 - 可选：
   - `python3-smbus2`（Pi I2C 直连 ICM-20948）
+  - `pipewire`、`wireplumber`、`libspa-0.2-bluetooth`、`pulseaudio-utils`、
+    `alsa-utils`、`espeak-ng`（蓝牙音箱播放/麦克风 + 中文 TTS；见 §5.6/§5.7）
   - `nav2_bringup`、`nav2_msgs`（Nav2 后端）
   - `slam_toolbox`（建图）
   - `robot_localization`（EKF）
@@ -69,6 +89,40 @@ source install/setup.bash
 
 修改源码后重新 `colcon build --packages-select custom_msgs edge_server`。
 
+修改增量构建部署：
+```bash
+cd /mnt/f/CODE/rush-mog
+
+rsync -avz --delete \
+  --exclude='__pycache__' --exclude='.pytest_cache' \
+  software/edge_server/ \
+  ubuntu@192.168.3.26:/opt/edge_server/src/edge_server/
+
+rsync -avz --delete \
+  --exclude='__pycache__' --exclude='.pytest_cache' \
+  software/custom_msgs/ \
+  ubuntu@192.168.3.26:/opt/edge_server/src/custom_msgs/
+
+# 注意：远端登录 shell 是 zsh，必须显式用 bash -lc 包一层
+
+ssh ubuntu@192.168.3.26 'bash -lc "
+  source /opt/ros/humble/setup.bash &&
+  cd /opt/edge_server &&
+  colcon build --packages-select custom_msgs edge_server &&
+  sudo systemctl restart edge_server
+"'
+
+# 只改了 `edge_server` 的 Python/网页、没有改消息时，可以只构建 `edge_server`：
+
+ssh ubuntu@192.168.3.26 'bash -lc "
+  source /opt/ros/humble/setup.bash &&
+  cd /opt/edge_server &&
+  colcon build --packages-select edge_server &&
+  sudo systemctl restart edge_server
+"'
+
+```
+
 ---
 
 ## 3. 启动
@@ -94,8 +148,8 @@ ros2 launch edge_server edge_server.launch.py \
 
 ```bash
 ros2 launch edge_server robot_bringup.launch.py
-# IMU 直连 Pi I2C 时：
-ros2 launch edge_server robot_bringup.launch.py start_imu:=true
+# IMU 已默认启动（imu.enabled=true）；走 STM32/base_bridge 时关闭：
+ros2 launch edge_server robot_bringup.launch.py start_imu:=false
 # 指定配置：
 ros2 launch edge_server robot_bringup.launch.py config_file:=/path/to/robot.yaml
 ```
@@ -118,19 +172,39 @@ SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="r
 ```
 `robot.yaml` 的 `base.port` 可改为 `/dev/rush_base`；并确认 `python3-serial` 已安装。
 
+激光雷达（D6/LD19，UART4 GPIO8/9）：
+```ini
+# /boot/firmware/config.txt
+dtoverlay=uart4
+```
+```bash
+# /etc/udev/rules.d/99-rush-mog.rules；设备名以 `ls /dev/ttyAMA*` 为准
+KERNEL=="ttyAMA3", SYMLINK+="rush_lidar"
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+`robot.yaml` 默认 `lidar.port: /dev/rush_lidar`、`baud: 230400`，
+`frame_id: laser_link`，并发布 `base_link → laser_link` 静态 TF（按实际安装位置改
+`tf_x/tf_y/tf_z/tf_yaw_deg`）。单独验证：
+```bash
+ros2 launch edge_server lidar.launch.py \
+  config_file:=$HOME/rush_mog_ws/src/edge_server/edge_server/config/robot.yaml
+ros2 topic hz /scan        # ≈10 Hz
+ros2 topic echo /lidar/status --once
+```
+
 80 端口绑定权限二选一：
 ```bash
 # 使用 systemd 时由 root 启动，或：
 sudo setcap cap_net_bind_service=+ep /usr/bin/python3
 ```
 
-网络：树莓派用 `hostapd` + `dnsmasq` 提供 `RUSH-MOG` AP（`192.168.4.1`），
+网络：树莓派用 `hostapd` + `dnsmasq` 提供 `RUSH-MOG` AP（`192.168.3.26`），
 或接入现有局域网；手机/PC 打开 `http://<pi-ip>/`，视频流为
 `http://<pi-ip>:8080/stream`。
 
 其他启动前确认：
-- 激光驱动已发布 `/scan`；
-- 相机驱动已发布 `/camera/image_raw`（Edge Server 订阅并转成 MJPEG）；
+- 激光驱动已发布 `/scan`（`robot_bringup` 默认启动 `lidar_node`；未接雷达可 `start_lidar:=false`）；
+- 相机驱动已发布 `/camera/color/image_raw`（Astra Pro；Edge Server 订阅并转成 MJPEG）；
 - 12V/5V/6V 共地，急停释放。
 
 旧模式仍可用（不推荐）：
@@ -150,12 +224,13 @@ ros2 launch edge_server slam_stack.launch.py
 # 定位/导航（注意：Nav2 最终速度被重映射到 /nav/cmd_vel）
 ros2 launch edge_server nav2_stack.launch.py map:=$HOME/rush_mog/maps/rush_mog.yaml
 
-# EKF（单独启动）
-ros2 run robot_localization ekf_node --ros-args \
-  --params-file <install>/share/edge_server/config/ekf.yaml
+# EKF（可选；先确认 base.publish_tf=false，避免和 edge_server 抢 odom->base_link）
+ros2 launch edge_server ekf.launch.py
 ```
 
 若未安装 Nav2，`navigation.backend: auto` 会自动回退到内置直航，只需 `/scan`、`/center/pose`。
+当前 Pi 已安装 `slam_toolbox`、`robot_localization`；`nav2_bringup` 尚未安装。
+建图前先确认 `/scan` 有 publisher、`base_link→laser_link` 和 `odom→base_link` TF 正常。
 
 ---
 
@@ -164,7 +239,7 @@ ros2 run robot_localization ekf_node --ros-args \
 | 节点 | 职责 |
 |---|---|
 | `center_bridge_node` | image/laser/odom 软同步；audio/joint/imu 最近值缓存 |
-| `vla_inference_node` | 多模态预处理 + VLA 规则桩，发布意图/结果 |
+| `vla_inference_node` | 多模态预处理 + Center 远程 SmolVLA（规则桩兜底），发布意图/结果 |
 | `action_generator_node` | 单步意图 → `/cmd_vel_raw`，发布前安全校验 |
 | `reverse_operation_node` | 急停/回退/机械臂复位/任务撤销/手动接管 → `/reverse/cmd_vel` |
 | `safety_manager_node` | 障碍/数据/电量/定位/急停 → `/center/safety_state`、`/safety/cmd_vel_override` |
@@ -173,9 +248,11 @@ ros2 run robot_localization ekf_node --ros-args \
 | `localization_node` | 位姿选择、定位健康度、`/center/set_initial_pose` |
 | `map_manager_node` | `/map` 消费、前沿、`/center/map_control`、PGM/YAML 存图 |
 | `navigation_node` | `/center/navigate_to`，Nav2/直航后端 |
-| `target_detector_node` | 颜色/YOLO 检测、激光/bbox 测距、map 投影、跟踪 |
+| `target_detector_node` | 颜色/YOLO 检测、深度/激光/bbox 测距、map 投影、跟踪 |
 | `object_search_node` | `/center/explore`、`/center/search_object` |
-| `edge_server_node` | Pi Edge Server：80 网页/API、8080 MJPEG、STM32 串口、`/odom`、`/joint_states`、`/base/status` |
+| `voice_scenario_node` | 场景编排（L3）：语音文本 → 解析 → 调 `/center/search_object` → `/body/say` 播报；发布 `/center/scenario_status` |
+| `lidar_node` | LD19/D6 串口驱动：UART4 → `/scan`，可选 `base_link→laser_link` TF、`/lidar/status` |
+| `edge_server_node` | Pi Edge Server：80 网页/API、8080 MJPEG、STM32 串口、悬崖状态、蓝牙音箱/语音播报、HFP 录音与 `/edge/audio`、树莓派电源监控、`/odom`、`/joint_states`、`/base/status`、`/body/cliff_status`、`/body/audio_status`、`/body/mic_status`、`/body/power_status` |
 | `base_bridge_node` | 旧版 Pi ↔ STM32 二进制串口桥（legacy） |
 | `imu_node` | Pi I2C 直连 ICM-20948 → `/imu/data` |
 | `health_monitor_node` | 节点/设备健康、`/center/health`、`/center/healthcheck`、HTTP `:8090` |
@@ -188,14 +265,26 @@ ros2 run robot_localization ekf_node --ros-args \
 
 | 话题 | 类型 | 方向 |
 |---|---|---|
-| `/scan`、`/edge/radar` | `sensor_msgs/LaserScan` | 订阅 |
-| `/camera/image_raw`、`/edge/video` | `sensor_msgs/Image` | 订阅 |
-| `/edge/audio` | `custom_msgs/AudioData` | 订阅 |
+| `/camera/color/image_raw` | `sensor_msgs/Image` | 发布（Astra/相机驱动）/订阅 |
+| `/camera/depth/image_raw` | `sensor_msgs/Image` | 发布（Astra 驱动）/订阅（深度测距） |
+| `/camera/color/camera_info` | `sensor_msgs/CameraInfo` | 订阅（自动更新内参） |
+| `/scan` | `sensor_msgs/LaserScan` | 发布（lidar_node）/订阅 |
+| `/edge/radar` | `sensor_msgs/LaserScan` | 订阅（仿真兼容） |
+| `/lidar/status` | `std_msgs/String` | 发布（雷达串口/CRC/扫描状态，1 Hz） |
+| `/body/cliff_status` | `std_msgs/String` | 发布（STM32 悬崖掩码/左右状态，1 Hz） |
+| `/camera/color/image_raw`、`/edge/video` | `sensor_msgs/Image` | 订阅 |
+| `/edge/audio` | `custom_msgs/AudioData` | 发布（录音时 10 Hz PCM）/订阅（bridge） |
 | `/odom`、`/robot/odometry` | `nav_msgs/Odometry` | 订阅 |
 | `/imu/data` | `sensor_msgs/Imu` | 订阅 |
 | `/joint_states` | `sensor_msgs/JointState` | 订阅 |
 | `/arm/joint_states` | `sensor_msgs/JointState` | 订阅（健康检查，待接入） |
-| `/body/audio_status` | `std_msgs/String` | 订阅（健康检查，待接入） |
+| `/body/say` | `std_msgs/String` | 订阅（文本 -> TTS -> 蓝牙音箱） |
+| `/body/audio_status` | `std_msgs/String` | 发布（音箱状态 JSON，1 Hz；健康检查 speaker） |
+| `/body/mic_status` | `std_msgs/String` | 发布（麦克风状态 JSON，1 Hz；健康检查 microphone） |
+| `/body/power_status` | `std_msgs/String` | 发布（树莓派电源状态 JSON，1 Hz；健康检查 power） |
+| `/edge/scenario_command` | `std_msgs/String` | 订阅（通用场景指令 JSON `{text, source, request_id}`；文本/语音统一入口） |
+| `/edge/voice_command` | `std_msgs/String` | 订阅（兼容：语音文本 -> 场景编排层） |
+| `/center/scenario_status` | `std_msgs/String` | 发布（场景状态 JSON，1 Hz，TRANSIENT_LOCAL；`GET /api/voice` 数据源） |
 | `/battery_state` | `sensor_msgs/BatteryState` | 订阅 |
 | `/base/status` | `std_msgs/String` | 发布/订阅（STM32 遥测 JSON） |
 | `/map` | `nav_msgs/OccupancyGrid` | 订阅/发布 |
@@ -271,7 +360,7 @@ ros2 action send_goal /center/search_object custom_msgs/action/SearchObject \
 
 ### 5.4 健康检查（供 Edge Server / dashboard）
 
-详细契约、字段语义和接入示例见 [`HEALTHCHECK.md`](HEALTHCHECK.md)。主接口：
+详细契约、字段语义和接入示例见 [`docs/HEALTHCHECK.md`](docs/HEALTHCHECK.md)。主接口：
 
 ```bash
 # 详细健康（HTTP 200 只代表数据可读；机器健康看 body.status/healthy/ready）
@@ -305,9 +394,9 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
 
 - 代码默认监听 `127.0.0.1:8090`；`robot.yaml` 也保持回环，由同机 Edge Server 代理；跨机监控再改 `0.0.0.0` 并设置 `health.http.api_key`。
 - 设备参数（频率/超时/必需）与 health monitor 参数可在 dashboard 的 ROS 参数抽屉直接修改。
-- 设备清单在 `health.devices` 配置：camera/lidar/imu/microphone/speaker/arm/base/battery/odom。
-- 音箱 `/body/audio_status`、机械臂 `/arm/joint_states` 当前无反馈时显示 `unknown`，不伪造 `ok`；
-  接入后无需改代码。
+- 设备清单在 `health.devices` 配置：camera/lidar/imu/microphone/speaker/arm/base/battery/power/odom。
+- 音箱由 `edge_server_node` 发布 `/body/audio_status`，`online=false` 时显示 `degraded`；
+  机械臂 `/arm/joint_states` 无反馈时显示 `unknown`，不伪造 `ok`；接入后无需改代码。
 - 整体状态：`ok` / `starting` / `degraded` / `error` / `disabled`；
   `ready=true` 表示可接新任务（`ok`/`degraded` 且未急停）。
 
@@ -322,16 +411,389 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
 | `GET/POST /cmd-button`、`/cmd-stick`、`/stop` | 旧页面兼容接口 |
 | `GET /status` | Pi 运行状态、串口/ROS/相机/运动状态（含当前指令 `motion`） |
 | `GET /api/body` | STM32 编码器遥测快照 + 当前指令/来源/持续时长 |
+| `GET /api/radar` | dashboard 雷达地图：降采样 `/map` + `/scan` + `/center/pose` 快照 |
 | `GET /api/events?limit=N` | 最近 N 条运行事件（命令、串口连接、急停、租约超时） |
+| `GET /api/speaker` | 蓝牙音箱连接/A2DP sink/TTS/播放队列状态 |
+| `POST /api/speaker/{connect,say,play,volume,stop}` | 连接音箱、TTS 播报、播放 `audio_dir` 文件、音量、停止 |
+| `GET /api/microphone` | HFP 麦克风能力/输入源/录音状态/最近录音 |
+| `POST /api/microphone/{start,stop,play,volume,list}` | 开始/停止录音、回放、音量、录音列表 |
+| `GET /api/microphone/recordings[/{name}]` | 录音列表 / 下载 WAV |
+| `GET /api/power` | 树莓派欠压/降频/温度/核心电压状态 |
+| `POST /api/voice` | 语音输入适配器（raw/form/JSON）→ 通用场景执行接口 |
+| `GET /api/voice` | 场景状态快照 + `/center/scenario_status` 最近一帧 |
+| `POST /api/scenario/execute` | 文本场景指令（JSON/form/raw）→ `/edge/scenario_command` |
+| `GET /api/scenario` | 通用场景状态（含 `last_source`/`last_dispatch`） |
 | `GET /api/modules` | Edge + 同机 ROS 子系统 + 外部模块（CENTER） |
 | `GET/POST /api/modules/edge/params` | Edge 参数（运动保活、图传帧率） |
 | `GET /api/modules/{id}/health|params` | 代理 ROS（同机）/CENTER（外部） |
 | `POST /api/modules/report` | CENTER 等外部模块上报（`edge`/`ros` 保留） |
+| `POST /api/center/handshake` | Center Server 启动/心跳握手，记录 IP、端口、`infer_url` |
+| `GET /api/center` | 最近一次 CENTER 握手快照（VLA 节点据此发现推理地址） |
 | `GET /stream`（8080） | ROS 相机的 MJPEG；80 端口返回 302 |
 
 完整 OpenAPI 定义见 [`software/api.yaml`](../api.yaml)；实现见
 `edge_server/edge_web.py`、`edge_server/edge_control.py` 和
 `ros_nodes/edge_server_node.py`。
+
+#### 5.5.1 CENTER 握手与 VLA 地址发现
+
+`EdgeHttpApp` 内置一个**内存模块注册表**（最多 8 个外部模块）：
+
+1. Center Server 启动后 `POST /api/center/handshake`（JSON 或表单），字段见
+   [`center_server/deploy/README.md`](../center_server/deploy/README.md#6-握手协议center--edge)；
+2. Edge 以 TCP 对端 IP 为准（忽略 payload 的 `ip`），按 `infer_port`/`infer_path`
+   生成 `infer_url`，记录 `base_url`、health/params 地址和模型 `meta`；
+3. `vla_inference_node` 按 `vla_engine.remote.discovery_url`（默认
+   `http://127.0.0.1/api/center`，仿真配置为 8081）拉取地址，调用 Center
+   `/v1/infer`；发现失败/超时/HTTP 错误时按 `retry_after_sec` 降级到规则桩；
+4. Center 每 `interval_sec` 发 `heartbeat`，Edge 重启或注册表被清空后可自动恢复。
+
+```bash
+# 查看 CENTER 是否已握手（含 IP/端口/推理地址/新旧程度）
+curl -s http://127.0.0.1/api/center | python3 -m json.tool
+# 伪装一次握手（联调用；正式由 Center 自动发送）
+curl -X POST http://127.0.0.1/api/center/handshake \
+  -H 'Content-Type: application/json' \
+  -d '{"module":"center","health_port":8000,"infer_port":8000}'
+```
+
+> 注册表只在内存中，Edge 重启后等待 Center 的下一次 heartbeat（默认 ≤10s）。
+> 旧版上报脚本 `software/tools/edge_link.py` 仍可用 `/api/modules/report` 兼容，
+> 但推荐由 Center Server 内置握手替代（少一个常驻进程）。
+
+### 5.6 蓝牙音箱与语音播报（NewMine / HONOR AM510）
+
+`edge_server_node` 内置 `SpeakerManager`，按 `edge.speaker.model` 选择型号
+（默认 `newmine`，可切 `am510`），自动搜索/配对/信任/连接；连接成功后等待
+PipeWire 创建 sink 并设为默认输出；断线后每 `connect_interval_sec` 秒重试。
+dashboard 的“型号”下拉和 `POST /api/speaker/model` 可运行时切换，切换后自动
+断开旧设备、重启用户级 WirePlumber（清理旧 card/profile）并重连；重启服务后
+回到 config 里的 `model`。
+
+型号在 `edge.speaker.models` 中定义（`label` / `device_name` / `device_mac` /
+`force_a2dp`）。只有 `force_a2dp=true` 的型号（AM510）才会在只有 HFP sink 时
+主动执行 `pactl set-card-profile ... a2dp-sink`；NewMine 保持“有 bluez sink 就用”，
+避免反复切 profile 造成断连。首次配对前要 `bluetoothctl pairable on`，否则适配器
+可能不持久化 link key（`Store hint: No`）。
+
+sink 就绪后，`keepalive=true`（默认）会用 `pacat` 持续送 48 kHz 立体声、
+±128 LSB 的 dither（不是全 0，避免音箱把数字静音当成空闲而自动 mute，吞掉下一条
+播报的第一个字）；录音切 HFP 时流退出，恢复 A2DP 后自动重启。不需要保活时设
+`keepalive: false`。
+
+主机依赖（Ubuntu 22.04 / Pi 4B）：
+
+```bash
+sudo apt-get install -y pipewire pipewire-pulse wireplumber \
+  libspa-0.2-bluetooth pulseaudio-utils alsa-utils espeak-ng
+sudo loginctl enable-linger ubuntu
+sudo -u ubuntu XDG_RUNTIME_DIR=/run/user/1000 \
+  systemctl --user enable --now pipewire pipewire-pulse wireplumber
+```
+
+`edge_server.service` 需要把用户会话环境传给播放器（部署机已配置）：
+
+```ini
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=PULSE_SERVER=unix:/run/user/1000/pulse/native
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+```
+
+配置（`edge.speaker`）：
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `enabled` | `false`（`robot.yaml` 为 `true`） | 总开关 |
+| `model` | `newmine` | 默认型号；`newmine` / `am510`，dashboard 可运行时切换 |
+| `models.<id>.device_name` | 内置 | 该型号的蓝牙名；先用 `bluetoothctl devices` 确认 |
+| `models.<id>.device_mac` | 空 | 该型号 MAC，填了可跳过扫描、快速重连 |
+| `models.<id>.force_a2dp` | newmine=false / am510=true | 只有 HFP sink 时是否主动切 A2DP |
+| `keepalive` | `true` | 持续给 A2DP sink 送极低电平 dither，防休眠/防静音 mute |
+| `auto_connect` | `true` | 后台自动重连 |
+| `recover_wireplumber` | `true` | `profile-unavailable` 时重启用户级 WirePlumber |
+| `recover_wait_sec` | `15` | 重启 WirePlumber 后等待 A2DP endpoint 注册的秒数 |
+| `connect_interval_sec` | `20` | 巡检/重试周期 |
+| `volume` | `70` | 首次连接音量 0..100 |
+| `audio_dir` | `~/.local/share/rush-mog/audio` | `POST /api/speaker/play` 允许的目录 |
+| `say_topic` / `status_topic` | `/body/say` / `/body/audio_status` | ROS 话题 |
+| `playback_latency_ms` | `250` | paplay 请求缓冲，降低蓝牙抖动卡顿 |
+| `tts.backend` | `auto`（`robot.yaml` 为 `edge-tts`） | `edge-tts` / `espeak-ng` / `none` |
+| `tts.pre_roll_ms` | `450`（`robot.yaml` 为 `700`） | TTS 前补静音，避免 A2DP 唤醒吞掉第一个字 |
+| `tts.voice` | `cmn` | espeak-ng 中文音色；英文用 `en-us` |
+
+`edge-tts` 中文更自然，需要 `ffmpeg`（apt）和 `pip install edge-tts`，并保持联网；
+失败会自动回退 `espeak-ng`。espeak 输出会先转成 48kHz stereo，避免播放时做
+22050→48000 的非整数倍实时重采样，减少卡顿/失真。
+
+TTS 使用独立的 `_synth_loop` 预合成：当前一条还在播放时，下一条已经合成好，
+连续播报之间只剩 `pre_roll_ms` 和播放器启动时间；keepalive 也统一用 48kHz
+stereo，避免和 TTS 流切换时重新协商采样率、吞掉第一个字。
+
+常用短语（机器人已启动/已到达目标点/请注意避让/任务完成）在启动时预合成到
+`<audio_dir>/tts_cache`；dashboard 输入停顿 450ms 会调 `POST /api/speaker/prepare`
+提前合成当前文本。`say` 命中缓存时不再等 edge-tts，实测开始播放约 0.06s
+（再加上文件内预滚，`robot.yaml` 为 700ms）。
+
+> 旧配置仍兼容：没有 `model` 时按 `device_name` 推断型号，
+> `device_name`/`device_mac`/`device_aliases` 继续生效。
+
+接口示例：
+
+```bash
+curl -s http://192.168.3.26/api/speaker | python3 -m json.tool
+curl -X POST http://192.168.3.26/api/speaker/connect
+curl -X POST http://192.168.3.26/api/speaker/say \
+  -H 'Content-Type: application/json' -d '{"text":"机器人已启动"}'
+curl -X POST http://192.168.3.26/api/speaker/volume \
+  -H 'Content-Type: application/json' -d '{"volume":60}'
+ros2 topic pub --once /body/say std_msgs/msg/String "{data: 已到达目标点}"
+```
+
+dashboard 的「蓝牙音箱与语音播报」面板提供连接、停止、音量、文字播报和快捷短语；
+状态同时发布到 `/body/audio_status`，health monitor 用 `online` 字段判断音箱
+`ok`/`degraded`。
+
+### 5.7 蓝牙麦克风（HFP）
+
+`NewMine` / `HONOR AM510` 都是音箱+麦克风一体设备：A2DP 只负责播放，麦克风在
+HFP/HSP profile 下才可用。
+`MicrophoneManager` 在录音开始前把 PipeWire card 从 `a2dp-sink-*` 切到
+`headset-head-unit`，等待 `bluez_input.<MAC>.headset-head-unit` 输入源，
+用 `parec` 读原始 PCM（s16le / 8000 Hz / mono），同时：
+
+- 写 WAV 到 `edge.speaker.microphone.record_dir`（默认 `<audio_dir>/mic`）；
+- 每 `chunk_ms`（默认 100ms，10 Hz）发布 `custom_msgs/AudioData` 到 `/edge/audio`；
+- 停止后自动恢复原 A2DP profile，语音播报恢复高音质输出。
+
+录音期间输出会临时变成 HFP mono（8 kHz），这是蓝牙协议限制；如果此时播 TTS，
+会走 HFP sink。录音最长 `max_duration_sec`（默认 60s），到点自动停止。
+
+配置（`edge.speaker.microphone`）：
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `enabled` | `true`（默认 config 为 false） | 总开关 |
+| `record_dir` | 空 = `<audio_dir>/mic` | 录音目录，只允许此目录内文件 |
+| `sample_rate` / `channels` | `8000` / `1` | HFP 窄带 PCM |
+| `chunk_ms` | `100` | ROS AudioData 帧长度 |
+| `max_duration_sec` | `60` | 单次录音上限 |
+| `volume` | `100` | 麦克风输入音量 0..100 |
+| `gain` | `3.0` | 软件增益 1.0..8.0，HFP 麦克风偏小时调大（默认 +9.5dB） |
+| `topic` / `status_topic` | `/edge/audio` / `/body/mic_status` | ROS 话题 |
+
+```bash
+curl -s http://192.168.3.26/api/microphone | python3 -m json.tool
+curl -X POST http://192.168.3.26/api/microphone/start   -H 'Content-Type: application/json' -d '{"duration":10}'
+curl -X POST http://192.168.3.26/api/microphone/stop
+curl -s http://192.168.3.26/api/microphone/recordings
+curl -OJ http://192.168.3.26/api/microphone/recordings/mic-20261114-123901-694.wav
+curl -X POST http://192.168.3.26/api/microphone/play   -H 'Content-Type: application/json' -d '{"file":"mic-20261114-123901-694.wav"}'
+```
+
+ROS 侧录音时可以直接用 `ros2 topic hz /edge/audio`（约 10 Hz）确认；
+`health_monitor_node` 用 `/body/mic_status` 的 `online` 判断麦克风
+`ok`/`degraded`。dashboard 的同一面板提供开始/停止/下载/回放。
+
+### 5.8 树莓派电源监控（电源及转换板）
+
+“电源及转换板”模块的状态直接取树莓派电源监控：
+
+- `vcgencmd get_throttled`：firmware 的欠压/降频/温度限制位；
+- `/sys/class/hwmon/hwmon*/in0_lcrit_alarm`（`rpi_volt`）：当前低电压告警；
+- `vcgencmd measure_volts core`、`measure_temp`：辅助展示；
+- `/proc/device-tree/model`：板卡型号。
+
+状态语义：
+
+| 条件 | status |
+|---|---|
+| 当前欠压（`0x1` 或 alarm=1） | `error` |
+| 当前降频/限流/软温度限制 | `degraded` |
+| 仅历史位（`0x10000`/`0x40000`/`0x80000`） | `ok` + `warning=true` |
+| 无欠压/降频 | `ok` |
+
+`0x50000` 是本次部署实测值：表示启动后曾发生过欠压和降频，但当前已恢复，
+所以 dashboard 电源模块显示 `ok`，详情标注“历史欠压已恢复”，
+`/api/power` 的 `warning=true`、`throttled_raw="0x50000"`。
+
+配置（`edge.power`）：
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `enabled` | `false`（robot/deploy 为 true） | 总开关 |
+| `sample_interval_sec` | `2.0` | 读取缓存周期 |
+| `status_rate_hz` | `1.0` | `/body/power_status` 发布频率 |
+| `status_topic` | `/body/power_status` | ROS 状态 JSON |
+| `model_path` / `alarm_path` | Pi 默认路径 | 可覆盖 sysfs 路径 |
+| `vcgencmd` | `vcgencmd` | 命令名/路径 |
+
+```bash
+curl -s http://192.168.3.26/api/power | python3 -m json.tool
+# 关键字段：status, healthy, warning, undervoltage, throttled_raw,
+#           core_voltage_v, temperature_c
+```
+
+dashboard 的 BOM「电源及转换板」卡片使用该状态；health monitor 的 `power`
+设备读取 `/body/power_status`，电源异常时整体健康会降级。
+
+### 5.9 Astra Pro 深度相机
+
+Astra Pro 同时提供 RGB 和深度，使用 Orbbec ROS2 驱动（`ros-humble-orbbec-camera`）。
+本包提供：
+
+- `launch/astra.launch.py`：Astra 驱动 + `base_link → camera_link` 静态 TF；
+- `target_detector_node` 订阅深度图，bbox 中心区域中值测距；
+- health `depth_camera` 监控 `/camera/depth/image_raw`；
+- dashboard 的「深度相机」硬件卡片。
+
+安装与 USB：
+
+```bash
+sudo apt install ros-humble-orbbec-camera
+sudo cp /opt/ros/humble/share/orbbec_camera/udev/99-obsensor-libusb.rules \
+  /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+Astra Pro 是 USB 2.0 设备，插 Pi 4 的 USB 3.0 口，**不要经 Hub**，峰值约
+0.8A；建议深度/彩色都降到 640×480@10Hz。启动：
+
+```bash
+ros2 launch edge_server astra.launch.py
+# 或随 bringup（默认 start_camera:=false）
+ros2 launch edge_server robot_bringup.launch.py start_camera:=true
+```
+
+关键话题：
+
+| 话题 | 说明 |
+|---|---|
+| `/camera/color/image_raw` | RGB，Edge MJPEG / 目标检测 |
+| `/camera/depth/image_raw` | 深度 `16UC1`（mm）或 `32FC1`（m） |
+| `/camera/color/camera_info` | 彩色内参，自动更新 localizer |
+| `/camera/depth/camera_info` | 深度内参 |
+
+`astra.launch.py` 默认 `depth_registration:=true`（深度对齐到彩色），
+`enable_point_cloud:=false`（Pi 4B 省 CPU）。如果厂家驱动不支持对齐，
+把 `prefer_depth` 设为 false，深度分支会回退到激光/bbox 估距。
+
+TF 默认 `base_link → camera_link` 为 `x=0.08, y=0, z=0.22`，按实际安装位置改
+`astra.launch.py` 的 `tf_*` 参数，或用 `tf2_echo` 校验。
+
+验收：
+
+```bash
+ros2 topic hz /camera/color/image_raw
+ros2 topic hz /camera/depth/image_raw
+ros2 topic echo /camera/depth/camera_info --once
+ros2 run tf2_ros tf2_echo base_link camera_link
+curl -s http://192.168.3.26/api/modules/ros/health | python3 -m json.tool | grep -A3 depth_camera
+```
+
+### 5.10 语音找东西（场景编排层）
+
+架构分层见设计文档 [`docs/design/DESIGN.md`](docs/design/DESIGN.md) §2：
+基础能力层负责“检测/建图/导航/搜索/播报”，场景编排层只负责
+“听懂 → 调能力 → 播报结果”。新增场景（跟随、巡逻、取物）只写编排。
+
+**三条等价入口：**
+
+```bash
+# 1) 手机网页语音按钮：说“帮我找一下拖鞋”（Web Speech API -> POST /api/voice）
+# 2) 任意 HTTP 客户端：
+curl -X POST -H 'Content-Type: text/plain; charset=utf-8' \
+  --data '帮我找一下拖鞋' http://192.168.3.26/api/voice
+
+# 3) 任意 ASR 节点/脚本（离线 ASR 也可）：
+ros2 topic pub --once /edge/voice_command std_msgs/msg/String \
+  "{data: '帮我找一下拖鞋'}"
+
+# 4) 文本场景指令（dashboard「实时监控信息」输入框同一接口）：
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"text":"找拖鞋","source":"text"}' \
+  http://192.168.3.26/api/scenario/execute
+```
+
+流程：
+
+```text
+/api/voice、/api/scenario/execute 或 /edge/scenario_command
+  -> voice_scenario_node（统一解析、状态机、播报）
+     ├─ 找物/取消 -> /center/search_object（探索/确认/接近）
+     └─ 建图/探索/导航/回家 -> /center/mission_request -> task_manager_node
+  -> /body/say（TTS）
+  -> /center/scenario_status -> GET /api/voice 或 /api/scenario（网页状态）
+```
+
+**可用说法：**
+
+| 说法 | 行为 |
+|---|---|
+| `帮我找一下拖鞋` / `拖鞋在哪` / `find my slippers` | 开始搜索 `slipper` |
+| `别找了` / `停止寻找` / `取消搜索` | 取消当前搜索并播报 |
+| 搜索中再说另一个目标 | 取消旧搜索，切换到新目标 |
+| 急停 | 场景节点取消搜索并播报“已急停，停止寻找” |
+| `去厨房` / `建图` / `探索` / `回家` | 转交 `task_manager` 执行对应 mission |
+
+**播报示例：**“好的，我去找拖鞋。”→“好像看到拖鞋了，我确认一下。”→
+“确认是拖鞋，正在靠近。”→“找到拖鞋了，就在前面大约60厘米。”
+找不到时：“没有找到拖鞋。”；搜索功能未启动时：“寻找功能还没准备好……”
+
+**目标 label 必须与检测器输出一致：**
+
+- 语音别名在 `instruction.object_labels` 配置，拖鞋的 canonical label 是
+  `slipper`（`拖鞋/鞋子/slipper/shoe/...` 都映射到它）；
+- 默认 `perception.detector=color` 只适合贴色块/演示，配置里的颜色目标是
+  `cup`、`bottle`；检测器没有对应 label 时搜索会超时并播报“没找到”；
+- 找拖鞋等 COCO 外类别，推荐用开放词表检测器：
+  ```yaml
+  perception:
+    detector: "yolo_world"
+    model_path: "yolov8s-worldv2.pt"
+    open_vocab_labels: ["cup", "bottle", "slipper", "remote", "keys", "bag", "phone"]
+    targets:
+      slipper:
+        real_height_m: 0.08
+  ```
+  需要 `ultralytics` 与权重；缺失时 `make_detector` 自动回退到颜色检测器。
+  也可换成自定义 YOLO 模型，只要输出 label 是 `slipper`。
+
+**配置（`scenario` 段）：**
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `voice_topic` | `/edge/voice_command` | 兼容语音输入 |
+| `command_topic` | `/edge/scenario_command` | 通用场景输入（文本/语音） |
+| `mission_request_topic` | `/center/mission_request` | 非找物 mission 转交任务管理 |
+| `search_action` | `/center/search_object` | 调用的搜索能力 |
+| `say_topic` | `/body/say` | TTS 输出 |
+| `status_topic` | `/center/scenario_status` | 场景状态 JSON |
+| `max_duration_sec` | `300` | 单次搜索上限 |
+| `standoff_distance` | `0.6` | 目标前停距 |
+| `announce_start` / `announce_milestones` | `true` | 开始/确认/接近播报 |
+| `announce_progress_sec` | `30` | 长搜索进度播报间隔，0 关闭 |
+
+联调验证（无需硬件）：
+
+```bash
+# 终端 1：完整栈（fake_slam_robot 提供地图/位姿/cup 目标）
+ros2 launch edge_server edge_server.launch.py \
+  config_file:=$(pwd)/tests/config_test.yaml \
+  start_perception:=false start_localization:=false
+python3 tests/fake_slam_robot.py
+
+# 终端 2：自动检查（找到 + 取消 + 状态链）
+python3 tests/voice_scenario_check.py
+# RESULT: 3/3 passed
+
+# 或手动观察：
+ros2 topic pub --once /edge/voice_command std_msgs/msg/String "{data: '帮我找一下杯子'}"
+ros2 topic echo /body/say
+ros2 topic echo /center/scenario_status
+```
+
+`tests/test_voice_scenario.py` 覆盖解析/状态机/播报文案；`/api/voice` 在
+`tests/test_edge_web.py` 中覆盖 raw/form/JSON 三种请求体。
 
 ---
 
@@ -342,14 +804,18 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
 | 文件 | 用途 |
 |---|---|
 | `config.yaml` | 仿真/桌面默认；`/edge/*` 话题；`base.enabled=false`；Edge Web 使用 8081/8082 |
-| `robot.yaml` | 实车；`/scan`、`/camera/image_raw`；`base.transport=edge_serial`；Edge Web 80/8080 |
+| `robot.yaml` | 实车；`/scan`、`/camera/color/image_raw`、`/camera/depth/image_raw`；Edge Web 80/8080 |
 | `ekf.yaml` | `robot_localization` |
 | `slam_toolbox.yaml` | `slam_toolbox` |
 | `nav2_params.yaml` | Nav2 Humble 起步配置 |
 
 关键参数：
 
-- `vla_engine.inference_rate` / `confidence_threshold`
+- `vla_engine.backend`（auto/remote/stub） / `inference_rate` / `confidence_threshold`
+- `vla_engine.remote.*`：`discovery_url` / `discovery_interval_sec` / `host` / `port` /
+  `api_key` / `timeout_sec` / `max_rate_hz` / `chunk_size` / `image_key` /
+  `color_order` / `state_joint_names` / `confidence` / `turn_threshold` /
+  `linear_threshold` / `retry_after_sec` / `fallback_to_rules`
 - `safety.obstacle_stop_distance` / `data_timeout_sec` / `battery_low_percent`
 - `localization.min_quality`
 - `map_manager.frontier_min_size` / `map_dir`
@@ -360,7 +826,15 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
 - `health.publish_rate` / `startup_grace_sec` / `strict_unknown`
 - `health.http.host` / `port` / `api_key`
 - `base.transport` / `port` / `baud` / `body_command.*`
+- `lidar.enabled` / `port` / `baud` / `topic` / `frame_id` / `bins` /
+  `range_min` / `range_max` / `publish_tf` / `tf_*`
 - `edge.web.port` / `stream_port` / `edge.camera.fps` / `edge.motion.keepalive_ms`
+- `edge.speaker.*`：`enabled` / `model` / `models.*` / `auto_connect` /
+  `volume` / `audio_dir` / `tts.*`（见 §5.6）
+- `edge.speaker.microphone.*`：`enabled` / `record_dir` / `sample_rate` / `channels` /
+  `chunk_ms` / `max_duration_sec` / `volume` / `topic` / `status_topic`（见 §5.7）
+- `edge.power.*`：`enabled` / `sample_interval_sec` / `status_rate_hz` /
+  `status_topic` / `model_path` / `alarm_path` / `vcgencmd`（见 §5.8）
 - `health.devices.<id>` 的 `topic` / `message_type` / `expected_rate_hz` / `timeout_sec` / `required`
 
 ---
@@ -383,7 +857,7 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
 ```bash
 cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 94 passed
+# 180 passed
 ```
 
 单独跑健康检查（不依赖 ROS 图）：
@@ -486,16 +960,23 @@ ros2 service call /center/emergency_stop custom_msgs/srv/EmergencyStop "{trigger
 
 ## 9. 当前限制
 
-1. **VLA 为规则桩**：未包含模型权重/GPU 推理；替换 `VLAEngine._load_model/predict` 即可。
-2. **STM32 固件仍为 ASCII**：Pi Edge Server 已直连 ASCII 协议；`DESIGN.md §6.13` 的二进制协议尚未在固件实现。
+1. **VLA 依赖 Center Server**：仓库不带模型权重；`backend: auto` 时由 Center
+   提供真实 SmolVLA，离线自动回退规则桩。`backend: remote` 且
+   `fallback_to_rules: false` 时，Center 不可用会发 `stop`（confidence 0），
+   需要人工/上层确认，不会继续执行旧动作。
+2. **STM32 固件仍为 ASCII**：Pi Edge Server 已直连 ASCII 协议；设计文档 §8.4 的二进制协议尚未在固件实现。
 3. **Nav2 参数起步值**：需实车调 `robot_radius`、速度、膨胀半径、DWB critics。
-4. **无深度相机**：目标距离靠激光/bbox 高度；遮挡/高度变化精度有限。
+4. **深度相机可选**：Astra Pro 接入后优先深度测距；未接入/深度无效时自动回退激光/bbox 高度，遮挡/高度变化精度有限。
 5. **磁力计需校准**：ICM-20948 受电机干扰时只慢速校正，不硬切航向。
 6. **单地图/单楼层**：未实现多地图切换/电梯/多层。
 7. **动态目标**：搜索假设目标基本静止；移动目标需预测/重规划。
-8. **颜色检测仅演示**：真实场景建议 YOLO/深度相机/Orin Nano。
-9. **健康反馈缺口**：音箱 `/body/audio_status`、机械臂 `/arm/joint_states` 尚未发布，
-   健康接口显示 `unknown`；接入后自动变为 `ok`/`degraded`/`error`。
+8. **颜色检测仅演示**：真实场景建议 YOLO/YOLO-World；深度相机已接入 Astra Pro，可在 Pi 4B 上以 640×480@10Hz 运行。
+   拖鞋等 COCO 外类别需要 `perception.detector=yolo_world` + 权重，或自定义 YOLO 输出 `slipper`。
+9. **健康反馈缺口**：机械臂 `/arm/joint_states` 尚未发布，健康接口显示 `unknown`；
+   音箱/麦克风已接入 `/body/audio_status`、`/body/mic_status`，蓝牙未连接时显示
+   `degraded`，连接并支持 HFP 后恢复 `ok`。
+10. **浏览器语音识别依赖 Web Speech API**：部分浏览器/HTTP 页面可能要求安全上下文或联网；
+   离线场景可用任意 ASR（Vosk/Whisper）发布 `/edge/voice_command`，场景层无需改动。
 
 ---
 
@@ -506,17 +987,24 @@ software/edge_server/          # ROS 包根目录
 ├── edge_server/               # Python 包
 │   ├── config/                # config.yaml / robot.yaml / ekf.yaml / slam_toolbox.yaml / nav2_params.yaml
 │   ├── core/                  # 纯算法，可单测（含 health_monitor.py）
+│   ├── core/scenarios/        # L3 场景编排：voice_intent.py / find_object.py（不依赖 ROS）
 │   ├── drivers/               # ICM-20948
 │   ├── edge_control.py        # 按钮/摇杆/运动保活/STM32 遥测纯逻辑
+│   ├── core/speaker.py        # 蓝牙音箱自动连接 + TTS/音频排队播放
+│   ├── core/microphone.py     # HFP 麦克风录音 + WAV/ROS AudioData
+│   ├── core/power.py          # 树莓派 vcgencmd/rpi_volt 电源监控
+│   ├── core/lidar.py          # LD19/D6 47 字节协议解析/360° 分箱
 │   ├── edge_web.py            # Edge 网页/API/MJPEG（stdlib）
 │   ├── http_health.py         # 健康检查 HTTP 网关（stdlib）
 │   └── utils/
-├── ros_nodes/                 # 16 个 ROS2 节点（含 edge_server_node / health_monitor_node）
+├── ros_nodes/                 # 19 个 ROS2 节点（含 voice_scenario_node / edge_server_node / health_monitor_node）
 ├── web/                       # 手柄页、dashboard、静态资源
 ├── launch/                    # edge_server / robot_bringup / slam_stack / nav2_stack
 ├── tests/                     # 单元 + 仿真 + 联调（含 test_edge_*.py / test_health_*.py）
-├── DESIGN.md
-├── HEALTHCHECK.md             # 健康检查接口契约（HTTP + ROS）
+├── docs/
+│   ├── design/DESIGN.md       # 设计、架构与代码地图
+│   ├── deploy/DEPLOY.md       # 部署、发布、启停与排障
+│   └── HEALTHCHECK.md         # 健康检查接口契约（HTTP + ROS）
 ├── README.md
 ├── package.xml
 └── setup.py

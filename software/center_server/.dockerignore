@@ -1,0 +1,10 @@
+# Docker build context 排除项（构建上下文是 center_server/）
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+models/
+*.pt
+*.pth
+*.safetensors
+.git/

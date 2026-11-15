@@ -24,7 +24,7 @@ EXTI 四倍频，USART3 上报 Pi）、ICM-20948（Pi I2C1）。理论上接完�
 | P0 | **硬件急停 + 保险丝 + 总开关** | 建图时人在车后，Wi-Fi/节点挂了只能靠硬件断电 |
 | P1 | **激光/IMU/相机支架** | 原理图里这些器件都还没连线，更没有安装结构；IMU 必须刚性固定在底盘中心 |
 | P1 | **INA226 电量检测** | 自主建图/导航途中掉电没有预警 |
-| P1 | **悬崖传感器补到 2~3 路并分配 GPIO** | 现在只有 GPIO27 一个信号脚，激光盲区看不到桌沿 |
+| P1 | **悬崖传感器补到 2~3 路** | 现已接 STM32 PB3/PB4 两路，状态随 `$B` 上报；如需第 3 路再加 GPIO |
 | P2 | 散热/高耐久存储、碰撞开关、5GHz AP、USB 声卡 | 长时间建图稳定性/体验 |
 
 > ✅ 已解决（2026-11-14）：USART3 波特率 **9600 → 115200**，固件 `BODY_UART_BAUD_RATE` 与
@@ -64,8 +64,8 @@ LM393、喇叭的引脚全部悬空。另外 12V 接在 L298N 的 `Vss(9)`、`Vs
 | D6 2D 激光 | 已选型，接 Pi UART4 GPIO8/9 | SLAM 建图/定位/避障的主传感器 |
 | ICM-20948 | 已选型，接 Pi I2C1 GPIO2/3 | EKF 的角速度/航向，补编码器短时误差 |
 | Astra Pro 深度相机 | 已选型，USB 接 Pi | 目标检测/接近；2D 建图非必需 |
-| LM393 红外悬崖 ×2 | 已选型，输出接 Pi GPIO27 | 激光盲区安全（桌沿/台阶） |
-| USB 全向麦克风 / 蓝牙音箱 | 已选型 | 语音交互，与导航解耦 |
+| LM393 红外悬崖 ×2 | 已选型，接 **STM32 PB3/PB4**（非 Pi GPIO） | 激光盲区安全（桌沿/台阶），状态随 `$B` 遥测上报 |
+| NewMine / HONOR AM510 蓝牙音箱/麦克风（二选一） | 已选型 | 语音交互，与导航解耦 |
 | 12V 3600mAh + 12V→5V 3A / 3.3V 1A | 已选型 | 供电（**3A 偏紧，见 §6**） |
 | L298N 四驱板 | 已有 | 能驱动四轮，但只有 2 路使能（**P0 瓶颈**） |
 | PCA9685 + 机械臂 | 已有 | 抓取执行，不参与定位；注意机械臂会遮挡激光 |
@@ -98,10 +98,10 @@ LM393、喇叭的引脚全部悬空。另外 12V 接在 L298N 的 `Vss(9)`、`Vs
 │  UART3 GPIO4/5  ── 115200 8N1 ─── STM32 USART3 (PB10/PB11)        │
 │  UART4 GPIO8/9  ── TTL UART ───── D6 激光雷达（5V 独立供电）        │
 │  I2C1  GPIO2/3  ── 3.3V I2C ───── ICM-20948（0x68）               │
-│  GPIO27         ◄── LM393 悬崖输出（3.3V 电平）                    │
+│  STM32 PB3/PB4  ◄── LM393 悬崖输出（状态随 $B 上报）               │
 │  USB3           ◄── Astra Pro 深度相机                            │
-│  USB2           ◄── USB 全向麦克风                                │
-│  蓝牙           ──► 蓝牙音箱                                      │
+│  USB2           ── 预留（原 USB 麦克风）                          │
+│  蓝牙           ──► NewMine / AM510 音箱/麦克风（二选一）         │
 └───────────────┬───────────────────────────────────────────────────┘
                 │ UART3（ASCII 命令 + $B 遥测）
 ┌───────────────▼───────────────────────────────────────────────────┐
@@ -133,10 +133,9 @@ LM393、喇叭的引脚全部悬空。另外 12V 接在 L298N 的 `Vss(9)`、`Vs
 | STM32 串口 | UART3 GPIO4 (TX) / GPIO5 (RX) | STM32 PB11 (RX) / PB10 (TX) | 3.3V TTL，交叉 | 115200 8N1（已配置） |
 | 激光雷达 | UART4 GPIO8 (TX) / GPIO9 (RX) | D6 的 RX / TX | 3.3V TTL，交叉 | 5V 独立供电，共地 |
 | IMU | I2C1 GPIO2 (SDA) / GPIO3 (SCL) | ICM-20948 SDA/SCL | 3.3V，0x68 | 4.7k 上拉，线尽量短 |
-| 悬崖 | GPIO27 | LM393 OUT | 3.3V 输入 | 需要多路时另占 GPIO |
+| 悬崖 | STM32 PB3/PB4 | LM393 OUT | 3.3V 输入 | 10ms 采样/30ms 消抖；`$B` 第 9 字段 cliff_mask |
 | 深度相机 | USB3 | Astra Pro | USB 2.0 设备 | 不要经 USB Hub，避免带宽/供电 |
-| 麦克风 | USB2 | USB 全向麦 | USB | 与相机分开口 |
-| 音箱 | 蓝牙 | 蓝牙音箱 | — | 2.4G Wi-Fi 与蓝牙会互相干扰 |
+| 音箱/麦克风 | 蓝牙 | NewMine / HONOR AM510（二选一） | — | A2DP 外放 + HFP 录音；2.4G Wi-Fi 与蓝牙会互相干扰 |
 
 ### 4.2 电平与接地方向
 
@@ -179,12 +178,12 @@ KERNEL=="ttyAMA3", SYMLINK+="rush_lidar"
 |---|---|---|
 | `edge_server/config/robot.yaml` → `base.port` | `/dev/ttyUSB0` | `/dev/rush_base`（UART3） |
 | `base.baud` | `9600` | `115200` ✅（固件 `BODY_UART_BAUD_RATE` 已同步） |
-| `imu.enabled` | `false` | `true`（IMU 接 Pi I2C1） |
+| `imu.enabled` | `true`（已启用） | 接 Pi I2C1；未接时节点每 2s 重试 |
 | `imu.i2c_bus` / `address` | `1` / `0x68` | 实物 SA0 接地为 `0x68`，接 3.3V 为 `0x69` |
 | `perception.camera.fx/fy/cx/cy` | `0` | 棋盘格标定后填入 |
 | `navigation.direct.holonomic` | `true` | 换 4 路独立驱动前先设 `false`（L298N 2 路使能做不了真全向） |
 
-启动：`ros2 launch edge_server robot_bringup.launch.py start_imu:=true`。
+启动：`ros2 launch edge_server robot_bringup.launch.py`（`start_imu` 默认 true）。
 
 ---
 
@@ -203,10 +202,10 @@ KERNEL=="ttyAMA3", SYMLINK+="rush_lidar"
 
 | 器件 | 悬空引脚 | 说明 |
 |---|---|---|
-| J1 树莓派 4（40 pin） | 全部 | UART3/UART4/I2C1/GPIO27/5V/3V3 都还没接 |
+| J1 树莓派 4（40 pin） | 全部 | UART3/UART4/I2C1/5V/3V3 都还没接；悬崖不占 Pi GPIO |
 | U1 ICM-20948 | SDA/SCL/INT/VDD/GND/… | 应接 Pi I2C1 GPIO2/3 |
 | SW1~SW4 旋转编码器 | A/B/C | 应接 STM32 PA0~PA7（软件四倍频） |
-| U2 LM393 ×2 | +/−/OUT | 悬崖传感器，输出接 Pi GPIO（建议 2~3 路） |
+| U2 LM393 ×2 | +/−/OUT | 悬崖传感器，OUT 接 STM32 PB3/PB4 |
 | 喇叭 | 1/2 | 与当前“音频已关闭”的固件一致，可删或保留 |
 
 ### 5.3 需要修正/确认的点
@@ -216,7 +215,7 @@ KERNEL=="ttyAMA3", SYMLINK+="rush_lidar"
    并把 `Vss` 接到模块的 5V（或注明由模块内部稳压供电），否则投板会烧逻辑。
 2. **编码器没有电平处理**：PA0~PA7 是 TC 类型（非 5V 容忍），原理图里缺少分压电阻/电平转换。
 3. **没有激光雷达、深度相机、电源转换、电池、急停、INA226 的符号**：这些目前还是外挂件，
-   建议在原理图里补连接器（至少把 Pi 的 UART4/I2C1/GPIO27 引到排针）。
+   建议在原理图里补连接器（至少把 Pi 的 UART4/I2C1 引到排针；悬崖已接 STM32 PB3/PB4）。
 4. **`ago.kicad_pcb` 只有 50 字节的空骨架**：PCB 还没开始布线，当前只能用转接板/杜邦线。
 5. **4 个编码器用了 `Device:RotaryEncoder` 符号**（A/B/C 三脚），实际 JGB37-520 是
    VCC/GND/A/B 四线，建议换成 4 pin 连接器符号，避免接线时接错电源。
@@ -238,7 +237,7 @@ KERNEL=="ttyAMA3", SYMLINK+="rush_lidar"
  ├─ 电机驱动 12V（L298N → 后续换 TB6612/BTS7960）
  ├─ 5V/5A UBEC → 树莓派 4B（单独一路，线径 ≥20AWG）
  │              ├→ D6 激光（5V，启动电流可达 1A 以上）
- │              └→ Astra Pro / USB 麦（经 Pi USB 时注意总电流）
+ │              └→ Astra Pro（经 Pi USB 时注意总电流）
  ├─ 6V/5A BEC → PCA9685 + MG996 舵机（独立，不与 Pi 共地噪声）
  └─ 3.3V 1A → STM32 / ICM-20948 / 编码器上拉（低噪声）
 ```
@@ -250,7 +249,7 @@ KERNEL=="ttyAMA3", SYMLINK+="rush_lidar"
 | Pi 4B | 3~5 W（0.6~1.0 A） | ~1.5 A | USB 外设另算 |
 | Astra Pro | ~2.5 W（0.5 A） | ~0.8 A | USB 供电 |
 | D6 激光 | ~2 W（0.4 A） | >1 A 启动 | 不要从 Pi 的 5V 排针取电 |
-| USB 麦 | ~0.5 W | 0.2 A | |
+| NewMine / AM510 音箱 | — | — | 蓝牙连接，自带电池或 USB 供电，不占 Pi 5V |
 | STM32 + 逻辑 | ~0.5 W | 0.1 A | |
 | **合计（5V 侧）** | **~8~10 W** | **~3.5 A** | **5V/3A 不够，建议 5V/5A** |
 
@@ -329,10 +328,15 @@ ICM-20948 已进入 NRND/替代周期。新设计可评估 ICM-42688-P + 磁力�
 
 ### 8.2 驱动与 `/scan`
 
-- 仓库里**没有**激光驱动，需另装 ROS2 驱动（如 `ldlidar_stl_ros2`，或厂家提供的 D6 ROS2 包），
-  输出 `/scan`、frame_id `laser_link`。
-- 若 D6 是自定义协议，需要写一个解析节点：串口读帧 → `sensor_msgs/LaserScan`。
-- `edge_server` 已默认订阅 `/scan`（`sensor_topics.laser`），无需改代码。
+- 仓库已内置 `edge_server/ros_nodes/lidar_node.py`：
+  - LD19/LD06/D6 47 字节协议（`0x54 0x2C`、CRC-8 0x4D）；
+  - 串口读取 → 360° 分箱 → `/scan`，frame_id `laser_link`；
+  - 可选发布 `base_link → laser_link` 静态 TF（`lidar.publish_tf`）；
+  - 串口断线自动重连，`/lidar/status` 1 Hz 输出包数/CRC/扫描状态；
+  - `robot_bringup.launch.py` 默认 `start_lidar:=true`，配置见 `edge_server/config/robot.yaml` 的 `lidar.*`。
+- 若 D6 使用厂家自定义协议而不是 LD19，请按实际帧格式改
+  `edge_server/core/lidar.py` 的 `parse_packet()`。
+- `edge_server` 其它节点已订阅 `/scan`（`sensor_topics.laser`），无需改代码。
 
 ### 8.3 安装与 TF
 
@@ -365,7 +369,7 @@ ros2 run tf2_ros tf2_echo base_link laser_link
 |---|---|
 | USB | Astra Pro 是 USB 2.0 设备；插 Pi 4 的 **USB 3.0 口**（兼容 2.0，供电更足），不要经 Hub |
 | 带宽 | 深度 640×480@30 + RGB 同开接近 USB 2.0 上限，降帧率/分辨率更稳 |
-| 驱动 | Astra Pro 属老款结构光，官方 ROS2 `orbbec_camera` 主要覆盖 Astra 2 / Pro Plus / Gemini 系列；**先确认能出 `/camera/depth/image_raw`**，否则换 Astra Pro Plus / Gemini 2 / RealSense D435i |
+| 驱动 | 已安装 `ros-humble-orbbec-camera`，用 `launch/astra.launch.py` 启动；**先确认能出 `/camera/color/image_raw`、`/camera/depth/image_raw`**，否则换 Astra Pro Plus / Gemini 2 / RealSense D435i |
 | 供电 | 相机峰值 ~0.8A，计入 5V 预算 |
 
 ### 9.3 标定
@@ -422,7 +426,7 @@ JGB37-520 霍尔编码器：VCC、GND、A、B。
 ### 11.1 已购/已有
 
 树莓派 4B、STM32F103C8T6、D6 激光、ICM-20948、Astra Pro、LM393 悬崖、底盘 + JGB37-520×4、
-L298N、12V 3600mAh 电池、12V→5V 3A / 3.3V 1A、USB 麦、蓝牙音箱。
+L298N、12V 3600mAh 电池、12V→5V 3A / 3.3V 1A、NewMine / HONOR AM510 蓝牙音箱/麦克风（二选一）。
 
 ### 11.2 还要买（P0 优先）
 
@@ -495,7 +499,7 @@ L298N、12V 3600mAh 电池、12V→5V 3A / 3.3V 1A、USB 麦、蓝牙音箱。
 | 地图 | `/map`、`/center/map_info`、`/center/frontiers` | `map_manager_node` |
 | 定位 | `/amcl_pose`、TF、`/center/pose`、`/center/localization_status` | `localization_node` |
 | 导航 | `/center/navigate_to`、`/nav/cmd_vel` | `navigation_node` |
-| 目标 | `/camera/image_raw`、`/center/target_detections` | `target_detector_node` |
+| 目标 | `/camera/color/image_raw`、`/center/target_detections` | `target_detector_node` |
 | 搜索 | `/center/search_object`、`/center/explore` | `object_search_node` |
 | 速度 | `/cmd_vel_raw`、`/nav/cmd_vel`、`/reverse/cmd_vel`、`/safety/cmd_vel_override` → `/cmd_vel` | `velocity_mux_node` |
 | 任务 | `/center/execute_task`、`/center/execute_mission` | `task_manager_node` |
@@ -507,4 +511,4 @@ ros2 launch edge_server robot_bringup.launch.py start_imu:=true
 # 激光驱动、EKF、slam_toolbox、Nav2 另行 launch（见 software/edge_server/launch/）
 ```
 
-详细软件设计见 [`software/edge_server/DESIGN.md`](../software/edge_server/DESIGN.md)。
+详细软件设计见 [`software/edge_server/docs/design/DESIGN.md`](../software/edge_server/docs/design/DESIGN.md)。

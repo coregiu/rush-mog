@@ -5,7 +5,8 @@
 
 约定：
 - STM32 USART3 115200 8N1，ASCII 命令以 ``\\n`` 结尾；
-- 遥测行 ``$B,<seq>,<uptime_ms>,<fl>,<fr>,<rl>,<rr>,<distance_mm>``；
+- 遥测行 ``$B,<seq>,<uptime_ms>,<fl>,<fr>,<rl>,<rr>,<distance_mm>[,<cliff_mask>]``；
+  cliff_mask 为 0~3 按位，bit0=左前、bit1=右前；旧固件没有第 9 字段时按“未知”处理。
 - 按钮/摇杆命令沿用原网页协议（见 ``software/api.yaml``）。
 """
 
@@ -36,6 +37,8 @@ class BodyTelemetry:
     uptime_ms: int = 0
     wheel_mm_s: List[int] = field(default_factory=lambda: [0, 0, 0, 0])
     distance_mm: int = -1
+    cliff_mask: int = 0
+    cliff_available: bool = False
     received_at: float = 0.0
 
     def to_dict(self, now: Optional[float] = None) -> dict:
@@ -45,6 +48,25 @@ class BodyTelemetry:
             int(max(0.0, moment - self.received_at) * 1000.0) if valid else -1
         )
         stale = (not valid) or age_ms > int(BODY_FRESH_SEC * 1000.0)
+        mask = int(self.cliff_mask) if (valid and self.cliff_available) else 0
+        cliff = {
+            "available": bool(valid and self.cliff_available),
+            "mask": mask,
+            "left": bool(mask & 0x01),
+            "right": bool(mask & 0x02),
+            "triggered": bool(mask & 0x03),
+            "state": (
+                "left"
+                if mask == 0x01
+                else "right"
+                if mask == 0x02
+                else "both"
+                if mask == 0x03
+                else "clear"
+                if valid and self.cliff_available
+                else "unknown"
+            ),
+        }
         return {
             "valid": valid,
             "stale": stale,
@@ -55,6 +77,12 @@ class BodyTelemetry:
             "age_ms": age_ms,
             "wheel_mm_s": [int(value) for value in self.wheel_mm_s],
             "distance_mm": int(self.distance_mm) if valid else -1,
+            "cliff": cliff,
+            "cliff_available": cliff["available"],
+            "cliff_mask": cliff["mask"],
+            "cliff_left": cliff["left"],
+            "cliff_right": cliff["right"],
+            "cliff_triggered": cliff["triggered"],
         }
 
 
@@ -66,18 +94,21 @@ def parse_body_line(
     if not text.startswith("$B,"):
         return None
     parts = text.split(",")
-    if len(parts) != 8:
+    if len(parts) not in (8, 9):
         return None
     try:
         seq = int(parts[1])
         uptime_ms = int(parts[2])
         wheels = [int(parts[3]), int(parts[4]), int(parts[5]), int(parts[6])]
         distance_mm = int(parts[7])
+        cliff_mask = int(parts[8]) if len(parts) == 9 else 0
     except (TypeError, ValueError):
         return None
     if seq < 0 or uptime_ms < 0 or distance_mm < 0 or distance_mm > 2_000_000_000:
         return None
     if any(value < -MAX_WHEEL_MM_S or value > MAX_WHEEL_MM_S for value in wheels):
+        return None
+    if cliff_mask < 0 or cliff_mask > 3:
         return None
     return BodyTelemetry(
         valid=True,
@@ -85,6 +116,8 @@ def parse_body_line(
         uptime_ms=uptime_ms,
         wheel_mm_s=wheels,
         distance_mm=distance_mm,
+        cliff_mask=cliff_mask,
+        cliff_available=len(parts) == 9,
         received_at=time.monotonic() if now is None else float(now),
     )
 

@@ -120,6 +120,50 @@ class YoloDetector:
         return detections
 
 
+class YoloWorldDetector:
+    """开放词表检测（YOLO-World），用于“找拖鞋”这类 COCO 之外的类别。
+
+    需要 ``ultralytics`` 与 ``yolov8s-worldv2.pt`` 一类权重；启动时通过
+    ``set_classes(labels)`` 把 ``perception.open_vocab_labels`` 注册为可检测类别。
+    未安装/未下载权重时 ``make_detector`` 会回退到颜色检测器，不影响其他功能。
+    """
+
+    def __init__(self, model_path: str, labels=None, conf: float = 0.35):
+        from ultralytics import YOLOWorld  # pragma: no cover - 可选依赖
+
+        self.model = YOLOWorld(model_path)
+        self.allowed = [str(item) for item in (labels or []) if str(item).strip()]
+        if not self.allowed:
+            raise ValueError("yolo_world 需要 perception.open_vocab_labels")
+        self.model.set_classes(self.allowed)
+        self.conf = float(conf)
+
+    def detect(self, image_bgr) -> List[Detection]:  # pragma: no cover
+        height, width = image_bgr.shape[:2]
+        results = self.model.predict(image_bgr, conf=self.conf, verbose=False)
+        detections: List[Detection] = []
+        for result in results:
+            names = result.names or {}
+            for box in result.boxes:
+                cls_id = int(box.cls[0])
+                label = names.get(cls_id, str(cls_id))
+                x0, y0, x1, y1 = [float(v) for v in box.xyxy[0].tolist()]
+                detections.append(
+                    Detection(
+                        label=str(label),
+                        confidence=float(box.conf[0]),
+                        bbox=(
+                            max(0.0, x0 / width),
+                            max(0.0, y0 / height),
+                            min(1.0, x1 / width),
+                            min(1.0, y1 / height),
+                        ),
+                    )
+                )
+        detections.sort(key=lambda d: d.confidence, reverse=True)
+        return detections
+
+
 def make_detector(cfg: Optional[dict], logger=None):
     cfg = cfg or {}
     kind = str(cfg.get("detector", "color")).lower()
@@ -136,6 +180,22 @@ def make_detector(cfg: Optional[dict], logger=None):
         except Exception as exc:  # noqa: BLE001
             if logger is not None:
                 logger.warning(f"YOLO unavailable ({exc}); falling back to color detector")
+            return ColorBlobDetector(targets)
+    if kind in ("yolo_world", "yoloworld", "world"):
+        labels = cfg.get("open_vocab_labels") or cfg.get("allowed_labels")
+        if not labels:
+            labels = list(targets.keys())
+        try:
+            return YoloWorldDetector(
+                str(cfg.get("model_path", "")),
+                labels=labels,
+                conf=float(cfg.get("min_confidence", 0.35)),
+            )
+        except Exception as exc:  # noqa: BLE001
+            if logger is not None:
+                logger.warning(
+                    f"YOLO-World unavailable ({exc}); falling back to color detector"
+                )
             return ColorBlobDetector(targets)
     return ColorBlobDetector(targets)
 

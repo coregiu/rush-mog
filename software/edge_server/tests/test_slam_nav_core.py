@@ -24,6 +24,7 @@ from edge_server.core.state_machine import State, TaskStateMachine
 from edge_server.core.target_localizer import (
     CameraModel,
     TargetLocalizer,
+    depth_distance,
     approach_pose,
     lidar_distance,
 )
@@ -195,6 +196,33 @@ def test_bbox_height_distance_and_approach():
     assert goal.x == pytest.approx(1.4)
     assert goal.y == pytest.approx(0.0)
     assert goal.yaw == pytest.approx(0.0)
+
+
+def test_depth_localization_and_camera_info():
+    depth = np.full((480, 640), 2000, dtype=np.uint16)
+    loc = TargetLocalizer(
+        camera_cfg={"width": 640, "height": 480, "hfov_deg": 60.0},
+        targets_cfg={"cup": {"real_height_m": 0.12}},
+        prefer_depth=True,
+    )
+    est = loc.estimate(
+        "cup",
+        0.9,
+        (0.45, 0.40, 0.55, 0.60),
+        depth=depth,
+        depth_scale=0.001,
+    )
+    assert est.distance_source == "depth"
+    assert est.distance_m == pytest.approx(2.0, abs=0.01)
+    assert est.position_frame == "base_link"
+    assert est.x == pytest.approx(2.0, abs=0.2)
+
+    empty = np.zeros((480, 640), dtype=np.uint16)
+    assert depth_distance(empty, (0.45, 0.4, 0.55, 0.6)) == 0.0
+
+    loc.set_camera_info(1280, 720, 900.0, 900.0, 640.0, 360.0)
+    assert loc.camera.width == 1280
+    assert loc.camera.fx == pytest.approx(900.0)
 
 
 def test_target_tracker_iou_and_best():
