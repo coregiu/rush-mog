@@ -1408,6 +1408,81 @@ paths:
               schema:
                 $ref: '#/components/schemas/CenterErrorResponse'
 
+  /api/scenario:
+    get:
+      tags: [Edge Server]
+      summary: 通用场景执行状态
+      description: |
+        返回 `/center/scenario_status` 最近一帧，以及通用场景输入的在线状态和
+        最近一次命令的 `last_source` / `last_dispatch`。与 `/api/voice` 返回同一份
+        场景状态，供 dashboard「实时监控信息」使用。
+      operationId: edgeScenarioStatus
+      responses:
+        '200':
+          description: 场景状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgeVoiceStatus'
+        '503':
+          description: 场景执行接口未启用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
+  /api/scenario/execute:
+    post:
+      tags: [Edge Server]
+      summary: 执行文本场景指令
+      description: |
+        通用场景执行接口的文本适配器。发布 `/edge/scenario_command`（JSON
+        `{text, source, request_id}`），由 `voice_scenario_node` 统一解析：
+        找物/取消进入 `FindObjectScenario`；建图/探索/导航/回家转交
+        `/center/mission_request`。支持 raw `text/plain`、form `text=...`、
+        JSON `{"text": "...", "source": "text"}`。
+      operationId: edgeScenarioExecute
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+              example: 找拖鞋
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: {type: string, example: 找拖鞋}
+                source: {type: string, enum: [text, voice], default: text}
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: {type: string, example: 找拖鞋}
+                source: {type: string, enum: [text, voice], default: text}
+      responses:
+        '200':
+          description: 指令已发送
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EdgeVoiceCommandResponse'
+        '400':
+          description: 文本为空或过长
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+        '503':
+          description: 场景执行接口未启用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CenterErrorResponse'
+
   /api/modules/report:
     post:
       tags: [Edge Server]

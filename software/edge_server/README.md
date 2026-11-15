@@ -40,7 +40,7 @@
 | 项目 | 结果 |
 |---|---|
 | `colcon build --packages-select custom_msgs edge_server` | 通过 |
-| `pytest tests -q` | 179 passed（含 26 项远程 VLA/握手 + 9 项场景 + 1 项 `/api/voice`） |
+| `pytest tests -q` | 180 passed（含 26 项远程 VLA/握手 + 9 项场景 + 2 项场景 HTTP） |
 | `tests/end_to_end_check.py` | 7/7 passed |
 | `tests/slam_nav_check.py` + `fake_slam_robot.py` | 6/6 passed |
 | `tests/voice_scenario_check.py` + `fake_slam_robot.py` | 3/3 passed（找到/取消/状态链） |
@@ -282,7 +282,8 @@ ros2 launch edge_server ekf.launch.py
 | `/body/audio_status` | `std_msgs/String` | 发布（音箱状态 JSON，1 Hz；健康检查 speaker） |
 | `/body/mic_status` | `std_msgs/String` | 发布（麦克风状态 JSON，1 Hz；健康检查 microphone） |
 | `/body/power_status` | `std_msgs/String` | 发布（树莓派电源状态 JSON，1 Hz；健康检查 power） |
-| `/edge/voice_command` | `std_msgs/String` | 订阅（语音文本 -> 场景编排层；HTTP `/api/voice` 与外部 ASR 共用） |
+| `/edge/scenario_command` | `std_msgs/String` | 订阅（通用场景指令 JSON `{text, source, request_id}`；文本/语音统一入口） |
+| `/edge/voice_command` | `std_msgs/String` | 订阅（兼容：语音文本 -> 场景编排层） |
 | `/center/scenario_status` | `std_msgs/String` | 发布（场景状态 JSON，1 Hz，TRANSIENT_LOCAL；`GET /api/voice` 数据源） |
 | `/battery_state` | `sensor_msgs/BatteryState` | 订阅 |
 | `/base/status` | `std_msgs/String` | 发布/订阅（STM32 遥测 JSON） |
@@ -418,8 +419,10 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
 | `POST /api/microphone/{start,stop,play,volume,list}` | 开始/停止录音、回放、音量、录音列表 |
 | `GET /api/microphone/recordings[/{name}]` | 录音列表 / 下载 WAV |
 | `GET /api/power` | 树莓派欠压/降频/温度/核心电压状态 |
-| `POST /api/voice` | 语音文本（raw/form/JSON `text`）→ `/edge/voice_command`；如“帮我找一下拖鞋” |
-| `GET /api/voice` | 语音场景状态快照 + `/center/scenario_status` 最近一帧 |
+| `POST /api/voice` | 语音输入适配器（raw/form/JSON）→ 通用场景执行接口 |
+| `GET /api/voice` | 场景状态快照 + `/center/scenario_status` 最近一帧 |
+| `POST /api/scenario/execute` | 文本场景指令（JSON/form/raw）→ `/edge/scenario_command` |
+| `GET /api/scenario` | 通用场景状态（含 `last_source`/`last_dispatch`） |
 | `GET /api/modules` | Edge + 同机 ROS 子系统 + 外部模块（CENTER） |
 | `GET/POST /api/modules/edge/params` | Edge 参数（运动保活、图传帧率） |
 | `GET /api/modules/{id}/health|params` | 代理 ROS（同机）/CENTER（外部） |
@@ -704,16 +707,22 @@ curl -X POST -H 'Content-Type: text/plain; charset=utf-8' \
 # 3) 任意 ASR 节点/脚本（离线 ASR 也可）：
 ros2 topic pub --once /edge/voice_command std_msgs/msg/String \
   "{data: '帮我找一下拖鞋'}"
+
+# 4) 文本场景指令（dashboard「实时监控信息」输入框同一接口）：
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"text":"找拖鞋","source":"text"}' \
+  http://192.168.3.26/api/scenario/execute
 ```
 
 流程：
 
 ```text
-/api/voice 或 /edge/voice_command
-  -> voice_scenario_node（语音解析、状态机、播报）
-  -> /center/search_object（探索/确认/接近）
+/api/voice、/api/scenario/execute 或 /edge/scenario_command
+  -> voice_scenario_node（统一解析、状态机、播报）
+     ├─ 找物/取消 -> /center/search_object（探索/确认/接近）
+     └─ 建图/探索/导航/回家 -> /center/mission_request -> task_manager_node
   -> /body/say（TTS）
-  -> /center/scenario_status -> GET /api/voice（网页状态）
+  -> /center/scenario_status -> GET /api/voice 或 /api/scenario（网页状态）
 ```
 
 **可用说法：**
@@ -724,6 +733,7 @@ ros2 topic pub --once /edge/voice_command std_msgs/msg/String \
 | `别找了` / `停止寻找` / `取消搜索` | 取消当前搜索并播报 |
 | 搜索中再说另一个目标 | 取消旧搜索，切换到新目标 |
 | 急停 | 场景节点取消搜索并播报“已急停，停止寻找” |
+| `去厨房` / `建图` / `探索` / `回家` | 转交 `task_manager` 执行对应 mission |
 
 **播报示例：**“好的，我去找拖鞋。”→“好像看到拖鞋了，我确认一下。”→
 “确认是拖鞋，正在靠近。”→“找到拖鞋了，就在前面大约60厘米。”
@@ -752,7 +762,9 @@ ros2 topic pub --once /edge/voice_command std_msgs/msg/String \
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
-| `voice_topic` | `/edge/voice_command` | 语音文本输入 |
+| `voice_topic` | `/edge/voice_command` | 兼容语音输入 |
+| `command_topic` | `/edge/scenario_command` | 通用场景输入（文本/语音） |
+| `mission_request_topic` | `/center/mission_request` | 非找物 mission 转交任务管理 |
 | `search_action` | `/center/search_object` | 调用的搜索能力 |
 | `say_topic` | `/body/say` | TTS 输出 |
 | `status_topic` | `/center/scenario_status` | 场景状态 JSON |
@@ -845,7 +857,7 @@ ros2 topic echo /center/scenario_status
 ```bash
 cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 179 passed
+# 180 passed
 ```
 
 单独跑健康检查（不依赖 ROS 图）：

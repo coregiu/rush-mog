@@ -380,7 +380,9 @@ edge_server:
   #       -> /center/search_object(L2) -> 探索/导航/检测/接近 -> /body/say
   # 说明：target_label 必须与检测器输出一致；拖鞋的 canonical label 是 slipper。
   scenario:
-    voice_topic: "/edge/voice_command"
+    voice_topic: "/edge/voice_command"          # 兼容：外部 ASR/旧接口
+    command_topic: "/edge/scenario_command"  # 通用场景指令（JSON: text/source/request_id）
+    mission_request_topic: "/center/mission_request"
     search_action: "/center/search_object"
     say_topic: "/body/say"
     status_topic: "/center/scenario_status"

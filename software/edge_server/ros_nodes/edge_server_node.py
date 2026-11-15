@@ -262,6 +262,9 @@ class EdgeServerNode(Node):
         self.scenario_voice_topic = str(
             scenario_cfg.get("voice_topic", "/edge/voice_command")
         )
+        self.scenario_command_topic = str(
+            scenario_cfg.get("command_topic", "/edge/scenario_command")
+        )
         self.scenario_status_topic = str(
             scenario_cfg.get("status_topic", "/center/scenario_status")
         )
@@ -354,6 +357,11 @@ class EdgeServerNode(Node):
         self.pub_voice_command = self.create_publisher(
             String,
             self.scenario_voice_topic,
+            10,
+        )
+        self.pub_scenario_command = self.create_publisher(
+            String,
+            self.scenario_command_topic,
             10,
         )
         voice_status_qos = QoSProfile(
@@ -761,34 +769,62 @@ class EdgeServerNode(Node):
             )
 
     def handle_voice(self, text: str) -> dict:
-        """``POST /api/voice``：文本 -> ``/edge/voice_command``。"""
+        """``POST /api/voice``：语音输入适配器 -> 通用场景执行接口。"""
+        return self._execute_scenario_command(text, "voice")
+
+    def handle_scenario_command(self, text: str, source: str = "text") -> dict:
+        """``POST /api/scenario/execute``：文本输入适配器 -> 通用场景执行接口。"""
+        return self._execute_scenario_command(text, source)
+
+    def _execute_scenario_command(self, text: str, source: str) -> dict:
+        """发布通用场景指令；``source`` 只用于区分 voice/text 入口。"""
         cleaned = str(text or "").strip()
         if not cleaned:
-            raise ValueError("语音文本为空")
+            raise ValueError("场景指令为空")
         if len(cleaned) > 200:
-            raise ValueError("语音文本过长（>200）")
+            raise ValueError("场景指令过长（>200）")
+        normalized_source = (
+            "voice" if str(source or "").strip().lower() == "voice" else "text"
+        )
+        request_id = f"scenario_{normalized_source}_{int(time.time() * 1000)}"
+        payload = {
+            "text": cleaned,
+            "source": normalized_source,
+            "request_id": request_id,
+        }
+        generic_subs = int(self.pub_scenario_command.get_subscription_count())
+        legacy_subs = int(self.pub_voice_command.get_subscription_count())
         try:
-            self.pub_voice_command.publish(String(data=cleaned))
+            # 新场景节点订阅通用 topic；老版本只订阅 voice topic 时自动降级。
+            if generic_subs <= 0 and legacy_subs > 0:
+                self.pub_voice_command.publish(String(data=cleaned))
+                channel = self.scenario_voice_topic
+            else:
+                self.pub_scenario_command.publish(
+                    String(data=json.dumps(payload, ensure_ascii=False))
+                )
+                channel = self.scenario_command_topic
         except Exception as exc:  # noqa: BLE001
-            raise RuntimeError(f"发布语音指令失败: {exc}") from exc
+            raise RuntimeError(f"发布场景指令失败: {exc}") from exc
         with self._voice_lock:
             self._voice_last_text = cleaned
-            payload = dict(self._voice_status) if self._voice_status else None
+            status_payload = dict(self._voice_status) if self._voice_status else None
             status_age = (
                 time.monotonic() - self._voice_status_mono
                 if self._voice_status is not None
                 else None
             )
-        subscribers = int(self.pub_voice_command.get_subscription_count())
+        subscribers = max(generic_subs, legacy_subs)
         scenario_online = subscribers > 0 or (
             status_age is not None and status_age <= 5.0
         )
-        message = "语音指令已发送"
+        label = "语音指令" if normalized_source == "voice" else "场景指令"
+        message = f"{label}已发送"
         if not scenario_online:
-            message = "语音指令已发送，但场景节点未在线（指令可能未处理）"
+            message = f"{label}已发送，但场景节点未在线（指令可能未处理）"
         self._record_event(
-            "voice",
-            f"语音指令: {cleaned[:60]}",
+            "voice" if normalized_source == "voice" else "scenario",
+            f"{label}: {cleaned[:60]}",
             source="api",
             status="ok" if scenario_online else "warn",
         )
@@ -796,10 +832,14 @@ class EdgeServerNode(Node):
             "ok": True,
             "accepted": True,
             "text": cleaned,
+            "source": normalized_source,
+            "request_id": request_id,
+            "interface": "scenario",
+            "channel": channel,
             "message": message,
             "scenario_online": scenario_online,
             "subscribers": subscribers,
-            "scenario": payload,
+            "scenario": status_payload,
         }
 
     def voice_status(self) -> dict:
@@ -818,7 +858,9 @@ class EdgeServerNode(Node):
         )
         return {
             "ok": True,
+            "interface": "voice",
             "topic": self.scenario_voice_topic,
+            "command_topic": self.scenario_command_topic,
             "status_topic": self.scenario_status_topic,
             "scenario_online": scenario_online,
             "subscribers": subscribers,
@@ -826,6 +868,13 @@ class EdgeServerNode(Node):
             "age_ms": int(status_age * 1000.0) if status_age is not None else -1,
             "scenario": payload,
         }
+
+    def scenario_status(self) -> dict:
+        """``GET /api/scenario``：通用场景接口状态（含语音兼容 topic）。"""
+        payload = self.voice_status()
+        payload["interface"] = "scenario"
+        payload["voice_topic"] = self.scenario_voice_topic
+        return payload
 
     def on_speaker_timer(self) -> None:
         # 未启用时不必伪造在线状态；health monitor 会报 unknown（可选设备）。

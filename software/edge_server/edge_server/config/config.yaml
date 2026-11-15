@@ -58,7 +58,9 @@ edge_server:
   # 语音找东西场景（L3：voice_scenario_node）
   # 只负责“听懂 -> 调搜索能力 -> 播报”，具体探索/导航/检测在能力层。
   scenario:
-    voice_topic: "/edge/voice_command"
+    voice_topic: "/edge/voice_command"          # 兼容：外部 ASR/旧接口
+    command_topic: "/edge/scenario_command"  # 通用场景指令（JSON: text/source/request_id）
+    mission_request_topic: "/center/mission_request"
     search_action: "/center/search_object"
     say_topic: "/body/say"
     status_topic: "/center/scenario_status"

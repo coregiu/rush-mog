@@ -36,7 +36,7 @@
 | 代码 | `software/edge_server`（ament_python，ROS 2 Humble） |
 | 消息/动作 | `software/custom_msgs`（v0.2.0） |
 | 构建 | `colcon build --packages-select custom_msgs edge_server` 通过 |
-| 单元测试 | `pytest tests -q`：179 passed（含远程 VLA/握手 26 项、语音场景 9 项、`/api/voice` 1 项） |
+| 单元测试 | `pytest tests -q`：180 passed（含远程 VLA/握手 26 项、语音场景 9 项、`/api/voice` + `/api/scenario` 2 项） |
 | 健康检查 | `test_health_monitor.py` + `test_health_http.py`：29 passed；ROS/HTTP 手工联调通过 |
 | VLA/安全端到端 | `end_to_end_check.py`：7/7 passed |
 | SLAM/导航/搜索联调 | `slam_nav_check.py` + `fake_slam_robot.py`：6/6 passed |
@@ -757,9 +757,16 @@ health_monitor_node
 
 接口契约、JSON 字段、设备反馈协议和 Edge Server/dashboard 接入示例见[健康检查契约](../HEALTHCHECK.md)。
 
-### 5.15 语音找东西场景（`voice_scenario_node` + `core/scenarios/`）
+### 5.15 场景执行与语音找东西（`voice_scenario_node` + `core/scenarios/`）
 
 在能力层之上增加 L3 场景层，避免把“语音交互 + 搜索 + 播报”写进 `object_search_node` 或 `task_manager_node`。分层机制见 §2.3。
+
+**通用场景执行接口（v3）：** 语音和文本是同一个执行器的两种输入适配器：
+
+- **文本入口**：`POST /api/scenario/execute`（JSON `{text, source}` / form / raw）→ `edge_server_node` 发布 `/edge/scenario_command`（JSON `{text, source, request_id}`）；
+- **语音入口**：`POST /api/voice` 与外部 `/edge/voice_command` → 同一个场景节点，`source=voice`；`/api/voice` 保留兼容；
+- **统一执行**：`voice_scenario_node` 解析文本；找物/取消走 `FindObjectScenario`；建图/探索/导航/回家等 mission 转交 `/center/mission_request`（`TaskRequest`）由 `task_manager_node` 执行；
+- **统一状态**：`GET /api/scenario` 返回场景状态及 `last_command` / `last_source` / `last_dispatch`；`GET /api/voice` 继续可用。
 
 **纯逻辑：**
 
@@ -788,18 +795,20 @@ IDLE ─────────────────────────
 
 | 事件 | 来源 | 场景处理 |
 |---|---|---|
-| 语音文本 | `/edge/voice_command` | 解析 find/cancel/ignore |
+| 场景文本 | `/edge/scenario_command`（文本/语音统一） | 解析 find/cancel → 场景状态机；mission → task_manager |
 | 搜索进度 | `/center/search_status` | 更新 detail；里程碑播报 |
 | 搜索结果 | `SearchObject` Action Result | 成功/失败播报，终止状态 |
 | 动作不可用 | ActionClient 等待超时 | 播报“寻找功能未就绪” |
 | 急停 | `/center/safety_state` | 取消搜索 + 播报 |
-| 新目标 | `/edge/voice_command` | 取消旧搜索，启动新搜索 |
+| 新目标 | `/edge/scenario_command` | 取消旧搜索，启动新搜索 |
 
 **ROS 适配（`voice_scenario_node`）：**
 
 | 方向 | 接口 | 说明 |
 |---|---|---|
-| 订阅 | `/edge/voice_command` | 网页/HTTP/外部 ASR 的文本 |
+| 订阅 | `/edge/scenario_command` | 通用场景文本（`source=text/voice`） |
+| 订阅 | `/edge/voice_command` | 兼容外部 ASR / 旧接口 |
+| 发布 | `/center/mission_request` | 非找物 mission 转交 `task_manager` |
 | 订阅 | `/center/search_status` | 搜索状态/进度，用于确认/接近里程碑播报 |
 | 订阅 | `/center/safety_state` | 急停取消 |
 | 订阅 | `/center/pose` | 计算找到目标后的距离播报 |
@@ -809,8 +818,10 @@ IDLE ─────────────────────────
 
 **HTTP 与网页：**
 
-- `POST /api/voice`：raw 文本 / form `text=...` / JSON `{"text": "..."}`；`edge_server_node` 发布 `/edge/voice_command`，并缓存 `/center/scenario_status` 供 `GET /api/voice`；
-- 网页 `audio.js` 用 Web Speech API 识别；命中“找/在哪”走场景接口，命中“别找了/停止寻找”取消并同时停车；普通方向/按键指令仍走原 `/cmd`。
+- `POST /api/voice`：raw/form/JSON → 通用场景接口（`source=voice`）；`POST /api/scenario/execute` → 同一接口（`source=text`），发布 `/edge/scenario_command`；
+- `GET /api/voice` / `GET /api/scenario`：返回 `/center/scenario_status` 最近一帧；
+- 网页 `audio.js` 用 Web Speech API 识别；命中“找/在哪”走场景接口，命中“别找了/停止寻找”取消并同时停车；普通方向/按键指令仍走 `/cmd`；
+- dashboard「实时监控信息」提供文本场景指令输入框，提交到 `/api/scenario/execute`。
 
 **配置：** `scenario.*`（voice/search/say/status topic、时长、standoff、播报开关/间隔）；`instruction.object_labels` 维护 canonical label 与中文别名；拖鞋 canonical label 为 `slipper`，需要 YOLO-World/自定义 YOLO 输出同名 label。
 
@@ -1008,7 +1019,8 @@ voice_scenario_node
 | `/body/cliff_status` | `std_msgs/String` | 发布 | 悬崖左右/触发状态 JSON（1 Hz） |
 | `/arm/joint_states` | `sensor_msgs/JointState` | 订阅 | 机械臂回读（待接入） |
 | `/body/say` | `std_msgs/String` | 订阅 | 文本 → TTS → 蓝牙音箱 |
-| `/edge/voice_command` | `std_msgs/String` | 订阅 | 语音文本 → 场景编排层；HTTP `/api/voice` 与外部 ASR 共用 |
+| `/edge/scenario_command` | `std_msgs/String` | 订阅 | 通用场景指令 JSON `{text, source, request_id}`；文本/语音统一入口 |
+| `/edge/voice_command` | `std_msgs/String` | 订阅 | 兼容：语音文本 → 场景编排层；外部 ASR/旧接口 |
 | `/center/scenario_status` | `std_msgs/String` | 发布 | 场景状态 JSON（1 Hz，TRANSIENT_LOCAL）；`GET /api/voice` 数据源 |
 | `/body/audio_status` | `std_msgs/String` | 发布 | 音箱状态 JSON（1 Hz） |
 | `/body/mic_status` | `std_msgs/String` | 发布 | HFP 麦克风状态 JSON（1 Hz） |
@@ -1065,7 +1077,9 @@ voice_scenario_node
 | POST | `/api/microphone/{start,stop,play,volume,list}` | 录音/回放/音量/列表 |
 | GET | `/api/microphone/recordings[/{name}]` | 录音列表/WAV 下载 |
 | GET | `/api/power` | 树莓派欠压/降频/温度/核心电压状态 |
-| POST | `/api/voice` | 语音文本 → `/edge/voice_command`（raw/form/JSON） |
+| POST | `/api/voice` | 语音输入适配器 → 通用场景接口（raw/form/JSON） |
+| GET | `/api/scenario` | 通用场景执行状态（含 `last_source`/`last_dispatch`） |
+| POST | `/api/scenario/execute` | 文本输入适配器 → `/edge/scenario_command`（JSON/form/raw） |
 | GET | `/api/voice` | 语音场景状态 + `/center/scenario_status` |
 | GET | `/api/modules` | 模块注册表 |
 | GET | `/api/modules/edge` | Edge 模块详情 |
@@ -1390,7 +1404,7 @@ python3 tests/slam_nav_check.py          # 6/6
 ```bash
 cd software/edge_server
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest tests -q
-# 179 passed
+# 180 passed
 ```
 
 健康检查专项：

@@ -17,6 +17,8 @@ const API = {
   edgeParams: '/api/modules/edge/params',
   body: '/api/body',
   radar: '/api/radar',
+  scenario: '/api/scenario/execute',
+  scenarioStatus: '/api/scenario',
   speaker: '/api/speaker',
   speakerAction: (action) => `/api/speaker/${encodeURIComponent(action)}`,
   microphone: '/api/microphone',
@@ -73,6 +75,8 @@ const EVENT_KIND_LABELS = {
   safety: 'SAFE',
   cliff: 'CLIFF',
   error: 'ERR',
+  voice: 'VOICE',
+  scenario: 'SCEN',
 };
 
 const BODY_MOTORS = [
@@ -137,6 +141,11 @@ const state = {
   radarError: '',
   radarPolling: false,
   radarTimer: null,
+  scenario: null,
+  scenarioError: '',
+  scenarioSending: false,
+  scenarioPolling: false,
+  scenarioTimer: null,
   videoReady: false,
   power: null,
   powerPolling: false,
@@ -872,6 +881,7 @@ function renderAll() {
   renderTelemetry();
   renderOpsCurrent();
   renderOpsEvents();
+  renderScenarioStatus();
   renderRadar();
   renderSyncTime();
 }
@@ -1824,6 +1834,121 @@ function initRadarCanvas() {
   }
 }
 
+
+/* --------------------------------------------------------- scenario exec */
+function setScenarioResult(text, kind = '') {
+  const el = $('#scenario-result');
+  if (!el) return;
+  el.textContent = text;
+  el.className = `monitor-tag${kind ? ` is-${kind}` : ''}`;
+}
+
+function renderScenarioStatus() {
+  const payload = state.scenario;
+  if (state.scenarioSending) return;
+  if (state.scenarioError) {
+    setScenarioResult('离线', 'error');
+    return;
+  }
+  if (!payload) {
+    setScenarioResult('待执行');
+    return;
+  }
+  const online = payload.scenario_online !== false;
+  const scenario = payload.scenario || {};
+  const stateName = String(scenario.state || '');
+  const target = scenario.display_name || scenario.target_label || '';
+  const dispatch = String(scenario.last_dispatch || '');
+  const result = $('#scenario-result');
+  if (!online) {
+    setScenarioResult('节点离线', 'warn');
+  } else if (stateName === 'searching') {
+    setScenarioResult(`搜索中${target ? ` · ${target}` : ''}`, 'ok');
+  } else if (stateName === 'succeeded') {
+    setScenarioResult(`已找到${target ? ` · ${target}` : ''}`, 'ok');
+  } else if (stateName === 'failed') {
+    setScenarioResult('未找到', 'warn');
+  } else if (dispatch === 'mission') {
+    setScenarioResult('任务已下发', 'ok');
+  } else if (dispatch === 'mission_offline') {
+    setScenarioResult('任务管理未在线', 'warn');
+  } else if (dispatch === 'emergency') {
+    setScenarioResult('急停中', 'error');
+  } else if (dispatch === 'ignored') {
+    setScenarioResult('不支持', 'warn');
+  } else if (stateName === 'canceled') {
+    setScenarioResult('已取消', 'warn');
+  } else {
+    setScenarioResult('待执行');
+  }
+  if (result) {
+    const command = scenario.last_command || payload.last_text || '';
+    const source = scenario.last_source || '';
+    result.title = command ? `${command}${source ? ` · ${source}` : ''}` : '';
+  }
+}
+
+async function pollScenarioStatus() {
+  if (state.scenarioPolling) return;
+  state.scenarioPolling = true;
+  try {
+    state.scenario = await fetchJson(API.scenarioStatus, {}, 3500);
+    state.scenarioError = '';
+  } catch (error) {
+    state.scenario = null;
+    state.scenarioError = error && error.message ? error.message : String(error);
+  } finally {
+    state.scenarioPolling = false;
+    renderScenarioStatus();
+  }
+}
+
+async function executeScenario(text) {
+  const command = String(text || '').trim();
+  if (!command || state.scenarioSending) return;
+  const input = $('#scenario-text');
+  if (input) input.value = command;
+  state.scenarioSending = true;
+  setScenarioResult('执行中…', 'warn');
+  try {
+    const payload = await fetchJson(API.scenario, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: command, source: 'text' }),
+    }, 6000);
+    if (payload && payload.scenario_online === false) {
+      setScenarioResult('节点未在线', 'warn');
+    } else {
+      setScenarioResult('已发送', 'ok');
+      toast(`场景指令已发送：${command}`, 'ok');
+    }
+    window.setTimeout(() => { pollScenarioStatus(); }, 700);
+  } catch (error) {
+    setScenarioResult('执行失败', 'error');
+    toast(error.message || '场景指令失败', 'error');
+  } finally {
+    state.scenarioSending = false;
+  }
+}
+
+function bindScenarioEvents() {
+  const form = $('#scenario-form');
+  if (form) {
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      executeScenario($('#scenario-text') ? $('#scenario-text').value : '');
+    });
+  }
+  const quick = $('#scenario-quick');
+  if (quick) {
+    quick.addEventListener('click', (event) => {
+      const button = event.target.closest('button[data-text]');
+      if (!button) return;
+      executeScenario(button.dataset.text);
+    });
+  }
+}
+
 function telemetryCard(label, value, sub) {
   return `<div class="telemetry">
     <span class="t-label">${escapeHtml(label)}</span>
@@ -2647,12 +2772,16 @@ function startPolling() {
   state.radarTimer = setInterval(() => {
     if (!document.hidden) pollRadar();
   }, 2000);
+  state.scenarioTimer = setInterval(() => {
+    if (!document.hidden) pollScenarioStatus();
+  }, 3000);
   pollBody();
   pollEvents();
   pollSpeaker();
   pollMicrophone();
   pollPower();
   pollRadar();
+  pollScenarioStatus();
   poll();
 }
 
@@ -2671,13 +2800,16 @@ function stopPolling() {
   state.powerTimer = null;
   if (state.radarTimer) clearInterval(state.radarTimer);
   state.radarTimer = null;
+  if (state.scenarioTimer) clearInterval(state.scenarioTimer);
+  state.scenarioTimer = null;
 }
 
 function bindEvents() {
   const refresh = $('#refresh-btn');
-  if (refresh) refresh.addEventListener('click', () => { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); pollPower(); pollRadar(); connectVideo(); poll(); });
+  if (refresh) refresh.addEventListener('click', () => { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); pollPower(); pollRadar(); pollScenarioStatus(); connectVideo(); poll(); });
   bindSpeakerEvents();
   bindMicrophoneEvents();
+  bindScenarioEvents();
 
   const auto = $('#auto-refresh');
   if (auto) {
@@ -2715,10 +2847,10 @@ function bindEvents() {
   });
 
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); pollPower(); pollRadar(); poll(); }
+    if (!document.hidden) { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); pollPower(); pollRadar(); pollScenarioStatus(); poll(); }
   });
 
-  window.addEventListener('online', () => { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); pollPower(); pollRadar(); connectVideo(); poll(); });
+  window.addEventListener('online', () => { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); pollPower(); pollRadar(); pollScenarioStatus(); connectVideo(); poll(); });
 }
 
 function init() {

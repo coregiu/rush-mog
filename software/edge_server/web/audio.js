@@ -17,6 +17,8 @@ function stopVoiceMotion() {
 // 由树莓派上的 voice_scenario_node 解析并编排“搜索 -> 确认 -> 接近 -> 播报”。
 const FIND_UTTERANCE_RE = /(找|寻找|搜索|look\s*for|find|where\s+is|在哪)/i;
 const SCENARIO_CANCEL_RE = /(别找|不要找|不用找|不找|停止寻找|停止搜索|取消寻找|取消搜索|stop\s+looking|cancel\s+search)/i;
+// 非找物场景：建图/探索/导航/回家等，交给通用场景执行接口。
+const MISSION_UTTERANCE_RE = /(建图|建立地图|探索|巡检|去|前往|导航|回家|返回|厨房|客厅|充电桩|kitchen|living\s*room|charging)/i;
 
 function isFindUtterance(text) {
     return FIND_UTTERANCE_RE.test(String(text || ''));
@@ -237,6 +239,10 @@ function initVoiceRecognition() {
                 sendVoiceScenario(plainText);
                 setVoiceScenarioStatus(`🎙️ ${plainText}`);
             } else if (isFindUtterance(plainText)) {
+                stopVoiceMotion();
+                sendButtonCommand('stop', 'down');
+                sendVoiceScenario(plainText);
+            } else if (MISSION_UTTERANCE_RE.test(plainText)) {
                 stopVoiceMotion();
                 sendButtonCommand('stop', 'down');
                 sendVoiceScenario(plainText);

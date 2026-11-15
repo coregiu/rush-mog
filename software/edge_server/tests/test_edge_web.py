@@ -73,6 +73,7 @@ class FakeRuntime:
         }
         self.mic_file = ""
         self.voice_commands = []
+        self.scenario_commands = []
         self.voice_status_payload = {
             "ok": True,
             "scenario_online": True,
@@ -223,6 +224,25 @@ class FakeRuntime:
             "scenario_online": True,
             "scenario": self.voice_status_payload["scenario"],
         }
+
+    def handle_scenario_command(self, text, source="text"):
+        text = str(text or "").strip()
+        if not text:
+            raise ValueError("场景指令为空")
+        self.scenario_commands.append((text, source))
+        return {
+            "ok": True,
+            "accepted": True,
+            "text": text,
+            "source": source,
+            "interface": "scenario",
+            "message": "场景指令已发送",
+            "scenario_online": True,
+            "scenario": self.voice_status_payload["scenario"],
+        }
+
+    def scenario_status(self):
+        return dict(self.voice_status_payload, interface="scenario")
 
     def voice_status(self):
         return dict(self.voice_status_payload)
@@ -672,6 +692,57 @@ def test_voice_api(web_server):
     )
     assert status == 400
     assert json.loads(body)["error"]["code"] == "voice_command_too_long"
+
+
+def test_scenario_api(web_server):
+    port, runtime = web_server
+
+    status, _, body = request(
+        port,
+        "/api/scenario/execute",
+        method="POST",
+        data="找拖鞋",
+        headers={"Content-Type": "text/plain; charset=utf-8"},
+    )
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["accepted"] is True
+    assert payload["text"] == "找拖鞋"
+    assert runtime.scenario_commands[-1] == ("找拖鞋", "text")
+
+    status, _, body = request(
+        port,
+        "/api/scenario/execute",
+        method="POST",
+        data=json.dumps({"text": "去厨房", "source": "text"}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert status == 200
+    assert runtime.scenario_commands[-1] == ("去厨房", "text")
+
+    status, _, body = request(port, "/api/scenario")
+    assert status == 200
+    assert json.loads(body)["interface"] == "scenario"
+
+    status, _, body = request(
+        port,
+        "/api/scenario/execute",
+        method="POST",
+        data="",
+        headers={"Content-Type": "text/plain"},
+    )
+    assert status == 400
+    assert json.loads(body)["error"]["code"] == "empty_scenario_command"
+
+    status, _, body = request(
+        port,
+        "/api/scenario/execute",
+        method="POST",
+        data="找" * 201,
+        headers={"Content-Type": "text/plain"},
+    )
+    assert status == 400
+    assert json.loads(body)["error"]["code"] == "scenario_command_too_long"
 
 
 def test_microphone_api(web_server, tmp_path):

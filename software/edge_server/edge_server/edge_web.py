@@ -507,6 +507,26 @@ class EdgeHttpApp:
             raise RuntimeError("语音场景未启用")
         return handler()
 
+    # ------------------------------------------------------------ scenario
+    def scenario_command(self, text: str, source: str = "text") -> dict:
+        """``POST /api/scenario/execute``：通用场景指令 -> ROS 场景节点。"""
+        handler = getattr(self.runtime, "handle_scenario_command", None)
+        if handler is None:
+            handler = getattr(self.runtime, "handle_voice", None)
+            if handler is None:
+                raise RuntimeError("场景执行接口未启用")
+            return handler(str(text or ""))
+        return handler(str(text or ""), str(source or "text"))
+
+    def scenario_payload(self) -> dict:
+        """``GET /api/scenario``：通用场景状态快照（兼容 /api/voice）。"""
+        handler = getattr(self.runtime, "scenario_status", None)
+        if handler is None:
+            handler = getattr(self.runtime, "voice_status", None)
+        if handler is None:
+            raise RuntimeError("场景执行接口未启用")
+        return handler()
+
     # ------------------------------------------------------------- power
     def power_payload(self) -> dict:
         handler = getattr(self.runtime, "power_status", None)
@@ -822,6 +842,56 @@ class _EdgeRequestHandler(BaseHTTPRequestHandler):
             self._send_json(200, payload)
             return
 
+        if path in {"/api/scenario", "/api/scenario/execute"}:
+            body = self._read_body()
+            if body is None:
+                return
+            fields = self._parse_fields(body)
+            text = str(fields.get("text") or fields.get("command") or "").strip()
+            if not text:
+                raw = body.decode("utf-8", "replace").strip()
+                if raw and not raw.startswith("{") and "=" not in raw:
+                    text = raw
+            source = str(fields.get("source") or "text").strip().lower()
+            if source not in {"text", "voice"}:
+                source = "text"
+            if not text:
+                self._send_json(
+                    400,
+                    app.error_payload(
+                        "empty_scenario_command", "缺少场景指令文本 text/command"
+                    ),
+                )
+                return
+            if len(text) > 200:
+                self._send_json(
+                    400,
+                    app.error_payload(
+                        "scenario_command_too_long", "场景指令过长（>200）"
+                    ),
+                )
+                return
+            try:
+                payload = app.scenario_command(text, source)
+            except ValueError as exc:
+                self._send_json(
+                    400, app.error_payload("invalid_scenario_request", str(exc))
+                )
+                return
+            except RuntimeError as exc:
+                self._send_json(
+                    503, app.error_payload("scenario_unavailable", str(exc))
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("scenario command failed")
+                self._send_json(
+                    500, app.error_payload("scenario_failed", f"场景指令失败: {exc}")
+                )
+                return
+            self._send_json(200, payload)
+            return
+
         if path == "/api/center/handshake":
             body = self._read_body()
             if body is None:
@@ -1067,6 +1137,27 @@ class _EdgeRequestHandler(BaseHTTPRequestHandler):
                 filename=os.path.basename(filename),
                 head_only=head_only,
             )
+            return
+
+        if path == "/api/scenario":
+            try:
+                payload = app.scenario_payload()
+            except RuntimeError as exc:
+                self._send_json(
+                    503,
+                    app.error_payload("scenario_unavailable", str(exc)),
+                    head_only=head_only,
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("scenario status failed")
+                self._send_json(
+                    500,
+                    app.error_payload("scenario_failed", f"场景状态不可用: {exc}"),
+                    head_only=head_only,
+                )
+                return
+            self._send_json(200, payload, head_only=head_only)
             return
 
         if path == "/api/voice":

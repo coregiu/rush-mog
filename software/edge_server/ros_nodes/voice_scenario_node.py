@@ -38,7 +38,7 @@ from edge_server.core.scenarios import (
 )
 from edge_server.utils.config import load_config
 from custom_msgs.action import SearchObject
-from custom_msgs.msg import SafetyState, SearchStatus
+from custom_msgs.msg import SafetyState, SearchStatus, TaskRequest
 
 
 class VoiceScenarioNode(Node):
@@ -49,6 +49,12 @@ class VoiceScenarioNode(Node):
 
         self.voice_topic = str(
             scenario_cfg.get("voice_topic", "/edge/voice_command")
+        )
+        self.command_topic = str(
+            scenario_cfg.get("command_topic", "/edge/scenario_command")
+        )
+        self.mission_request_topic = str(
+            scenario_cfg.get("mission_request_topic", "/center/mission_request")
         )
         self.search_action = str(
             scenario_cfg.get("search_action", "/center/search_object")
@@ -64,6 +70,8 @@ class VoiceScenarioNode(Node):
 
         parser = InstructionParser(self.cfg.get("instruction") or {})
         resolver = VoiceIntentResolver(parser)
+        self.parser = parser
+        self.resolver = resolver
         scenario_conf = FindObjectConfig(
             max_duration_sec=self.max_duration,
             min_confidence=float(scenario_cfg.get("min_confidence", 0.5)),
@@ -92,6 +100,10 @@ class VoiceScenarioNode(Node):
         self._last_pose_at = 0.0
         self._last_status_at = 0.0
         self._last_published_state = ""
+        self._last_command_text = ""
+        self._last_command_source = ""
+        self._last_command_id = ""
+        self._last_dispatch = "idle"
         self._shutdown = threading.Event()
 
         self._cb_group = ReentrantCallbackGroup()
@@ -104,8 +116,14 @@ class VoiceScenarioNode(Node):
         self.pub_status = self.create_publisher(
             String, self.status_topic, status_qos
         )
+        self.pub_mission_request = self.create_publisher(
+            TaskRequest, self.mission_request_topic, 10
+        )
         self.create_subscription(
             String, self.voice_topic, self.on_voice_command, 10
+        )
+        self.create_subscription(
+            String, self.command_topic, self.on_scenario_command, 10
         )
         self.create_subscription(
             SearchStatus, "/center/search_status", self.on_search_status, 10
@@ -126,23 +144,118 @@ class VoiceScenarioNode(Node):
         )
         self.create_timer(1.0 / self.status_rate, self.on_status_timer)
         self.get_logger().info(
-            f"voice_scenario_node started (voice={self.voice_topic}, "
-            f"search={self.search_action}, say={self.say_topic})"
+            f"voice_scenario_node started (command={self.command_topic}, "
+            f"voice={self.voice_topic}, search={self.search_action}, "
+            f"say={self.say_topic})"
         )
 
     # ------------------------------------------------------------- callbacks
     def on_voice_command(self, msg: String) -> None:
-        text = str(msg.data or "").strip()
+        """旧语音 topic：作为通用场景接口的 voice 输入适配器。"""
+        self._handle_scenario_text(str(msg.data or "").strip(), "voice")
+
+    def on_scenario_command(self, msg: String) -> None:
+        """通用场景 topic：JSON ``{text, source, request_id}`` 或纯文本。"""
+        raw = str(msg.data or "").strip()
+        if not raw:
+            return
+        text = raw
+        source = "text"
+        request_id = ""
+        if raw.startswith("{"):
+            try:
+                payload = json.loads(raw)
+            except (TypeError, ValueError):
+                payload = None
+            if isinstance(payload, dict):
+                text = str(payload.get("text") or "").strip()
+                source = str(payload.get("source") or "text").strip().lower()
+                request_id = str(payload.get("request_id") or "")
+        if source not in {"text", "voice"}:
+            source = "text"
+        self._handle_scenario_text(text, source, request_id)
+
+    def _handle_scenario_text(
+        self, text: str, source: str = "voice", request_id: str = ""
+    ) -> None:
+        text = str(text or "").strip()
         if not text:
             return
         now = time.monotonic()
+        effects: list[ScenarioEffect] = []
+        dispatch = "ignored"
         with self._lock:
+            self._last_command_text = text
+            self._last_command_source = source
+            self._last_command_id = request_id or f"scenario_{int(time.time() * 1000)}"
             if self._emergency:
-                self._speak("急停中，暂时不能寻找。")
-                return
-            effects = self.scenario.handle_utterance(text, now)
+                dispatch = "emergency"
+                effects = [ScenarioEffect("speak", "急停中，暂时不能执行场景指令。")]
+            else:
+                command = self.resolver.resolve(text)
+                if command.kind in {"find", "cancel"}:
+                    dispatch = command.kind
+                    effects = self.scenario.handle_utterance(text, now)
+                else:
+                    spec = self.parser.parse(text)
+                    if spec.is_mission:
+                        if self.scenario.active:
+                            effects.extend(
+                                self.scenario.cancel(
+                                    "superseded by scenario command",
+                                    now,
+                                    speech="好的，切换任务。",
+                                )
+                            )
+                            self._generation += 1
+                            self._cancel_active_locked()
+                        dispatched = self._publish_mission_request(
+                            spec, text, source, self._last_command_id
+                        )
+                        dispatch = "mission" if dispatched else "mission_offline"
+                        effects.append(
+                            ScenarioEffect(
+                                "speak",
+                                f"好的，执行：{text}"
+                                if dispatched
+                                else "任务管理未在线，暂时不能执行。",
+                            )
+                        )
+                    else:
+                        dispatch = "ignored"
+                        if source == "text":
+                            effects = [
+                                ScenarioEffect(
+                                    "speak", "这条指令不是场景任务，请换一种说法。"
+                                )
+                            ]
+            self._last_dispatch = dispatch
         self._apply_effects(effects)
         self._publish_status(force=True)
+
+    def _publish_mission_request(
+        self, spec, text: str, source: str, request_id: str
+    ) -> bool:
+        msg = TaskRequest()
+        msg.task_id = request_id or f"scenario_{int(time.time() * 1000)}"
+        msg.language_instruction = text
+        msg.voice_instruction = text if source == "voice" else ""
+        msg.priority = 0
+        msg.enable_reverse = True
+        msg.task_type = spec.mission_type
+        msg.target_label = spec.target_label
+        msg.target_x = float(spec.x)
+        msg.target_y = float(spec.y)
+        msg.target_yaw = float(spec.yaw)
+        msg.max_duration = float(spec.max_duration)
+        msg.save_map = bool(spec.save_map)
+        msg.target_coverage = float(spec.target_coverage)
+        try:
+            self.pub_mission_request.publish(msg)
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().warn(f"publish mission request failed: {exc}")
+            return False
+        return int(self.pub_mission_request.get_subscription_count()) > 0
 
     def on_search_status(self, msg: SearchStatus) -> None:
         with self._lock:
@@ -408,6 +521,10 @@ class VoiceScenarioNode(Node):
             payload["ok"] = True
             payload["emergency_stop"] = bool(self._emergency)
             payload["search_active"] = bool(self._search_active)
+            payload["last_command"] = self._last_command_text
+            payload["last_source"] = self._last_command_source
+            payload["last_request_id"] = self._last_command_id
+            payload["last_dispatch"] = self._last_dispatch
             payload["updated_ms"] = int(time.time() * 1000)
         try:
             self.pub_status.publish(
