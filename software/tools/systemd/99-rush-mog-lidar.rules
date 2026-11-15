@@ -1,0 +1,8 @@
+# RUSH-MOG D6/LD19 激光雷达（UART4，GPIO8/9）
+# 安装：sudo cp 99-rush-mog-lidar.rules /etc/udev/rules.d/
+#       sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+# 用 platform device 名匹配，避免 ttyAMA 编号随内核/overlay 顺序变化：
+#   UART4 = fe201800.serial -> /dev/ttyAMA2
+# 规则同时设置 dialout 组和 0660，ubuntu 用户需在 dialout 组（默认已加入）。
+SUBSYSTEM=="tty", KERNELS=="fe201800.serial", SYMLINK+="rush_lidar", GROUP="dialout", MODE="0660"

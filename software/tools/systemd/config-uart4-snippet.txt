@@ -1,0 +1,19 @@
+# RUSH-MOG 树莓派 4B：D6/LD19 激光雷达 UART4（GPIO8/9）
+# 文件：/boot/firmware/config.txt
+# 注意：GPIO8/9 与 SPI0 CE0/CE1 复用，必须关闭 SPI0；STM32 的 UART3(GPIO4/5) 不受影响。
+# 修改后必须 sudo reboot（UART overlay 不能热加载）。
+
+# 1) 关闭 SPI0（原行 dtparam=spi=on 注释掉）
+# dtparam=spi=on
+
+# 2) 保留 STM32 USART3（GPIO4/5）
+dtoverlay=uart3
+
+# 3) 启用 UART4（GPIO8=TXD4, GPIO9=RXD4）-> /dev/ttyAMA2
+dtoverlay=uart4
+
+# 验证：
+#   ls -l /dev/ttyAMA2 /dev/rush_lidar
+#   sudo cat /sys/kernel/debug/pinctrl/fe200000.gpio-pinctrl-bcm2711/pinmux-pins | grep -E "pin (8|9) "
+#   期望：fe201800.serial ... function alt4 group gpio8/gpio9
+#   sudo dmesg | grep fe201800   # ttyAMA2 at MMIO 0xfe201800

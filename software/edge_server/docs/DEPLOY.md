@@ -543,17 +543,18 @@ curl -s http://192.168.3.26/api/microphone | python3 -m json.tool
 如果仍卡顿，优先把 Pi 的 WiFi 切到 **5GHz**（当前 `wlan0` 在 2.4GHz channel 1，与蓝牙共用天线），或靠近路由器/音箱；这是无线共存问题，软件缓冲只能缓解，不能完全消除 2.4GHz 干扰。
 
 ### 6.5 激光雷达（D6/LD19）
+
+> 接线：GPIO8=物理 pin24（TXD4，接雷达 RX，可不接），GPIO9=物理 pin21（RXD4，接雷达 TX，必须接），GND 共地，D6 通常 5V/1A 独立供电；`GPIO8/9` 与 `SPI0 CE0/CE1` 复用，必须 `# dtparam=spi=on` 关闭 SPI0。
 代码已内置 `lidar_node`（`edge_server/core/lidar.py` + `ros_nodes/lidar_node.py`），支持 LD19/LD06/D6 的 47 字节协议（`0x54 0x2C`，CRC-8 0x4D）。接线与系统配置：
 ```ini
 # /boot/firmware/config.txt
-dtoverlay=uart4          # GPIO8/9，D6 激光；不要同时启用 spi0
+dtoverlay=uart4          # GPIO8/9，D6 激光；必须同时关闭 spi0（见下）
 ```
 ```bash
-# /etc/udev/rules.d/99-rush-mog.rules（设备名以 ls /dev/ttyAMA* 为准，此处 ttyAMA3 为例）
-sudo tee /etc/udev/rules.d/99-rush-mog.rules >/dev/null <<'RULE'
-KERNEL=="ttyAMA3", SYMLINK+="rush_lidar"
-RULE
+# 仓库模板：software/tools/systemd/99-rush-mog-lidar.rules
+sudo cp 99-rush-mog-lidar.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
+# 用 platform device 匹配（fe201800.serial=UART4），不要写死 ttyAMA 编号
 
 # 重启后确认
 ls -l /dev/rush_lidar /dev/ttyAMA*
@@ -592,7 +593,7 @@ ros2 topic echo /scan --once    # ranges 长度 360，frame_id=laser_link
 ros2 topic echo /lidar/status --once
 ros2 run tf2_ros tf2_echo base_link laser_link
 ```
-现状与可选服务：本机未接 D6、未启用 `dtoverlay=uart4`，所以 `/dev/rush_lidar` 暂时不存在（`ros-humble-slam-toolbox` 已安装）。已安装并 enable 可选的 `rush-mog-lidar.service`：单元 `/etc/systemd/system/rush-mog-lidar.service`（仓库模板 `software/tools/systemd/rush-mog-lidar.service`），`ConditionPathExists=/dev/rush_lidar`，设备不存在时静默跳过；接好线、创建 udev symlink 并重启后，服务会自动启动 `lidar_node`。接好硬件后：确认 `config.txt` 有 `dtoverlay=uart4` → 建 udev symlink → `sudo reboot`（或 `sudo systemctl start rush-mog-lidar`）。波特率或协议不同，改 `lidar.baud`/`lidar.protocol`；设备名不同，改 udev 规则或 `lidar.port`。
+现状（2026-11-15）：已启用 `dtoverlay=uart4`、关闭 SPI0、创建 `/dev/rush_lidar`，`rush-mog-lidar.service` 已 active；但 UART4 上未收到任何字节（GPIO9 无电平跳变），需检查雷达供电/共地/TX→GPIO9 接线。诊断前先 `sudo systemctl stop rush-mog-lidar.service`，再执行 `sudo python3 /opt/edge_server/tools/lidar_probe.py`；`/lidar/status` 的 `state=no_data` 表示串口已开但无数据。单元模板在 `software/tools/systemd/`，`ConditionPathExists=/dev/rush_lidar`，设备不存在时静默跳过；接好线、创建 udev symlink 并重启后自动启动。波特率/协议不同改 `lidar.baud`/`lidar.protocol`；设备名不同改 udev 规则或 `lidar.port`。
 
 ### 6.6 Astra Pro 深度相机
 驱动 `ros-humble-orbbec-camera`（已安装）；udev `/etc/udev/rules.d/99-obsensor-libusb.rules`（已从 `/opt/ros/humble/share/orbbec_camera/udev/` 复制）。
