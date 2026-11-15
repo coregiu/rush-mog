@@ -81,6 +81,7 @@ class LidarNode(Node):
         self._serial = None
         self._connected = False
         self._state = "disabled" if not self.enabled else "starting"
+        self._rx_bytes = 0
         self._packets = 0
         self._scans = 0
         self._crc_errors = 0
@@ -152,10 +153,18 @@ class LidarNode(Node):
             ):
                 if self._state != "no_data":
                     self._state = "no_data"
-                    self._last_error = (
-                        "串口已打开但未收到数据：检查雷达 5V/地、TX→GPIO9(pin21)、"
-                        "RX→GPIO8(pin24)、波特率/协议；可用 tools/lidar_probe.py 诊断"
-                    )
+                    if self._rx_bytes > 0 or self._crc_errors or self._header_errors:
+                        self._last_error = (
+                            f"收到 {self._rx_bytes} 字节但无有效 LD19 帧"
+                            f"（crc={self._crc_errors}, header={self._header_errors}）："
+                            "检查 lidar.baud / lidar.protocol（D6 可能不是 LD19 帧）"
+                        )
+                    else:
+                        self._last_error = (
+                            "串口已打开但一个字节都没收到：检查雷达 5V/地、"
+                            "TX→GPIO9(pin21)、RX→GPIO8(pin24)；D6 固定 921600、启动电流>1.5A；"
+                            "可用 tools/lidar_probe.py 诊断"
+                        )
                     warning = self._last_error
             payload = {
                 "ok": True,
@@ -167,6 +176,7 @@ class LidarNode(Node):
                 "protocol": self.protocol,
                 "topic": self.topic,
                 "frame_id": self.frame_id,
+                "rx_bytes": int(self._rx_bytes),
                 "packets": int(self._packets),
                 "scans": int(self._scans),
                 "crc_errors": int(self._crc_errors),
@@ -255,6 +265,8 @@ class LidarNode(Node):
             if not chunk:
                 continue
             buffer.extend(chunk)
+            with self._lock:
+                self._rx_bytes += len(chunk)
             while len(buffer) >= PACKET_SIZE:
                 index = buffer.find(bytes([PACKET_HEADER]))
                 if index < 0:

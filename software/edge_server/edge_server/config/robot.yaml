@@ -26,7 +26,7 @@ edge_server:
   lidar:
     enabled: true
     port: "/dev/rush_lidar"
-    baud: 230400
+    baud: 921600          # 国科光芯 D6 固定 921600；LD19/LD06 改回 230400
     protocol: "ld19"
     topic: "/scan"
     status_topic: "/lidar/status"

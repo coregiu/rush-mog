@@ -175,6 +175,7 @@ SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="r
 激光雷达（D6/LD19，UART4 GPIO8/9）：
 GPIO8=物理 pin24（UART4 TXD，接雷达 RX，可不接）；GPIO9=物理 pin21（UART4 RXD，接雷达 TX，必须接）；
 GND 必须共地；D6 一般 5V/1A 独立供电。GPIO8/9 与 SPI0 CE0/CE1 复用，**必须关闭 SPI0**。
+D6 标配 10 芯线**颜色会重复**（黄色 Tx/IO3、白色 GND/IO1、绿色 Rx/IO2），必须按管脚号：0=+5V、1=GND、2=Tx→GPIO9(pin21)、3=Rx→GPIO8(pin24)、4=GND；5–9 为 NPN I/O 不要接。D6 启动电流 >1.5A，建议独立 5V 并与 Pi 共地。详见 [DEPLOY.md §6.5.1](docs/DEPLOY.md)。
 ```ini
 # /boot/firmware/config.txt
 # dtparam=spi=on          # 关闭，让出 GPIO8/9
@@ -196,7 +197,7 @@ sudo python3 /opt/edge_server/tools/lidar_probe.py
 sudo python3 /opt/edge_server/tools/lidar_probe.py --ports /dev/rush_lidar --bauds 115200 --send 55aa55aa
 sudo systemctl start rush-mog-lidar.service
 ```
-`robot.yaml` 默认 `lidar.port: /dev/rush_lidar`、`baud: 230400`，
+`robot.yaml` 默认 `lidar.port: /dev/rush_lidar`、`baud: 921600`（国科光芯 D6 固定 921600；LD19/LD06 用 230400），
 `frame_id: laser_link`，并发布 `base_link → laser_link` 静态 TF（按实际安装位置改
 `tf_x/tf_y/tf_z/tf_yaw_deg`）。单独验证：
 ```bash
