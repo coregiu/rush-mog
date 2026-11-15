@@ -14,7 +14,7 @@
 | 推理后端 | SmolVLA（LeRobot）+ `stub` 联调后端 |
 | 接口 | HTTP/JSON，`/v1/infer`、`/v1/health`、`/v1/model`、`/v1/params`、`/v1/reset`、`/v1/warmup`、`/v1/handshake` |
 | 发现 | 启动向 Edge `POST /api/center/handshake`，心跳续约；机载经 `GET /api/center` 发现 |
-| 测试 | `pytest tests -q`：55 passed（无 GPU/torch） |
+| 测试 | `pytest tests -q`：57 passed（无 GPU/torch） |
 | 真实权重 | 不随仓库分发；默认 `lerobot/smolvla_base` 或本地微调 checkpoint |
 | 实车验证 | 未做硬件在环；需联调相机、Wi-Fi、GPU 延迟 |
 

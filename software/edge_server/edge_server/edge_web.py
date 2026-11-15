@@ -514,6 +514,13 @@ class EdgeHttpApp:
             raise RuntimeError("电源监控不可用")
         return handler()
 
+    # ------------------------------------------------------------- radar
+    def radar_payload(self) -> dict:
+        handler = getattr(self.runtime, "radar_status", None)
+        if handler is None:
+            raise RuntimeError("雷达地图未启用")
+        return handler()
+
     # ------------------------------------------------------------- static
     def _safe_path(self, root: str, request_path: str) -> Optional[str]:
         if not root:
@@ -939,6 +946,27 @@ class _EdgeRequestHandler(BaseHTTPRequestHandler):
             motion = getattr(app.runtime, "motion_snapshot", None)
             if motion is not None:
                 payload["motion"] = motion()
+            self._send_json(200, payload, head_only=head_only)
+            return
+
+        if path == "/api/radar":
+            try:
+                payload = app.radar_payload()
+            except RuntimeError as exc:
+                self._send_json(
+                    503,
+                    app.error_payload("radar_unavailable", str(exc)),
+                    head_only=head_only,
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("radar status failed")
+                self._send_json(
+                    500,
+                    app.error_payload("radar_failed", f"雷达地图不可用: {exc}"),
+                    head_only=head_only,
+                )
+                return
             self._send_json(200, payload, head_only=head_only)
             return
 

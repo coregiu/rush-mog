@@ -1057,6 +1057,7 @@ voice_scenario_node
 | GET/POST | `/stop` | 无条件停车 |
 | GET | `/status` | 运行状态（含 `motion` 当前指令） |
 | GET | `/api/body` | 遥测详情 + `motion` 当前指令/来源/持续时长 |
+| GET | `/api/radar` | 雷达地图快照：降采样 `/map` + `/scan` + `/center/pose`（dashboard 实时监控） |
 | GET | `/api/events?limit=N` | 最近 N 条运行事件（命令/串口/急停/超时） |
 | GET | `/api/speaker` | 蓝牙音箱/TTS/播放状态 |
 | POST | `/api/speaker/{connect,say,play,volume,stop}` | 连接/TTS/播放文件/音量/停止 |
@@ -1269,6 +1270,8 @@ ROS 参数 config_file  >  环境变量 EDGE_SERVER_CONFIG（兼容旧 CENTER_SE
 | `base.transport/port/baud` | edge_serial//dev/ttyUSB0/115200 | Pi 直连 STM32（实车覆盖为 ttyAMA1） |
 | `edge.web.port/stream_port` | 80/8080 | Edge Web 与 MJPEG |
 | `edge.motion.keepalive_ms` | 200 | 手动/raw 命令重发周期 |
+| `edge.radar.enabled` | true | dashboard 雷达地图（`/map` + `/scan` + `/center/pose`） |
+| `edge.radar.max_cells` | 240 | 地图降采样上限（宽/高） |
 | `health.devices.<id>.required` | 按设备 | 缺失是否 error |
 
 ---

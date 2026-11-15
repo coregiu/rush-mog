@@ -301,6 +301,13 @@ class HttpApi:
                 details={"received": len(body), "max": self.max_body_bytes},
             )
 
+        if not body:
+            # 空请求体（如 curl -X POST /v1/warmup）不校验 Content-Type：
+            # 客户端常自动带 form 类型，实际没有 JSON 负载可解析。
+            if allow_empty:
+                return {}
+            raise BadRequest("请求体为空", code="empty_body")
+
         content_type = headers.get("content-type", "").split(";", 1)[0].strip()
         if content_type and content_type.lower() != "application/json":
             raise UnsupportedMediaType(
@@ -308,10 +315,6 @@ class HttpApi:
                 details={"received": content_type},
             )
 
-        if not body:
-            if allow_empty:
-                return {}
-            raise BadRequest("请求体为空", code="empty_body")
         try:
             return json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:

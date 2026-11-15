@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import math
 import os
@@ -30,8 +31,8 @@ from collections import deque
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import rclpy
-from geometry_msgs.msg import TransformStamped, Twist
-from nav_msgs.msg import Odometry
+from geometry_msgs.msg import PoseWithCovarianceStamped, TransformStamped, Twist
+from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import (
@@ -40,7 +41,7 @@ from rclpy.qos import (
     ReliabilityPolicy,
     qos_profile_sensor_data,
 )
-from sensor_msgs.msg import Image, JointState
+from sensor_msgs.msg import Image, JointState, LaserScan
 from std_msgs.msg import String
 from tf2_ros import TransformBroadcaster
 
@@ -78,6 +79,11 @@ def _local_ip() -> str:
     finally:
         sock.close()
 
+
+
+def _yaw_from_quaternion(x: float, y: float, z: float, w: float) -> float:
+    """四元数 -> 平面航向（rad）。"""
+    return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
 
 def _free_memory_bytes() -> int:
     try:
@@ -486,6 +492,45 @@ class EdgeServerNode(Node):
                     qos_profile_sensor_data,
                 )
                 self.get_logger().info(f"camera stream topic: {self.camera_topic}")
+
+        # 雷达地图：/map + /scan + /center/pose 聚合给 dashboard（可选，缺失不影响控制）
+        radar_cfg = dict(edge_cfg.get("radar") or {})
+        self.radar_enabled = bool(radar_cfg.get("enabled", True))
+        self.radar_max_cells = max(64, min(400, _int_or(radar_cfg.get("max_cells"), 240)))
+        self._radar_lock = threading.Lock()
+        self._radar_map: Optional[dict] = None
+        self._radar_map_at = 0.0
+        self._radar_scan: Optional[dict] = None
+        self._radar_scan_at = 0.0
+        self._radar_pose: Optional[dict] = None
+        self._radar_pose_at = 0.0
+        if self.radar_enabled:
+            # 订阅用 VOLATILE，兼容 slam_toolbox（VOLATILE）与 map_server
+            # （TRANSIENT_LOCAL）两种发布端。
+            map_qos = QoSProfile(
+                depth=1,
+                reliability=ReliabilityPolicy.RELIABLE,
+                durability=DurabilityPolicy.VOLATILE,
+            )
+            self.create_subscription(
+                OccupancyGrid,
+                str(radar_cfg.get("map_topic", "/map") or "/map"),
+                self.on_radar_map,
+                map_qos,
+            )
+            self.create_subscription(
+                LaserScan,
+                str(radar_cfg.get("scan_topic", "/scan") or "/scan"),
+                self.on_radar_scan,
+                qos_profile_sensor_data,
+            )
+            self.create_subscription(
+                PoseWithCovarianceStamped,
+                str(radar_cfg.get("pose_topic", "/center/pose") or "/center/pose"),
+                self.on_radar_pose,
+                10,
+            )
+            self.get_logger().info("radar map: /map + /scan -> /api/radar")
 
         self._steady_clock = create_steady_clock()
         self._odom_timer = self.create_timer(
@@ -1228,6 +1273,165 @@ class EdgeServerNode(Node):
                 and self._jpeg_at > 0.0
                 and (time.monotonic() - self._jpeg_at) <= 2.0
             )
+
+
+    # ------------------------------------------------------------- radar
+    def on_radar_map(self, msg: OccupancyGrid) -> None:
+        """缓存 /map，降采样后供 ``/api/radar``（字节：0=未知，1=空闲，2=占据）。"""
+        now = time.monotonic()
+        if (now - self._radar_map_at) < 0.8:
+            return
+        try:
+            width = int(msg.info.width)
+            height = int(msg.info.height)
+            if width <= 0 or height <= 0:
+                return
+            data = list(msg.data)
+            if len(data) < width * height:
+                return
+            step = max(1, int(math.ceil(max(width, height) / float(self.radar_max_cells))))
+            out_w = (width + step - 1) // step
+            out_h = (height + step - 1) // step
+            cells = bytearray(out_w * out_h)
+            for oy in range(out_h):
+                y0 = oy * step
+                y1 = min(y0 + step, height)
+                for ox in range(out_w):
+                    x0 = ox * step
+                    x1 = min(x0 + step, width)
+                    occupied = False
+                    free = 0
+                    known = 0
+                    for y in range(y0, y1):
+                        base = y * width
+                        for x in range(x0, x1):
+                            value = data[base + x]
+                            if value < 0:
+                                continue
+                            known += 1
+                            if value >= 65:
+                                occupied = True
+                            elif value <= 50:
+                                free += 1
+                    if occupied:
+                        cells[oy * out_w + ox] = 2
+                    elif known and free * 2 >= known:
+                        cells[oy * out_w + ox] = 1
+            origin = msg.info.origin
+            payload = {
+                "available": True,
+                "frame_id": str(msg.header.frame_id or "map"),
+                "width": out_w,
+                "height": out_h,
+                "source_width": width,
+                "source_height": height,
+                "step": step,
+                "resolution": float(msg.info.resolution) * step,
+                "origin": {
+                    "x": float(origin.position.x),
+                    "y": float(origin.position.y),
+                    "yaw": _yaw_from_quaternion(
+                        float(origin.orientation.x),
+                        float(origin.orientation.y),
+                        float(origin.orientation.z),
+                        float(origin.orientation.w),
+                    ),
+                },
+                "data": base64.b64encode(bytes(cells)).decode("ascii"),
+            }
+            with self._radar_lock:
+                self._radar_map = payload
+                self._radar_map_at = now
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().warn(f"radar map convert failed: {exc}")
+
+    def on_radar_scan(self, msg: LaserScan) -> None:
+        """缓存 /scan，限制点数后供 ``/api/radar``。"""
+        try:
+            values = list(msg.ranges)
+            if not values:
+                return
+            step = max(1, int(math.ceil(len(values) / 720.0)))
+            if step > 1:
+                values = values[::step]
+            ranges: List[Optional[float]] = []
+            for value in values:
+                distance = float(value)
+                ranges.append(round(distance, 3) if math.isfinite(distance) and distance > 0.01 else None)
+            payload = {
+                "available": True,
+                "frame_id": str(msg.header.frame_id or "laser_link"),
+                "angle_min": float(msg.angle_min),
+                "angle_increment": float(msg.angle_increment) * step,
+                "range_min": float(msg.range_min),
+                "range_max": float(msg.range_max),
+                "count": len(ranges),
+                "ranges": ranges,
+            }
+            with self._radar_lock:
+                self._radar_scan = payload
+                self._radar_scan_at = time.monotonic()
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().warn(f"radar scan convert failed: {exc}")
+
+    def on_radar_pose(self, msg: PoseWithCovarianceStamped) -> None:
+        """缓存 /center/pose，供地图上的机器人位姿叠加。"""
+        pose = msg.pose.pose
+        payload = {
+            "x": float(pose.position.x),
+            "y": float(pose.position.y),
+            "yaw": _yaw_from_quaternion(
+                float(pose.orientation.x),
+                float(pose.orientation.y),
+                float(pose.orientation.z),
+                float(pose.orientation.w),
+            ),
+            "frame_id": str(msg.header.frame_id or "map"),
+        }
+        with self._radar_lock:
+            self._radar_pose = payload
+            self._radar_pose_at = time.monotonic()
+
+    def radar_status(self) -> dict:
+        """``GET /api/radar`` 的快照：地图/扫描/位姿各自带新鲜度。"""
+        now = time.monotonic()
+        lock = getattr(self, "_radar_lock", None)
+        if lock is None:
+            return {
+                "ok": True,
+                "enabled": False,
+                "server_time_ms": int(time.time() * 1000.0),
+                "map": {"available": False},
+                "scan": {"available": False},
+                "pose": {"available": False},
+            }
+        with lock:
+            map_payload = dict(self._radar_map) if self._radar_map else None
+            map_at = self._radar_map_at
+            scan_payload = dict(self._radar_scan) if self._radar_scan else None
+            scan_at = self._radar_scan_at
+            pose_payload = dict(self._radar_pose) if self._radar_pose else None
+            pose_at = self._radar_pose_at
+
+        def aged(payload: Optional[dict], stamp: float, limit: float) -> dict:
+            if payload is None:
+                return {"available": False}
+            age = max(0.0, now - stamp)
+            if age > limit:
+                return {"available": False}
+            out = dict(payload)
+            out["available"] = True
+            out["age_ms"] = int(age * 1000.0)
+            return out
+
+        return {
+            "ok": True,
+            "enabled": bool(self.radar_enabled),
+            "server_time_ms": int(time.time() * 1000.0),
+            "map": aged(map_payload, map_at, 600.0),
+            "scan": aged(scan_payload, scan_at, 2.0),
+            "pose": aged(pose_payload, pose_at, 5.0),
+        }
 
     # ------------------------------------------------------------- runtime API
     def status(self) -> dict:

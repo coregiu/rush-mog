@@ -139,6 +139,15 @@ class FakeRuntime:
     def body(self):
         return self.body_payload
 
+    def radar_status(self):
+        return {
+            "ok": True,
+            "enabled": True,
+            "map": {"available": False},
+            "scan": {"available": False},
+            "pose": {"available": False},
+        }
+
     def motion_snapshot(self):
         return {
             "active": False,
@@ -417,6 +426,12 @@ def test_body_and_modules(web_server):
     payload = json.loads(body)
     assert payload["body"]["wheel_mm_s"] == [10, 20, 30, 40]
     assert payload["motion"]["source"] == "idle"
+
+    status, _, body = request(port, "/api/radar")
+    assert status == 200
+    radar = json.loads(body)
+    assert radar["ok"] is True
+    assert radar["map"]["available"] is False
 
     status, _, body = request(port, "/api/events?limit=5")
     assert status == 200

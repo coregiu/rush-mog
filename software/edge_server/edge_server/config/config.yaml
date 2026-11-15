@@ -356,6 +356,13 @@ edge_server:
       topic: "/camera/image_raw"
       fps: 10
       quality: 70
+    # dashboard「雷达地图」：缓存 /map + /scan + /center/pose，由 /api/radar 提供。
+    radar:
+      enabled: true
+      map_topic: "/map"
+      scan_topic: "/scan"
+      pose_topic: "/center/pose"
+      max_cells: 240                # 地图降采样上限（宽/高）
     motion:
       keepalive_ms: 200
       raw_lease_sec: 1.0

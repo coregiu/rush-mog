@@ -410,6 +410,7 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
 | `GET/POST /cmd-button`、`/cmd-stick`、`/stop` | 旧页面兼容接口 |
 | `GET /status` | Pi 运行状态、串口/ROS/相机/运动状态（含当前指令 `motion`） |
 | `GET /api/body` | STM32 编码器遥测快照 + 当前指令/来源/持续时长 |
+| `GET /api/radar` | dashboard 雷达地图：降采样 `/map` + `/scan` + `/center/pose` 快照 |
 | `GET /api/events?limit=N` | 最近 N 条运行事件（命令、串口连接、急停、租约超时） |
 | `GET /api/speaker` | 蓝牙音箱连接/A2DP sink/TTS/播放队列状态 |
 | `POST /api/speaker/{connect,say,play,volume,stop}` | 连接音箱、TTS 播报、播放 `audio_dir` 文件、音量、停止 |

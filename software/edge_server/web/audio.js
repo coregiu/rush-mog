@@ -253,8 +253,8 @@ function initVoiceRecognition() {
         if (event.error === 'not-allowed') {
             alert('麦克风权限被拒绝。请在浏览器设置中允许麦克风访问。');
             voiceEnabled = false;
-            voiceBtn.style.backgroundColor = '';
-            voiceBtn.classList.remove('bg-red-500');
+            voiceBtn.classList.remove('is-active');
+            voiceBtn.classList.remove('animate-pulse');
         } else if (event.error === 'no-speech') {
             // 没有检测到语音，忽略
         } else {
@@ -292,7 +292,7 @@ function toggleVoiceControl() {
         try {
             recognition.start();
             voiceEnabled = true;
-            voiceBtn.style.backgroundColor = '#FF6B6B'; // 红色表示开启
+            voiceBtn.classList.add('is-active'); // 激活态由 ps2.css 控制
             voiceBtn.classList.add('animate-pulse');
             updateStatus('🎙️ Voice ON');
         } catch (e) {
@@ -307,7 +307,7 @@ function toggleVoiceControl() {
         stopVoiceMotion();
         // 关闭语音时兜底停车，避免上一条方向命令一直生效
         sendButtonCommand('stop', 'down');
-        voiceBtn.style.backgroundColor = ''; // 恢复蓝色
+        voiceBtn.classList.remove('is-active');
         voiceBtn.classList.remove('animate-pulse');
         updateStatus('🎙️ Voice OFF');
     }

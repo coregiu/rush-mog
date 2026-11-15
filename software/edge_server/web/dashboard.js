@@ -1,6 +1,8 @@
 /* RUSH-MOG digital twin dashboard
  * 数据源：
  *   GET  /api/modules                       Edge Server 模块注册表 + ROS 子系统
+ *   GET  /api/radar                         /map + /scan + /center/pose 雷达地图快照
+ *   GET  /stream                            MJPEG 相机流（302 -> :8080/stream）
  *   GET  /api/modules/{id}/health           Edge Server 代理 ROS/Center 健康接口
  *   GET  /api/modules/{id}/params           Edge Server 代理/本地参数描述
  *   POST /api/modules/{id}/params           参数修改
@@ -14,6 +16,7 @@ const API = {
   edgeHealth: '/api/modules/edge/health',
   edgeParams: '/api/modules/edge/params',
   body: '/api/body',
+  radar: '/api/radar',
   speaker: '/api/speaker',
   speakerAction: (action) => `/api/speaker/${encodeURIComponent(action)}`,
   microphone: '/api/microphone',
@@ -130,6 +133,11 @@ const state = {
   microphonePolling: false,
   microphoneTimer: null,
   microphoneError: '',
+  radar: null,
+  radarError: '',
+  radarPolling: false,
+  radarTimer: null,
+  videoReady: false,
   power: null,
   powerPolling: false,
   powerTimer: null,
@@ -864,6 +872,7 @@ function renderAll() {
   renderTelemetry();
   renderOpsCurrent();
   renderOpsEvents();
+  renderRadar();
   renderSyncTime();
 }
 
@@ -1503,6 +1512,316 @@ function renderOpsEvents() {
       <span class="ops-event-code">${escapeHtml(codeText)}</span>
     </li>`;
   }).join('');
+}
+
+
+/* ------------------------------------------------------------ radar map */
+const radarView = { mapKey: '', mapCanvas: null };
+
+function decodeRadarCells(encoded) {
+  try {
+    const binary = atob(String(encoded || ''));
+    const cells = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) cells[i] = binary.charCodeAt(i);
+    return cells;
+  } catch (error) {
+    return null;
+  }
+}
+
+function radarMapBitmap(map) {
+  if (radarView.mapKey === map.data && radarView.mapCanvas) return radarView.mapCanvas;
+  const cells = decodeRadarCells(map.data);
+  if (!cells || cells.length < map.width * map.height) return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = map.width;
+  canvas.height = map.height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  const image = ctx.createImageData(map.width, map.height);
+  for (let y = 0; y < map.height; y += 1) {
+    const source = y * map.width;
+    const target = (map.height - 1 - y) * map.width;
+    for (let x = 0; x < map.width; x += 1) {
+      const value = cells[source + x];
+      if (!value) continue;
+      const index = (target + x) * 4;
+      if (value === 2) {
+        image.data[index] = 148;
+        image.data[index + 1] = 163;
+        image.data[index + 2] = 184;
+        image.data[index + 3] = 235;
+      } else {
+        image.data[index] = 34;
+        image.data[index + 1] = 211;
+        image.data[index + 2] = 238;
+        image.data[index + 3] = 26;
+      }
+    }
+  }
+  ctx.putImageData(image, 0, 0);
+  radarView.mapKey = map.data;
+  radarView.mapCanvas = canvas;
+  return canvas;
+}
+
+function radarMapView(map, width, height) {
+  const resolution = Number(map.resolution) || 0.05;
+  const mapW = Math.max(0.01, Number(map.width) * resolution);
+  const mapH = Math.max(0.01, Number(map.height) * resolution);
+  const pad = 10;
+  const scale = Math.min((width - pad * 2) / mapW, (height - pad * 2) / mapH);
+  return {
+    kind: 'map',
+    scale,
+    ox: (width - mapW * scale) / 2,
+    oy: (height - mapH * scale) / 2,
+    minX: Number(map.origin && map.origin.x) || 0,
+    maxY: (Number(map.origin && map.origin.y) || 0) + mapH,
+    mapW,
+    mapH,
+  };
+}
+
+function radarScanView(scan, width, height) {
+  const values = (scan.ranges || []).filter((value) => value != null);
+  const maxRange = values.length ? Math.max.apply(null, values) : 0;
+  const rangeMax = Math.max(1, Math.min(Number(scan.range_max) || 12, maxRange * 1.15 || 6));
+  const pad = 14;
+  const scale = Math.max(4, (Math.min(width, height) / 2 - pad) / rangeMax);
+  return { kind: 'scan', cx: width / 2, cy: height / 2, scale, rangeMax };
+}
+
+function drawRadarPolar(ctx, view) {
+  ctx.strokeStyle = 'rgba(125, 211, 252, 0.12)';
+  ctx.lineWidth = 1;
+  const step = view.rangeMax > 8 ? 2 : 1;
+  for (let r = step; r <= view.rangeMax; r += step) {
+    ctx.beginPath();
+    ctx.arc(view.cx, view.cy, r * view.scale, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.moveTo(view.cx - 8, view.cy);
+  ctx.lineTo(view.cx + 8, view.cy);
+  ctx.moveTo(view.cx, view.cy - 8);
+  ctx.lineTo(view.cx, view.cy + 8);
+  ctx.stroke();
+}
+
+function drawRadarScan(ctx, scan, mapMode, pose, view) {
+  const ranges = scan.ranges || [];
+  const angleMin = Number(scan.angle_min) || 0;
+  const increment = Number(scan.angle_increment) || 0;
+  ctx.fillStyle = 'rgba(34, 211, 238, 0.9)';
+  ctx.beginPath();
+  for (let i = 0; i < ranges.length; i += 1) {
+    const range = Number(ranges[i]);
+    if (!Number.isFinite(range) || range <= 0) continue;
+    const angle = angleMin + i * increment;
+    let px;
+    let py;
+    if (mapMode && pose) {
+      const wx = Number(pose.x) + Math.cos(Number(pose.yaw) + angle) * range;
+      const wy = Number(pose.y) + Math.sin(Number(pose.yaw) + angle) * range;
+      px = view.ox + (wx - view.minX) * view.scale;
+      py = view.oy + (view.maxY - wy) * view.scale;
+    } else {
+      px = view.cx + Math.sin(angle) * range * view.scale;
+      py = view.cy - Math.cos(angle) * range * view.scale;
+    }
+    ctx.moveTo(px, py);
+    ctx.arc(px, py, 1.5, 0, Math.PI * 2);
+  }
+  ctx.fill();
+}
+
+function drawRadarRobot(ctx, pose, view, mapMode) {
+  let x;
+  let y;
+  let yaw = 0;
+  if (mapMode) {
+    if (!pose) return;
+    x = view.ox + (Number(pose.x) - view.minX) * view.scale;
+    y = view.oy + (view.maxY - Number(pose.y)) * view.scale;
+    yaw = Number(pose.yaw) || 0;
+  } else {
+    x = view.cx;
+    y = view.cy;
+  }
+  ctx.save();
+  ctx.translate(x, y);
+  if (mapMode) {
+    ctx.rotate(-yaw);
+    ctx.beginPath();
+    ctx.moveTo(11, 0);
+    ctx.lineTo(-7, 7);
+    ctx.lineTo(-4, 0);
+    ctx.lineTo(-7, -7);
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(0, -11);
+    ctx.lineTo(7, 7);
+    ctx.lineTo(0, 4);
+    ctx.lineTo(-7, 7);
+  }
+  ctx.closePath();
+  ctx.fillStyle = '#f59e0b';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function renderRadar() {
+  const panel = $('#radar-panel');
+  const canvas = $('#radar-canvas');
+  if (!panel || !canvas) return;
+  const empty = $('#radar-empty');
+  const stateEl = $('#radar-state');
+  const meta = $('#radar-meta');
+  const data = state.radar;
+  const map = data && data.map && data.map.available ? data.map : null;
+  const scan = data && data.scan && data.scan.available ? data.scan : null;
+  const pose = data && data.pose && data.pose.available ? data.pose : null;
+  const ready = Boolean(map || scan);
+  let status = 'waiting';
+  let label = '等待';
+  if (state.radarError) {
+    status = 'error';
+    label = '离线';
+  } else if (map && scan) {
+    status = 'live';
+    label = 'LIVE';
+  } else if (map) {
+    status = 'live';
+    label = 'MAP';
+  } else if (scan) {
+    status = 'live';
+    label = 'SCAN';
+  }
+  panel.dataset.state = status;
+  if (stateEl) stateEl.textContent = label;
+  if (empty) empty.hidden = ready;
+  if (meta) {
+    const bits = [];
+    if (map) bits.push(`MAP ${map.width}×${map.height} @ ${Number(map.resolution).toFixed(2)}m`);
+    if (scan) bits.push(`SCAN ${scan.count || (scan.ranges || []).length}pts`);
+    if (pose) bits.push(`POSE ${Number(pose.x).toFixed(2)},${Number(pose.y).toFixed(2)}`);
+    meta.textContent = bits.length ? bits.join(' · ') : '--';
+  }
+  if (!ready) return;
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width < 20 || rect.height < 20) return;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const pixelW = Math.max(1, Math.round(rect.width * dpr));
+  const pixelH = Math.max(1, Math.round(rect.height * dpr));
+  if (canvas.width !== pixelW || canvas.height !== pixelH) {
+    canvas.width = pixelW;
+    canvas.height = pixelH;
+  }
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const width = rect.width;
+  const height = rect.height;
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = '#03070d';
+  ctx.fillRect(0, 0, width, height);
+  const view = map ? radarMapView(map, width, height) : radarScanView(scan, width, height);
+  if (map) {
+    const bitmap = radarMapBitmap(map);
+    if (bitmap) {
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(bitmap, view.ox, view.oy, view.mapW * view.scale, view.mapH * view.scale);
+    }
+  } else {
+    drawRadarPolar(ctx, view);
+  }
+  if (scan && (!map || pose)) drawRadarScan(ctx, scan, Boolean(map), pose, view);
+  drawRadarRobot(ctx, pose, view, Boolean(map));
+}
+
+async function pollRadar() {
+  if (state.radarPolling) return;
+  state.radarPolling = true;
+  try {
+    state.radar = await fetchJson(API.radar, {}, 3500);
+    state.radarError = '';
+  } catch (error) {
+    state.radar = null;
+    state.radarError = error && error.message ? error.message : String(error);
+  } finally {
+    state.radarPolling = false;
+    renderRadar();
+  }
+}
+
+/* --------------------------------------------------------------- video */
+const videoState = { img: null, empty: null, panel: null, label: null, retryTimer: null };
+
+function setVideoState(label, kind) {
+  if (videoState.label) videoState.label.textContent = label;
+  if (videoState.panel) videoState.panel.dataset.state = kind;
+}
+
+function connectVideo() {
+  const img = videoState.img;
+  if (!img) return;
+  setVideoState('连接中', 'waiting');
+  if (videoState.empty) videoState.empty.hidden = false;
+  img.classList.remove('is-live');
+  img.removeAttribute('src');
+  img.src = `/stream?t=${Date.now()}`;
+}
+
+function scheduleVideoRetry() {
+  if (videoState.retryTimer) return;
+  videoState.retryTimer = window.setTimeout(() => {
+    videoState.retryTimer = null;
+    connectVideo();
+  }, 8000);
+}
+
+function initVideo() {
+  videoState.img = $('#video-stream');
+  videoState.empty = $('#video-empty');
+  videoState.panel = $('#video-panel');
+  videoState.label = $('#video-state');
+  const img = videoState.img;
+  if (!img) return;
+  img.addEventListener('load', () => {
+    img.classList.add('is-live');
+    if (videoState.empty) videoState.empty.hidden = true;
+    setVideoState('LIVE', 'live');
+  });
+  img.addEventListener('error', () => {
+    img.classList.remove('is-live');
+    if (videoState.empty) videoState.empty.hidden = false;
+    setVideoState('等待相机', 'waiting');
+    scheduleVideoRetry();
+  });
+  window.setInterval(() => {
+    if (!videoState.img || videoState.img.classList.contains('is-live')) return;
+    if (videoState.img.naturalWidth > 0) {
+      videoState.img.classList.add('is-live');
+      if (videoState.empty) videoState.empty.hidden = true;
+      setVideoState('LIVE', 'live');
+    }
+  }, 2000);
+  connectVideo();
+}
+
+function initRadarCanvas() {
+  const canvas = $('#radar-canvas');
+  if (!canvas) return;
+  if (window.ResizeObserver) {
+    const observer = new ResizeObserver(() => renderRadar());
+    observer.observe(canvas.parentElement || canvas);
+  } else {
+    window.addEventListener('resize', () => renderRadar());
+  }
 }
 
 function telemetryCard(label, value, sub) {
@@ -2325,11 +2644,15 @@ function startPolling() {
   state.powerTimer = setInterval(() => {
     if (!document.hidden) pollPower();
   }, 3000);
+  state.radarTimer = setInterval(() => {
+    if (!document.hidden) pollRadar();
+  }, 2000);
   pollBody();
   pollEvents();
   pollSpeaker();
   pollMicrophone();
   pollPower();
+  pollRadar();
   poll();
 }
 
@@ -2346,11 +2669,13 @@ function stopPolling() {
   state.microphoneTimer = null;
   if (state.powerTimer) clearInterval(state.powerTimer);
   state.powerTimer = null;
+  if (state.radarTimer) clearInterval(state.radarTimer);
+  state.radarTimer = null;
 }
 
 function bindEvents() {
   const refresh = $('#refresh-btn');
-  if (refresh) refresh.addEventListener('click', () => { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); pollPower(); poll(); });
+  if (refresh) refresh.addEventListener('click', () => { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); pollPower(); pollRadar(); connectVideo(); poll(); });
   bindSpeakerEvents();
   bindMicrophoneEvents();
 
@@ -2390,16 +2715,18 @@ function bindEvents() {
   });
 
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); pollPower(); poll(); }
+    if (!document.hidden) { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); pollPower(); pollRadar(); poll(); }
   });
 
-  window.addEventListener('online', () => { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); pollPower(); poll(); });
+  window.addEventListener('online', () => { pollBody(); pollEvents(); pollSpeaker(); pollMicrophone(); pollPower(); pollRadar(); connectVideo(); poll(); });
 }
 
 function init() {
   bindEvents();
   initGauge();
   initMotorCards();
+  initVideo();
+  initRadarCanvas();
   state.clockTimer = setInterval(updateSyncText, 1000);
   startPolling();
 }

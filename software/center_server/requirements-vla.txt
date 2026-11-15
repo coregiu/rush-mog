@@ -11,3 +11,4 @@ lerobot[smolvla]>=0.4.0
 huggingface_hub>=0.24
 safetensors>=0.4
 accelerate>=0.30
+gymnasium==1.1.1  # Python 3.10：1.4.x 的 typing 在 Windows/3.10 上导入失败

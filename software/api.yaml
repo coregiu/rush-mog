@@ -1022,6 +1022,85 @@ paths:
                         maxItems: 4
                       distance_mm: {type: integer}
 
+  /api/radar:
+    get:
+      tags: [Edge Server]
+      summary: 雷达地图与扫描快照
+      description: |
+        dashboard「雷达地图」数据源：`/map` 降采样栅格（base64，0=未知/1=空闲/2=占据）、
+        `/scan` 极坐标扫描点、`/center/pose` 位姿。各字段 `available=false` 表示尚未订阅到或已超时。
+      operationId: edgeRadar
+      responses:
+        '200':
+          description: 雷达快照
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: {type: boolean}
+                  enabled: {type: boolean}
+                  server_time_ms: {type: integer}
+                  map:
+                    type: object
+                    properties:
+                      available: {type: boolean}
+                      age_ms: {type: integer}
+                      frame_id: {type: string}
+                      width: {type: integer}
+                      height: {type: integer}
+                      source_width: {type: integer}
+                      source_height: {type: integer}
+                      step: {type: integer}
+                      resolution: {type: number}
+                      origin:
+                        type: object
+                        properties:
+                          x: {type: number}
+                          y: {type: number}
+                          yaw: {type: number}
+                      data:
+                        type: string
+                        description: base64 编码的 uint8 栅格，行优先，y 向上
+                  scan:
+                    type: object
+                    properties:
+                      available: {type: boolean}
+                      age_ms: {type: integer}
+                      frame_id: {type: string}
+                      angle_min: {type: number}
+                      angle_increment: {type: number}
+                      range_min: {type: number}
+                      range_max: {type: number}
+                      count: {type: integer}
+                      ranges:
+                        type: array
+                        items:
+                          type: number
+                          nullable: true
+                  pose:
+                    type: object
+                    properties:
+                      available: {type: boolean}
+                      age_ms: {type: integer}
+                      frame_id: {type: string}
+                      x: {type: number}
+                      y: {type: number}
+                      yaw: {type: number}
+        '503':
+          description: 雷达地图功能未启用
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: {type: boolean}
+                  error:
+                    type: object
+                    properties:
+                      code: {type: string}
+                      message: {type: string}
+
   /api/speaker:
     get:
       tags: [Edge Server]

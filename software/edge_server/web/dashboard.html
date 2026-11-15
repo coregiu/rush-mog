@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#050914">
   <title>RUSH-MOG · 数字孪生</title>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
-  <link rel="stylesheet" href="dashboard.css?v=20261114r">
+  <link rel="stylesheet" href="dashboard.css?v=20261115f">
 </head>
 <body>
   <div class="ambient ambient-a"></div>
@@ -34,7 +34,7 @@
     </div>
 
     <nav class="topbar-actions">
-      <label class="switch" title="模块 5 秒 / 车身遥测 1 秒自动刷新">
+      <label class="switch" title="模块 5 秒 / 车身遥测 1 秒 / 雷达 2 秒自动刷新">
         <input id="auto-refresh" type="checkbox" checked>
         <span class="switch-track"><span class="switch-thumb"></span></span>
         <span class="switch-label">自动</span>
@@ -491,49 +491,84 @@
       <div class="telemetry-row" id="telemetry-row"></div>
     </section>
 
-    <section class="panel ops-panel" id="ops-panel" data-source="idle">
+    <section class="panel monitor-panel" id="ops-panel" data-source="idle">
       <div class="panel-head">
         <div>
-          <span class="eyebrow">MOTION COMMAND · EVENT LOG</span>
-          <h2>当前指令与运行记录</h2>
+          <span class="eyebrow">LIVE MONITOR · COMMAND / VIDEO / LIDAR</span>
+          <h2>实时监控信息</h2>
         </div>
         <div class="panel-meta">
-          <span class="status-chip status-unknown" id="ops-source">空闲</span>
           <span class="led status-unknown" id="ops-led"></span>
           <span id="ops-time">--:--:--</span>
         </div>
       </div>
 
-      <div class="ops-grid">
-        <div class="ops-current">
-          <div class="ops-main">
-            <span class="ops-code" id="ops-code">0</span>
-            <div class="ops-copy">
-              <strong id="ops-label">停止</strong>
-              <span id="ops-sub">等待指令</span>
+      <div class="monitor-grid">
+        <div class="monitor-block monitor-command">
+          <div class="monitor-head">
+            <span>当前指令</span>
+            <span class="status-chip status-unknown" id="ops-source">空闲</span>
+          </div>
+          <div class="ops-current">
+            <div class="ops-main">
+              <span class="ops-code" id="ops-code">0</span>
+              <div class="ops-copy">
+                <strong id="ops-label">停止</strong>
+                <span id="ops-sub">等待指令</span>
+              </div>
             </div>
-          </div>
-          <div class="ops-facts">
-            <div><span>来源</span><strong id="ops-fact-source">--</strong></div>
-            <div><span>PWM</span><strong id="ops-fact-pwm">--</strong></div>
-            <div><span>持续</span><strong id="ops-fact-age">--</strong></div>
-            <div><span>串口</span><strong id="ops-fact-serial">--</strong></div>
-          </div>
-          <div class="ops-live">
-            <span>轮速 <b id="ops-wheels">--</b></span>
-            <span>里程 <b id="ops-dist">--</b></span>
-            <span>底盘 <b id="ops-body">--</b></span>
+            <div class="ops-facts">
+              <div><span>来源</span><strong id="ops-fact-source">--</strong></div>
+              <div><span>PWM</span><strong id="ops-fact-pwm">--</strong></div>
+              <div><span>持续</span><strong id="ops-fact-age">--</strong></div>
+              <div><span>串口</span><strong id="ops-fact-serial">--</strong></div>
+            </div>
+            <div class="ops-live">
+              <span>轮速 <b id="ops-wheels">--</b></span>
+              <span>里程 <b id="ops-dist">--</b></span>
+              <span>底盘 <b id="ops-body">--</b></span>
+            </div>
           </div>
         </div>
 
-        <div class="ops-log">
-          <div class="ops-log-head">
-            <span>最近运行记录</span>
-            <span class="muted" id="ops-event-count" title="内存环形缓冲，最多 120 条；服务重启后清空">0 条</span>
+        <div class="monitor-block monitor-video" id="video-panel" data-state="waiting">
+          <div class="monitor-head">
+            <span>视频监控</span>
+            <a href="/stream" target="_blank" rel="noopener">打开 MJPEG</a>
           </div>
-          <ol class="ops-events" id="ops-events">
-            <li class="ops-empty">暂无运行记录</li>
-          </ol>
+          <div class="video-frame">
+            <img id="video-stream" alt="Edge 相机视频流">
+            <div class="video-empty" id="video-empty">
+              <span>等待视频流</span>
+              <small>/camera/color/image_raw · MJPEG</small>
+            </div>
+          </div>
+          <div class="monitor-foot">
+            <span id="video-state">等待相机</span>
+            <span>EDGE MJPEG</span>
+          </div>
+        </div>
+
+        <div class="monitor-block monitor-radar" id="radar-panel" data-state="waiting">
+          <div class="monitor-head">
+            <span>雷达地图</span>
+            <span class="monitor-tag" id="radar-state">等待</span>
+          </div>
+          <div class="radar-frame">
+            <canvas id="radar-canvas" aria-label="雷达地图"></canvas>
+            <div class="radar-empty" id="radar-empty">
+              <span>等待 /map 或 /scan</span>
+              <small>SLAM/导航启动后自动叠加地图与扫描</small>
+            </div>
+          </div>
+          <div class="radar-legend">
+            <span><i class="legend-occupied"></i>占据</span>
+            <span><i class="legend-free"></i>空闲</span>
+            <span><i class="legend-unknown"></i>未知</span>
+            <span><i class="legend-scan"></i>扫描</span>
+            <span><i class="legend-robot"></i>机器人</span>
+            <span id="radar-meta">--</span>
+          </div>
         </div>
       </div>
     </section>
@@ -668,17 +703,20 @@
             </label>
           </div>
 
-          <form id="speaker-form" class="speaker-say" autocomplete="off">
-            <input id="speaker-text" type="text" maxlength="120"
-                   placeholder="输入要播报的文字，例如：机器人已到达目标点">
-            <button class="btn btn-primary" type="submit">语音播报</button>
-          </form>
+          <div class="speaker-say-block">
+            <span class="speaker-section-title">语音播报</span>
+            <form id="speaker-form" class="speaker-say" autocomplete="off">
+              <input id="speaker-text" type="text" maxlength="120"
+                     placeholder="输入要播报的文字，例如：机器人已到达目标点">
+              <button class="btn btn-primary" type="submit">语音播报</button>
+            </form>
 
-          <div class="speaker-quick" id="speaker-quick">
-            <button type="button" class="speaker-chip" data-text="机器人已启动">机器人已启动</button>
-            <button type="button" class="speaker-chip" data-text="已到达目标点">已到达目标点</button>
-            <button type="button" class="speaker-chip" data-text="请注意避让">请注意避让</button>
-            <button type="button" class="speaker-chip" data-text="任务完成">任务完成</button>
+            <div class="speaker-quick" id="speaker-quick">
+              <button type="button" class="speaker-chip" data-text="机器人已启动">机器人已启动</button>
+              <button type="button" class="speaker-chip" data-text="已到达目标点">已到达目标点</button>
+              <button type="button" class="speaker-chip" data-text="请注意避让">请注意避让</button>
+              <button type="button" class="speaker-chip" data-text="任务完成">任务完成</button>
+            </div>
           </div>
 
           <div class="mic-block" id="mic-block" data-status="unknown">
@@ -722,12 +760,25 @@
       </div>
       <div id="device-grid" class="device-grid"></div>
     </section>
+
+    <section class="panel log-panel" id="ops-log-panel">
+      <div class="panel-head">
+        <div>
+          <span class="eyebrow">EVENT LOG · RING BUFFER 120</span>
+          <h2>最近运行记录</h2>
+        </div>
+        <span class="muted" id="ops-event-count" title="内存环形缓冲，最多 120 条；服务重启后清空">0 条</span>
+      </div>
+      <ol class="ops-events" id="ops-events">
+        <li class="ops-empty">暂无运行记录</li>
+      </ol>
+    </section>
   </main>
 
   <footer class="footer">
-    <span>RUSH-MOG · EDGE DIGITAL TWIN CONSOLE</span>
+    <span>RUSH-MOG · EDGE DIGITAL TWIN CONSOLE · LAYOUT 20261115f</span>
     <span id="footer-status">DISCONNECTED</span>
-    <span>API: /api/modules · /api/body · /api/speaker · /ros/health</span>
+    <span>API: /api/modules · /api/body · /api/radar · /api/speaker · /ros/health</span>
   </footer>
 
   <div id="scrim" class="scrim" hidden></div>
@@ -755,6 +806,6 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="dashboard.js?v=20261114r"></script>
+  <script src="dashboard.js?v=20261115f"></script>
 </body>
 </html>

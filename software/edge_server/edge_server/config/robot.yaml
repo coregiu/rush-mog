@@ -58,11 +58,11 @@ edge_server:
       discovery_url: "http://127.0.0.1/api/center"
       discovery_interval_sec: 5.0
       discovery_timeout_sec: 1.0
-      host: ""                       # 可选：直接写 Center IP，跳过发现
+      host: "192.168.3.25"           # 本现场 Center IP；注册表不可用时直连
       port: 8000
       api_key: ""
-      timeout_sec: 1.5
-      max_rate_hz: 5.0
+      timeout_sec: 3.0               # 实测 1050 Ti 单次约 1.2s，留余量
+      max_rate_hz: 2.0
       chunk_size: 1
       image_key: "front"
       color_order: "bgr"
@@ -462,7 +462,7 @@ edge_server:
   # 健康检查（health_monitor_node）
   #   GET  http://127.0.0.1:8090/ros/health   -> Edge Server/dashboard
   #   ROS  /center/health + /center/healthcheck
-  # 接口契约与字段语义见 software/edge_server/docs/HEALTHCHECK.md。
+  # 接口契约与字段语义见 software/edge_server/HEALTHCHECK.md。
   #
   # 已实现：speaker -> /body/audio_status，microphone -> /body/mic_status
   # 仍在缺口（状态 unknown，不影响整体 ok）：

@@ -11,6 +11,11 @@
 | A. venv + systemd | GPU 工作站/笔记本长期运行（推荐） | `CENTER_SERVER_EDGE_URL` |
 | B. Docker Compose（CPU） | 快速联调、stub 链路、无 GPU | compose `.env` 的 `EDGE_URL` |
 | C. Docker Compose + GPU | 已有 NVIDIA Container Toolkit 的服务器 | 同上 |
+| D. Windows 计划任务 | **本现场 Center（192.168.3.25）** | `start_center.ps1` 环境变量 |
+
+> 本现场使用 D 方案（Edge 固定 `192.168.3.26`）。一键脚本与日志路径见
+> [`windows/README.md`](windows/README.md)，完整生命周期见
+> [`../README.md`](../README.md) §9。
 
 ---
 
@@ -104,7 +109,7 @@ journalctl -u rush-mog-center -f
 ```bash
 curl -s http://127.0.0.1:8000/v1/health | python3 -m json.tool | head -30
 curl -s http://127.0.0.1:8000/v1/handshake | python3 -m json.tool
-# Edge 侧应看到 CENTER（把 192.168.3.26 换成实际地址）
+# Edge 侧应看到 CENTER（本现场为 192.168.3.26）
 curl -s http://192.168.3.26/api/center | python3 -m json.tool
 ```
 
@@ -169,7 +174,7 @@ docker compose -f deploy/docker-compose.yml logs -f center
   "version": "0.2.0",
   "status": "ok",
   "summary": "ready=True backend=smolvla device=cuda model=lerobot/smolvla_base",
-  "ip": "192.168.4.50",
+  "ip": "192.168.3.25",
   "port": 8000,
   "scheme": "http",
   "health_port": 8000, "health_path": "/v1/health",
@@ -188,12 +193,12 @@ Edge 响应（字段供 Center 记录，不参与推理）：
 {
   "ok": true,
   "module": "center",
-  "ip": "192.168.4.50",
+  "ip": "192.168.3.25",
   "port": 8000,
   "scheme": "http",
-  "health_url": "http://192.168.4.50:8000/v1/health",
-  "params_url": "http://192.168.4.50:8000/v1/params",
-  "infer_url": "http://192.168.4.50:8000/v1/infer",
+  "health_url": "http://192.168.3.25:8000/v1/health",
+  "params_url": "http://192.168.3.25:8000/v1/params",
+  "infer_url": "http://192.168.3.25:8000/v1/infer",
   "handshake": "startup",
   "message": "CENTER 握手成功，地址已记录"
 }
