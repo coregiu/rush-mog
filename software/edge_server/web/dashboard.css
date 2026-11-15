@@ -335,6 +335,14 @@ body {
 .speaker-volume { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; }
 .speaker-volume input[type="range"] { width: 120px; accent-color: var(--cyan); }
 .speaker-volume strong { color: var(--text); font-family: var(--mono); font-size: 10px; min-width: 34px; }
+.speaker-model { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; }
+.speaker-model select {
+  height: 30px; padding: 0 8px; border-radius: 8px;
+  border: 1px solid rgba(125, 211, 252, 0.22);
+  background: rgba(8, 22, 34, 0.85); color: var(--text);
+  font-family: var(--mono); font-size: 11px;
+}
+.speaker-model select:focus { outline: none; border-color: rgba(34, 211, 238, 0.6); }
 .speaker-say { display: flex; gap: 8px; }
 .speaker-say input {
   flex: 1; min-width: 0; height: 36px; padding: 0 12px;

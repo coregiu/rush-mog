@@ -22,8 +22,7 @@
 | 7 小车底盘       | 金属底盘，JGB37520电机带霍尔效应编码器，麦克纳姆万向轮             | 350       |
 | 8 L298N四驱板    | 四驱的L298N电机驱动。                                           | 28       |
 | 9 电源及转换板    | 12V电源，要3600毫安时以上，DC接口。 12V转5V 3A和3.3V 1A转换板。    | 50       |
-| 10 麦克风        | USB全向麦克风，USB口接树莓派                                       | 25       |
-| 11 音箱         | 蓝牙音箱，树莓派蓝牙连接                                           | 50       |
+| 10 音箱/麦克风  | **NewMine**（默认）或 **HONOR AM510** 蓝牙音箱/麦克风一体，二选一，蓝牙连接树莓派 | 50–99    |
 
 > 目标增量预算约 ¥900–1500（不含机械臂/底盘）。详细选型、接线、引脚冲突和标定见
 > [SLAM_NAV.md](SLAM_NAV.md)。
@@ -38,14 +37,13 @@
 | 树莓派 SDA IIC1: GPIO2   | ICM 20948 SDA |  陀螺仪矫正 | |
 | 树莓派 SCL IIC1: GPIO3   | ICM 20948 SCL |  陀螺仪矫正 |  |
 | 树莓派 USB1   | 深度相机 |  视觉SLM建模 |  |
-| 树莓派 USB2   | 全向麦克风 |  语音识别控制 |  |
-| 树莓派 蓝牙1   | 蓝牙音箱 |  语音外放 |  |
+| 树莓派 蓝牙1   | NewMine / HONOR AM510（二选一） |  语音外放 + HFP 录音 | 2.4G Wi-Fi 与蓝牙可能互扰 |
 
 ## 模块说明
 
 #### 1 树莓派
 <img src="modules/raspberry.jpg" />
-树莓派 4B作为机载 ROS2 计算平台：接激光雷达、相机、ICM-20948、悬崖传感器、麦克风、音箱。
+树莓派 4B作为机载 ROS2 计算平台：接激光雷达、相机、ICM-20948、悬崖传感器、NewMine / AM510 蓝牙音箱/麦克风。
 通过 UART 与 STM32 通信，运行 EKF/SLAM/Nav2 与 edge_server 的导航/搜索节点。
 
 #### 2 控制中心-STM32单板
@@ -143,13 +141,30 @@ dashboard 的 **BODY CONTROL** 面板实时显示。
 小车上有12V，5V， 3.3V三种电压，最好用12V供电电源，并用电压转换板转换一下。
 <img src="modules/power_module.jpg" />
 
-#### 10 全向麦克风
-使用NewMine音箱和麦克风合的蓝牙音箱。
+#### 10 蓝牙音箱/麦克风一体（NewMine / HONOR AM510 可选）
 
-#### 11 蓝牙音箱
-使用NewMine音箱和麦克风合的蓝牙音箱。
+默认沿用 **NewMine 蓝牙音箱**，也可以切换到 **HONOR AM510 荣耀魔方**；两者都是
+音箱+麦克风一体，少占树莓派 USB 口。Edge Server 用 `edge.speaker.model` 选择，
+dashboard 的“型号”下拉可运行时切换（`POST /api/speaker/model`）。
 
-<img src="modules/speaker.jpg" />
+| 项目 | NewMine（默认） | HONOR AM510（可选） |
+| --- | --- | --- |
+| 连接 | 树莓派板载蓝牙 | 树莓派板载蓝牙 4.2 |
+| 音频 | A2DP 播放 + HFP 麦克风 | A2DP 播放 + HFP 麦克风 |
+| 供电/防护 | 电池/USB 供电 | 660mAh，Micro-USB，IP54 |
+| 备注 | 原车配置，优先保证稳定 | 3W 全频；Class 是 audio-headset |
+
+- 首次配对前执行 `bluetoothctl pairable on`，否则适配器可能不保存 link key
+  （抓包为 `Store hint: No`），重启后需要重新配对。
+- 首次使用：`bluetoothctl pair <MAC>`、`trust <MAC>`、`connect <MAC>`；之后自动重连。
+- 蓝牙名先用 `bluetoothctl devices` 确认，再填 `edge.speaker.models.<id>.device_name`
+  和 `device_mac`。AM510 进入配对模式：开机后快速三击按键。
+- 默认 `model: newmine`，不强制切 profile；切到 AM510 时 `force_a2dp: true`，
+  只有 HFP sink 时才会主动切 A2DP。
+- 外放走 A2DP；麦克风走 HFP/HSP，录音期间会降到 8 kHz mono，停止后自动恢复 A2DP。
+  配置和排障见 [edge_server/README.md](../software/edge_server/README.md) §5.6/§5.7。
+
+<img src="modules/speaker.jpg" style="zoom:60%;" />
 
 ## 硬件设计工具KiCAD
 

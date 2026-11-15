@@ -2,7 +2,7 @@
 
 本模块把树莓派上的外部命令收敛到一个可测试的后台服务：
 
-- 自动发现/配对/信任/连接蓝牙音箱（默认 ``newmine``）；
+- 自动发现/配对/信任/连接蓝牙音箱（默认 ``newmine``，可切到 ``am510``）；
 - 连接后等待 PipeWire/PulseAudio 创建 A2DP sink，并设为默认输出；
 - 串行执行 TTS 语音与本地音频文件，避免多个播放器抢占设备；
 - 提供线程安全的状态快照，供 HTTP API、ROS 话题和 dashboard 复用。
@@ -13,9 +13,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import logging
 import os
 import queue
+import random
 import re
 import shutil
 import subprocess
@@ -23,10 +26,24 @@ import tempfile
 import threading
 import time
 import wave
+from array import array
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Mapping, Optional
 
 LOGGER = logging.getLogger("edge_server.speaker")
+
+try:  # edge-tts 是可选依赖；没有就用 CLI/ espeak 回退。
+    import edge_tts as _edge_tts_api
+except Exception:  # noqa: BLE001
+    _edge_tts_api = None
+
+# dashboard 上最常点的几句话，启动后提前合成到缓存。
+_PREWARM_TEXTS = (
+    "机器人已启动",
+    "已到达目标点",
+    "请注意避让",
+    "任务完成",
+)
 
 _MAC_RE = re.compile(r"^[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}$")
 _VOICE_RE = re.compile(r"^[A-Za-z0-9_+\-]{1,24}$")
@@ -44,6 +61,76 @@ _STATE_CONNECTING = "connecting"
 _STATE_CONNECTED = "connected"
 _STATE_DISCONNECTED = "disconnected"
 _STATE_ERROR = "error"
+
+# 可选音箱型号；MAC 留空则由 config 的 models.<id>.device_mac 提供。
+_MODEL_DEFAULTS = {
+    "newmine": {
+        "label": "NewMine",
+        "device_name": "newmine",
+        "device_mac": "",
+        "force_a2dp": False,
+    },
+    "am510": {
+        "label": "HONOR AM510",
+        "device_name": "HONOR AM510",
+        "device_mac": "",
+        "force_a2dp": True,
+    },
+}
+_DEFAULT_MODEL = "newmine"
+
+
+def _keepalive_pcm(amplitude: int = 128) -> bytes:
+    """50ms 48kHz stereo s16le 的低电平 dither。
+
+    不能用全 0：部分蓝牙音箱检测到数字静音会把功放/噪声门关掉，下一条
+    TTS 的第一个字就会被吞掉。±128 LSB 约 -53 dBFS，远低于语音，但足以
+    让链路保持“有信号”，避免音箱进入静音/省电状态。
+    """
+    frames = 2400  # 50ms @ 48kHz
+    rng = random.Random(0xA510)
+    samples = array("h")
+    for _ in range(frames * 2):
+        samples.append(rng.randint(-amplitude, amplitude))
+    return samples.tobytes()
+
+
+def normalize_model(value: Any) -> str:
+    """把用户输入/配置值归一化为型号 id。"""
+    text = str(value or "").strip().casefold()
+    if text in {"newmine", "new mine"}:
+        return "newmine"
+    if text in {"am510", "honor am510", "hono am510"}:
+        return "am510"
+    return ""
+
+
+def build_speaker_models(cfg: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """合并内置型号与 ``edge.speaker.models`` 配置。"""
+    models = {key: dict(value) for key, value in _MODEL_DEFAULTS.items()}
+    raw = cfg.get("models") or {}
+    if not isinstance(raw, Mapping):
+        return models
+    for key, item in raw.items():
+        model = normalize_model(key) or str(key or "").strip().casefold()
+        if not model:
+            continue
+        entry = dict(models.get(model) or {})
+        entry.setdefault("label", str(key))
+        entry.setdefault("device_name", str(key))
+        entry.setdefault("device_mac", "")
+        entry.setdefault("force_a2dp", False)
+        if isinstance(item, Mapping):
+            if item.get("label"):
+                entry["label"] = str(item["label"]).strip()
+            if item.get("device_name"):
+                entry["device_name"] = str(item["device_name"]).strip()
+            if "device_mac" in item:
+                entry["device_mac"] = normalize_mac(item.get("device_mac"))
+            if "force_a2dp" in item:
+                entry["force_a2dp"] = bool(item.get("force_a2dp"))
+        models[model] = entry
+    return models
 
 
 class SpeakerError(RuntimeError):
@@ -130,9 +217,12 @@ def parse_wpctl_status(output: str) -> List[Dict[str, Any]]:
 
 
 def select_sink(
-    sinks: List[Mapping[str, Any]], mac: str = ""
+    sinks: List[Mapping[str, Any]],
+    mac: str = "",
+    *,
+    require_a2dp: bool = False,
 ) -> Optional[Dict[str, Any]]:
-    """优先选择与 MAC 匹配的 bluez sink，否则退回第一个 bluez sink。"""
+    """优先选择与 MAC 匹配的 A2DP bluez sink，否则退回第一个 bluez sink。"""
     bluez = [
         dict(item)
         for item in sinks
@@ -141,11 +231,24 @@ def select_sink(
     if not bluez:
         return None
     normalized = normalize_mac(mac).replace(":", "_").lower()
+    matched = bluez
     if normalized:
-        for item in bluez:
-            if normalized in str(item.get("name", "")).lower():
-                return item
-    return bluez[0]
+        matched = [
+            item
+            for item in bluez
+            if normalized in str(item.get("name", "")).lower()
+        ]
+        if not matched:
+            # 多台音箱同时在线时，绝不能把另一台的 sink 当成当前型号。
+            return None
+    a2dp = [
+        item for item in matched if "a2dp-sink" in str(item.get("name", ""))
+    ]
+    if a2dp:
+        return a2dp[0]
+    if require_a2dp:
+        return None
+    return matched[0]
 
 
 @dataclass
@@ -210,9 +313,10 @@ class SpeakerManager:
     """自动连接蓝牙音箱并串行播放语音。
 
     ``config`` 对应 ``edge.speaker``：
-    ``enabled``/``device_name``/``device_mac``/``auto_connect``/
-    ``connect_interval_sec``/``scan_timeout_sec``/``volume``/
-    ``audio_dir``/``tts.*``。所有外部命令都经由 ``runner``。
+    ``enabled``/``model``/``models``/``device_name``/``device_aliases``/
+    ``device_mac``/``auto_connect``/``connect_interval_sec``/
+    ``scan_timeout_sec``/``volume``/``audio_dir``/``tts.*``。
+    所有外部命令都经由 ``runner``。
     """
 
     def __init__(
@@ -235,8 +339,44 @@ class SpeakerManager:
 
         self.enabled = bool(cfg.get("enabled", False))
         self.auto_connect = bool(cfg.get("auto_connect", True))
-        self.device_name = str(cfg.get("device_name", "newmine") or "newmine")
-        self.device_mac = normalize_mac(cfg.get("device_mac", ""))
+        self.keepalive = bool(cfg.get("keepalive", True))
+        self.models = build_speaker_models(cfg)
+        explicit_model = str(cfg.get("model", "") or "").strip()
+        legacy_name = str(cfg.get("device_name", "") or "").strip()
+        legacy_mac = normalize_mac(cfg.get("device_mac", ""))
+        if explicit_model:
+            self.model = normalize_model(explicit_model) or explicit_model.casefold()
+        else:
+            # 兼容旧配置：没有 model 时按 device_name 推断。
+            self.model = normalize_model(legacy_name) or _DEFAULT_MODEL
+        if self.model not in self.models:
+            LOGGER.warning(
+                "未知音箱型号 %s，回退 %s", explicit_model or self.model, _DEFAULT_MODEL
+            )
+            self.model = _DEFAULT_MODEL
+        entry = self.models[self.model]
+        if explicit_model:
+            self.device_name = str(entry.get("device_name") or self.model).strip()
+            self.device_mac = normalize_mac(entry.get("device_mac", ""))
+        else:
+            self.device_name = legacy_name or str(
+                entry.get("device_name") or self.model
+            ).strip()
+            self.device_mac = legacy_mac or normalize_mac(entry.get("device_mac", ""))
+        self.force_a2dp = bool(entry.get("force_a2dp", False))
+        alias_cfg = cfg.get("device_aliases")
+        if alias_cfg is None:
+            alias_cfg = ()
+        elif isinstance(alias_cfg, str):
+            alias_cfg = [alias_cfg]
+        self.device_aliases = tuple(
+            name for name in (str(item).strip() for item in alias_cfg) if name
+        )
+        self.device_names = tuple(
+            dict.fromkeys(
+                name for name in (self.device_name, *self.device_aliases) if name
+            )
+        )
         self.connect_interval_sec = _clamp(
             float(cfg.get("connect_interval_sec", 20.0)), 5.0, 600.0
         )
@@ -250,6 +390,11 @@ class SpeakerManager:
         self.recover_interval_sec = _clamp(
             float(cfg.get("recover_interval_sec", 180.0)), 30.0, 1800.0
         )
+        # 重启 WirePlumber 后要等它重新注册 A2DP endpoint，太短会报
+        # br-connection-profile-unavailable / Protocol not available。
+        self.recover_wait_sec = _clamp(
+            float(cfg.get("recover_wait_sec", 15.0)), 1.0, 30.0
+        )
         self.sink_wait_sec = _clamp(
             float(cfg.get("sink_wait_sec", 8.0)), 1.0, 30.0
         )
@@ -257,6 +402,7 @@ class SpeakerManager:
         self.audio_dir = os.path.abspath(
             os.path.expanduser(str(cfg.get("audio_dir", "~/.local/share/rush-mog/audio")))
         )
+        self.tts_cache_dir = os.path.join(self.audio_dir, "tts_cache")
         self.temp_dir = os.path.abspath(
             os.path.expanduser(str(temp_dir or os.path.join(tempfile.gettempdir(), "edge_server_audio")))
         )
@@ -282,13 +428,21 @@ class SpeakerManager:
         )
 
         self._lock = threading.RLock()
+        self._prepare_lock = threading.Lock()
+        self._preparing: set = set()
         self._closing = threading.Event()
         self._wake = threading.Event()
         self._stop_playback = threading.Event()
         self._queue: "queue.Queue[Optional[tuple]]" = queue.Queue()
         self._connect_thread: Optional[threading.Thread] = None
         self._play_thread: Optional[threading.Thread] = None
+        self._synth_thread: Optional[threading.Thread] = None
+        self._prewarm_thread: Optional[threading.Thread] = None
+        self._keepalive_thread: Optional[threading.Thread] = None
         self._player: Optional[subprocess.Popen] = None
+        self._keepalive_proc: Optional[subprocess.Popen] = None
+        self._keepalive_chunk = _keepalive_pcm()
+        self._synth_queue: "queue.Queue[Optional[dict]]" = queue.Queue()
         self._started = False
 
         self._state = _STATE_STARTING if self.enabled else _STATE_DISABLED
@@ -310,6 +464,7 @@ class SpeakerManager:
 
         try:
             os.makedirs(self.temp_dir, exist_ok=True)
+            os.makedirs(self.tts_cache_dir, exist_ok=True)
         except OSError:
             pass
 
@@ -334,23 +489,50 @@ class SpeakerManager:
             self._play_thread = threading.Thread(
                 target=self._play_loop, name="edge-speaker-play", daemon=True
             )
+            self._synth_thread = threading.Thread(
+                target=self._synth_loop, name="edge-speaker-tts", daemon=True
+            )
+            self._prewarm_thread = threading.Thread(
+                target=self._prewarm_loop,
+                name="edge-speaker-prewarm",
+                daemon=True,
+            )
+            self._keepalive_thread = threading.Thread(
+                target=self._keepalive_loop,
+                name="edge-speaker-keepalive",
+                daemon=True,
+            )
             self._connect_thread.start()
             self._play_thread.start()
+            self._synth_thread.start()
+            self._prewarm_thread.start()
+            self._keepalive_thread.start()
 
     def stop(self) -> None:
         """停止线程、清空队列并终止当前播放器。"""
         self._closing.set()
         self._wake.set()
         self.stop_playback()
+        self._stop_keepalive()
         with self._lock:
             self._queue.put(None)
-        for thread in (self._connect_thread, self._play_thread):
+            self._synth_queue.put(None)
+        for thread in (
+            self._connect_thread,
+            self._play_thread,
+            self._synth_thread,
+            self._prewarm_thread,
+            self._keepalive_thread,
+        ):
             if thread is not None and thread.is_alive():
                 thread.join(timeout=2.5)
         with self._lock:
             self._started = False
             self._connect_thread = None
             self._play_thread = None
+            self._synth_thread = None
+            self._prewarm_thread = None
+            self._keepalive_thread = None
 
     # ------------------------------------------------------------- status
     def status(self) -> Dict[str, Any]:
@@ -376,6 +558,9 @@ class SpeakerManager:
             return {
                 "ok": True,
                 "enabled": bool(self.enabled),
+                "keepalive": bool(self.keepalive),
+                "model": str(self.model),
+                "models": self.available_models(),
                 "state": state,
                 "status": audio_status,
                 "connected": connected,
@@ -505,6 +690,67 @@ class SpeakerManager:
         return self.status()
 
     # ------------------------------------------------------------- commands
+    def available_models(self) -> List[Dict[str, Any]]:
+        """返回可选音箱型号（供 dashboard/API）。"""
+        with self._lock:
+            models = dict(self.models)
+        return [
+            {
+                "id": key,
+                "label": str(item.get("label") or key),
+                "device_name": str(item.get("device_name") or key),
+                "force_a2dp": bool(item.get("force_a2dp", False)),
+            }
+            for key, item in models.items()
+        ]
+
+    def select_model(self, model: Any) -> Dict[str, Any]:
+        """切换音箱型号并立即重连；切换只在本次运行内生效。"""
+        if not self.enabled:
+            raise SpeakerError("音箱功能未启用")
+        key = normalize_model(model) or str(model or "").strip().casefold()
+        with self._lock:
+            if key not in self.models:
+                raise ValueError(f"未知音箱型号: {model}")
+            if key == self.model:
+                return self.status()
+            entry = dict(self.models[key])
+            old_mac = str(self.device_mac)
+            was_connected = bool(self._connected)
+        self.stop_playback()
+        self._stop_keepalive()
+        if old_mac and was_connected:
+            self._run(["bluetoothctl", "disconnect", old_mac], timeout=8.0)
+        if self.recover_wireplumber:
+            # 切型号时清掉旧设备的 card/profile 残留，避免新设备
+            # 报 br-connection-profile-unavailable。
+            self._run(
+                ["systemctl", "--user", "restart", "wireplumber"],
+                timeout=15.0,
+            )
+            time.sleep(1.0)
+            self._last_profile_recover_at = time.monotonic()
+        with self._lock:
+            self.model = key
+            self.device_name = str(entry.get("device_name") or key).strip()
+            self.device_mac = normalize_mac(entry.get("device_mac", ""))
+            self.device_aliases = ()
+            self.device_names = (self.device_name,)
+            self.force_a2dp = bool(entry.get("force_a2dp", False))
+            self._display_name = self.device_name
+            self._connected = False
+            self._paired = False
+            self._trusted = False
+            self._sink_name = ""
+            self._sink_id = 0
+            self._sink_ready = False
+            self._last_error = ""
+            self._state = _STATE_STARTING if self.enabled else _STATE_DISABLED
+        self._emit("speaker", f"已切换音箱型号: {self.device_name}", "info")
+        self.start()
+        self._wake.set()
+        return self.status()
+
     def reconnect(self) -> Dict[str, Any]:
         """立即触发一次连接检查（不阻塞 HTTP 线程）。"""
         if not self.enabled:
@@ -512,6 +758,73 @@ class SpeakerManager:
         self.start()
         self._wake.set()
         return self.status()
+
+    def prepare(self, text: Any, *, voice: str = "") -> Dict[str, Any]:
+        """把一段文字提前合成到缓存；不播放，供 dashboard 输入时调用。"""
+        if not self.enabled:
+            raise SpeakerError("音箱功能未启用")
+        cleaned = sanitize_text(text, self.tts_max_chars)
+        if not cleaned:
+            raise ValueError("播报文本为空")
+        target_voice = str(voice or self.tts_voice).strip()
+        if not _VOICE_RE.match(target_voice):
+            raise ValueError("voice 参数非法")
+        if self._tts_backend_name() == "none":
+            raise SpeakerError("未安装 TTS 后端")
+        speed = int(self.tts_speed)
+        pitch = int(self.tts_pitch)
+        cache = self._tts_cache_path(cleaned, target_voice, speed, pitch)
+        if self._cache_valid(cache):
+            return {
+                "ok": True,
+                "cached": True,
+                "message": "已缓存",
+                "text": cleaned,
+            }
+        with self._prepare_lock:
+            if cache in self._preparing:
+                return {
+                    "ok": True,
+                    "cached": False,
+                    "message": "正在预合成",
+                    "text": cleaned,
+                }
+            self._preparing.add(cache)
+
+        def worker() -> None:
+            path = os.path.join(
+                self.temp_dir,
+                f"prepare-{os.getpid()}-{time.time_ns()}.wav",
+            )
+            try:
+                self._synthesize(
+                    cleaned,
+                    path,
+                    voice=target_voice,
+                    speed=speed,
+                    pitch=pitch,
+                )
+                if self._cache_valid(path):
+                    self._store_cache(path, cache)
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.warning("TTS prepare failed: %s", exc)
+            finally:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+                with self._prepare_lock:
+                    self._preparing.discard(cache)
+
+        threading.Thread(
+            target=worker, name="edge-speaker-prepare", daemon=True
+        ).start()
+        return {
+            "ok": True,
+            "cached": False,
+            "message": "已开始预合成",
+            "text": cleaned,
+        }
 
     def say(self, text: Any, *, voice: str = "") -> Dict[str, Any]:
         """排队播报一段文本（espeak-ng 等 TTS 后端）。"""
@@ -524,15 +837,18 @@ class SpeakerManager:
         if not _VOICE_RE.match(target_voice):
             raise ValueError("voice 参数非法")
         self._require_audio_ready()
-        self._enqueue(
-            "say",
-            {
-                "text": cleaned,
-                "voice": target_voice,
-                "speed": int(self.tts_speed),
-                "pitch": int(self.tts_pitch),
-            },
-        )
+        job = {
+            "text": cleaned,
+            "voice": target_voice,
+            "speed": int(self.tts_speed),
+            "pitch": int(self.tts_pitch),
+            "event": threading.Event(),
+            "path": "",
+            "error": "",
+            "cancelled": False,
+            "cached": False,
+        }
+        self._enqueue_say(job)
         with self._lock:
             self._last_text = cleaned
             self._play_error = ""
@@ -647,6 +963,19 @@ class SpeakerManager:
         info = self._bluetooth_info(mac) if mac else {}
 
         if connected and info.get("connected"):
+            if sink_ready and not self._sink_alive():
+                with self._lock:
+                    self._sink_ready = False
+                    self._sink_name = ""
+                    self._sink_id = 0
+                    self._last_error = "音频 sink 已消失"
+                self._stop_keepalive()
+                self._emit(
+                    "speaker",
+                    "音频 sink 已消失，重新协商 A2DP",
+                    "warn",
+                )
+                sink_ready = False
             if not sink_ready:
                 # BlueZ 有时显示 connected，但 A2DP sink 没起来（常见于
                 # br-connection-profile-unavailable 之后）。只等 sink 不会自愈，
@@ -686,25 +1015,32 @@ class SpeakerManager:
         )
         devices_result = self._run(["bluetoothctl", "devices"], timeout=6.0)
         devices = parse_bluetooth_devices(devices_result.stdout)
-        target_name = self.device_name.strip().casefold()
-        configured_mac = normalize_mac(self._cfg.get("device_mac", ""))
+        target_names = [name.casefold() for name in self.device_names]
+        configured_mac = normalize_mac(self.device_mac)
         match = None
         for device in devices:
             if configured_mac and device["mac"] == configured_mac:
                 match = device
                 break
-            name = device["name"].casefold()
-            if target_name and (
-                name == target_name
-                or (len(target_name) >= 4 and target_name in name)
-                or (len(name) >= 4 and name in target_name)
-            ):
-                match = device
-                break
+        if match is None:
+            # 按 device_name → device_aliases 的优先级做模糊匹配。
+            for target_name in target_names:
+                for device in devices:
+                    name = device["name"].casefold()
+                    if target_name and (
+                        name == target_name
+                        or (len(target_name) >= 4 and target_name in name)
+                        or (len(name) >= 4 and name in target_name)
+                    ):
+                        match = device
+                        break
+                if match is not None:
+                    break
         if match is None:
             detail = _short_output(result.stderr or result.stdout)
+            configured = " / ".join(self.device_names)
             self._set_error(
-                f"未发现蓝牙音箱 {self.device_name}"
+                f"未发现蓝牙音箱 {configured}"
                 + (f"（{detail}）" if detail else "")
             )
             return ""
@@ -804,19 +1140,42 @@ class SpeakerManager:
             ["systemctl", "--user", "restart", "wireplumber"],
             timeout=15.0,
         )
-        time.sleep(1.2)
+        time.sleep(self.recover_wait_sec)
         return True
+
+    def _force_a2dp_profile(self, mac: str) -> None:
+        """把 headset 类设备的 card profile 从 HFP 切回 A2DP。
+
+        AM510 的 Class 是 audio-headset，PipeWire 有时会把初始 profile 选成
+        ``headset-head-unit``，此时只有 HFP sink，没有 A2DP sink。
+        """
+        card = "bluez_card." + mac.replace(":", "_") if mac else ""
+        if not card:
+            return
+        self._run(
+            ["pactl", "set-card-profile", card, "a2dp-sink"], timeout=6.0
+        )
 
     def _refresh_sink(self, mac: str, *, initial: bool = False) -> bool:
         deadline = time.monotonic() + (self.sink_wait_sec if initial else 2.0)
+        profile_tried = False
         while True:
             sinks = self._list_sinks()
-            sink = select_sink(sinks, mac)
+            now = time.monotonic()
+            # 只有显式 force_a2dp 的型号（AM510）才要求 A2DP；NewMine 保持
+            # 原来的“有 bluez sink 就用”，避免反复切 profile 导致断连。
+            sink = select_sink(sinks, mac, require_a2dp=self.force_a2dp)
+            if sink is None and self.force_a2dp and not profile_tried:
+                self._force_a2dp_profile(mac)
+                profile_tried = True
+            if sink is None and now >= deadline:
+                sink = select_sink(sinks, mac)
             if sink is not None:
                 with self._lock:
                     self._sink_name = str(sink["name"])
                     self._sink_id = int(sink.get("id", 0) or 0)
                     self._sink_ready = True
+                    self._last_error = ""
                 self._set_default_sink()
                 self._apply_volume()
                 if initial:
@@ -826,7 +1185,9 @@ class SpeakerManager:
                         "ok",
                     )
                 return True
-            if self._closing.is_set() or time.monotonic() >= deadline:
+            if self._closing.is_set():
+                break
+            if now >= deadline:
                 break
             time.sleep(0.5)
         with self._lock:
@@ -842,6 +1203,7 @@ class SpeakerManager:
         return False
 
     def _mark_disconnected(self, reason: str) -> None:
+        self._stop_keepalive()
         with self._lock:
             was_connected = self._connected
             self._connected = False
@@ -877,6 +1239,17 @@ class SpeakerManager:
                 return parse_wpctl_status(result.stdout)
         return []
 
+    def _sink_alive(self) -> bool:
+        """当前记录的 A2DP sink 是否仍在 PipeWire/PulseAudio 里。"""
+        with self._lock:
+            name = str(self._sink_name)
+            ready = bool(self._sink_ready)
+        if not ready or not name:
+            return False
+        return any(
+            str(item.get("name", "")) == name for item in self._list_sinks()
+        )
+
     def _set_default_sink(self) -> None:
         with self._lock:
             name = str(self._sink_name)
@@ -905,6 +1278,87 @@ class SpeakerManager:
                 timeout=5.0,
             )
 
+    # ------------------------------------------------------------- keepalive
+    def _keepalive_loop(self) -> None:
+        """持续送极低电平 dither，既防休眠也防音箱对数字静音自动 mute。"""
+        while not self._closing.is_set():
+            if not self.keepalive:
+                self._stop_keepalive()
+                self._closing.wait(2.0)
+                continue
+            with self._lock:
+                sink = str(self._sink_name)
+                ready = bool(self._connected and self._sink_ready)
+            if not ready or not sink:
+                self._stop_keepalive()
+                self._closing.wait(2.0)
+                continue
+            proc = self._keepalive_proc
+            if (
+                proc is None
+                or proc.poll() is not None
+                or proc.stdin is None
+            ):
+                self._start_keepalive(sink)
+                proc = self._keepalive_proc
+            if proc is None or proc.stdin is None:
+                self._closing.wait(1.0)
+                continue
+            try:
+                proc.stdin.write(self._keepalive_chunk)
+                proc.stdin.flush()
+            except (BrokenPipeError, OSError, ValueError):
+                self._stop_keepalive()
+                self._closing.wait(0.5)
+                continue
+            # 50ms 的 PCM 每 40ms 送一次，留 20% 余量，避免欠载。
+            self._closing.wait(0.04)
+        self._stop_keepalive()
+
+    def _start_keepalive(self, sink: str) -> None:
+        pacat = self._which("pacat")
+        if not pacat:
+            return
+        self._stop_keepalive()
+        try:
+            proc = subprocess.Popen(
+                [
+                    pacat,
+                    "--playback",
+                    f"--device={sink}",
+                    "--format=s16le",
+                    "--rate=48000",
+                    "--channels=2",
+                    "--latency-msec=1000",
+                ],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                bufsize=0,
+            )
+        except OSError:
+            return
+        with self._lock:
+            self._keepalive_proc = proc
+
+    def _stop_keepalive(self) -> None:
+        with self._lock:
+            proc = self._keepalive_proc
+            self._keepalive_proc = None
+        if proc is None:
+            return
+        if proc.stdin is not None:
+            try:
+                proc.stdin.close()
+            except (BrokenPipeError, OSError, ValueError):
+                pass
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
     # ------------------------------------------------------------- playback
     def _enqueue(self, kind: str, payload: Mapping[str, Any]) -> None:
         with self._lock:
@@ -921,6 +1375,186 @@ class SpeakerManager:
             except queue.Empty:
                 break
 
+    def _enqueue_say(self, job: dict) -> None:
+        with self._lock:
+            if self._queue.qsize() >= 20:
+                raise SpeakerError("播放队列已满")
+            self._queue.put(("say", job))
+            self._synth_queue.put(job)
+        self.start()
+
+    def _cancel_job(self, job: Mapping[str, Any]) -> None:
+        job["cancelled"] = True  # type: ignore[index]
+        event = job.get("event")
+        if event is not None:
+            event.set()
+        path = str(job.get("path") or "")
+        if path:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    def _clear_queue(self) -> None:
+        while True:
+            try:
+                item = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            if item is not None:
+                kind, payload = item
+                if kind == "say":
+                    self._cancel_job(payload)
+            self._queue.task_done()
+        while True:
+            try:
+                job = self._synth_queue.get_nowait()
+            except queue.Empty:
+                break
+            if job is not None:
+                self._cancel_job(job)
+            self._synth_queue.task_done()
+
+    def _tts_cache_path(
+        self, text: str, voice: str, speed: int, pitch: int
+    ) -> str:
+        backend = self._tts_backend_name()
+        raw = f"{backend}|{voice}|{speed}|{pitch}|{text}".encode("utf-8")
+        return os.path.join(
+            self.tts_cache_dir, hashlib.sha1(raw).hexdigest() + ".wav"
+        )
+
+    @staticmethod
+    def _cache_valid(path: str) -> bool:
+        try:
+            return os.path.isfile(path) and os.path.getsize(path) > 44
+        except OSError:
+            return False
+
+    def _store_cache(self, source: str, cache: str) -> None:
+        try:
+            os.makedirs(self.tts_cache_dir, exist_ok=True)
+            temporary = cache + ".tmp"
+            shutil.copyfile(source, temporary)
+            os.replace(temporary, cache)
+            # 任意文本缓存会增长；保留最近 200 条即可。
+            entries = [
+                os.path.join(self.tts_cache_dir, name)
+                for name in os.listdir(self.tts_cache_dir)
+                if name.endswith(".wav")
+            ]
+            if len(entries) > 200:
+                entries.sort(key=os.path.getmtime)
+                for old in entries[:-200]:
+                    try:
+                        os.remove(old)
+                    except OSError:
+                        pass
+        except OSError as exc:
+            LOGGER.warning("TTS cache write failed: %s", exc)
+
+    def _prewarm_loop(self) -> None:
+        """启动后把 dashboard 最常点的几句提前合成到缓存。"""
+        if self._tts_backend_name() == "none":
+            return
+        for text in _PREWARM_TEXTS:
+            if self._closing.is_set():
+                return
+            voice = self.tts_voice
+            speed = int(self.tts_speed)
+            pitch = int(self.tts_pitch)
+            cache = self._tts_cache_path(text, voice, speed, pitch)
+            if self._cache_valid(cache):
+                continue
+            path = os.path.join(
+                self.temp_dir, f"prewarm-{os.getpid()}-{time.time_ns()}.wav"
+            )
+            try:
+                self._synthesize(
+                    text, path, voice=voice, speed=speed, pitch=pitch
+                )
+                if self._cache_valid(path):
+                    self._store_cache(path, cache)
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.warning("TTS prewarm failed (%s): %s", text, exc)
+            finally:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+    def _synth_loop(self) -> None:
+        """后台预合成 TTS；播放当前一条时，下一条已经在合成。"""
+        while not self._closing.is_set():
+            try:
+                job = self._synth_queue.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            if job is None:
+                self._synth_queue.task_done()
+                break
+            path = ""
+            try:
+                if job.get("cancelled"):
+                    continue
+                text = str(job.get("text", ""))
+                voice = str(job.get("voice") or self.tts_voice)
+                speed = int(job.get("speed", self.tts_speed))
+                pitch = int(job.get("pitch", self.tts_pitch))
+                cache = self._tts_cache_path(text, voice, speed, pitch)
+                if self._cache_valid(cache):
+                    job["path"] = cache
+                    job["cached"] = True
+                    continue
+                path = os.path.join(
+                    self.temp_dir,
+                    f"say-{os.getpid()}-{time.time_ns()}.wav",
+                )
+                self._synthesize(
+                    text, path, voice=voice, speed=speed, pitch=pitch
+                )
+                if job.get("cancelled"):
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+                else:
+                    job["path"] = path
+                    job["cached"] = False
+                    if self._cache_valid(path):
+                        self._store_cache(path, cache)
+            except Exception as exc:  # noqa: BLE001
+                job["error"] = str(exc)
+                if path:
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+            finally:
+                job["event"].set()
+                self._synth_queue.task_done()
+
+    def _play_say_job(self, job: Mapping[str, Any]) -> None:
+        event = job.get("event")
+        if event is not None and not event.wait(timeout=90.0):
+            raise SpeakerError("TTS 合成超时")
+        if job.get("cancelled"):
+            return
+        error = str(job.get("error") or "")
+        if error:
+            raise SpeakerError(error)
+        path = str(job.get("path") or "")
+        try:
+            if not path or not os.path.isfile(path):
+                raise SpeakerError("TTS 合成结果不存在")
+            self._play_path(path, text=str(job.get("text", "")))
+        finally:
+            if not job.get("cached"):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
     def _play_loop(self) -> None:
         while not self._closing.is_set():
             try:
@@ -931,12 +1565,14 @@ class SpeakerManager:
                 self._queue.task_done()
                 continue
             if self._stop_playback.is_set():
+                if item[0] == "say":
+                    self._cancel_job(item[1])
                 self._queue.task_done()
                 continue
             kind, payload = item
             try:
                 if kind == "say":
-                    self._play_say(payload)
+                    self._play_say_job(payload)
                 elif kind == "file":
                     self._play_path(
                         str(payload.get("path", "")),
@@ -952,26 +1588,12 @@ class SpeakerManager:
                     self._playing = False
                 self._queue.task_done()
 
-    def _play_say(self, payload: Mapping[str, Any]) -> None:
-        text = str(payload.get("text", ""))
-        voice = str(payload.get("voice", self.tts_voice))
-        speed = int(payload.get("speed", self.tts_speed))
-        pitch = int(payload.get("pitch", self.tts_pitch))
-        with self._lock:
-            self._last_text = text
-            self._play_error = ""
-        path = os.path.join(
-            self.temp_dir,
-            f"say-{os.getpid()}-{int(time.time() * 1000)}.wav",
-        )
-        try:
-            self._synthesize(text, path, voice=voice, speed=speed, pitch=pitch)
-            self._play_path(path, text=text)
-        finally:
-            try:
-                os.remove(path)
-            except OSError:
-                pass
+    async def _edge_tts_write(self, text: str, voice: str, path: str) -> None:
+        communicate = _edge_tts_api.Communicate(text, voice)
+        with open(path, "wb") as handle:
+            async for chunk in communicate.stream():
+                if chunk.get("type") == "audio" and chunk.get("data"):
+                    handle.write(chunk["data"])
 
     def _synthesize(
         self, text: str, path: str, *, voice: str, speed: int, pitch: int
@@ -980,49 +1602,69 @@ class SpeakerManager:
         if backend == "none":
             raise SpeakerError("未安装 TTS 后端（espeak-ng）")
         if backend == "edge-tts":
-            mp3 = path + ".mp3"
-            edge_voice = "zh-CN-XiaoxiaoNeural"
-            result = self._run(
-                [
-                    "edge-tts",
-                    "--voice",
-                    edge_voice,
-                    "--text",
-                    text,
-                    "--write-media",
-                    mp3,
-                ],
-                timeout=25.0,
-            )
-            if not result.ok or not os.path.isfile(mp3):
-                raise SpeakerError(f"edge-tts 失败: {_short_output(result.stderr)}")
-            ffmpeg = self._which("ffmpeg")
-            if not ffmpeg:
-                raise SpeakerError("edge-tts 需要 ffmpeg 转码")
-            convert = self._run(
-                [
-                    ffmpeg,
-                    "-y",
-                    "-loglevel",
-                    "error",
-                    "-i",
-                    mp3,
-                    "-ar",
-                    "44100",
-                    "-ac",
-                    "2",
-                    path,
-                ],
-                timeout=30.0,
-            )
             try:
-                os.remove(mp3)
-            except OSError:
-                pass
-            if not convert.ok or not os.path.isfile(path):
-                raise SpeakerError(f"音频转码失败: {_short_output(convert.stderr)}")
-            _prepend_wav_silence(path, self.tts_pre_roll_ms)
-            return
+                mp3 = path + ".mp3"
+                edge_voice = "zh-CN-XiaoxiaoNeural"
+                if _edge_tts_api is not None:
+                    # 进程内 API 比每次拉起 edge-tts CLI 少约 1 秒启动开销。
+                    try:
+                        asyncio.run(
+                            self._edge_tts_write(text, edge_voice, mp3)
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        raise SpeakerError(f"edge-tts 失败: {exc}")
+                    if not os.path.isfile(mp3) or os.path.getsize(mp3) <= 0:
+                        raise SpeakerError("edge-tts 输出为空")
+                else:
+                    result = self._run(
+                        [
+                            "edge-tts",
+                            "--voice",
+                            edge_voice,
+                            "--text",
+                            text,
+                            "--write-media",
+                            mp3,
+                        ],
+                        timeout=25.0,
+                    )
+                    if not result.ok or not os.path.isfile(mp3):
+                        raise SpeakerError(
+                            f"edge-tts 失败: {_short_output(result.stderr)}"
+                        )
+                ffmpeg = self._which("ffmpeg")
+                if not ffmpeg:
+                    raise SpeakerError("edge-tts 需要 ffmpeg 转码")
+                convert = self._run(
+                    [
+                        ffmpeg,
+                        "-y",
+                        "-loglevel",
+                        "error",
+                        "-i",
+                        mp3,
+                        "-ar",
+                        "48000",
+                        "-ac",
+                        "2",
+                        path,
+                    ],
+                    timeout=30.0,
+                )
+                try:
+                    os.remove(mp3)
+                except OSError:
+                    pass
+                if not convert.ok or not os.path.isfile(path):
+                    raise SpeakerError(
+                        f"音频转码失败: {_short_output(convert.stderr)}"
+                    )
+                _prepend_wav_silence(path, self.tts_pre_roll_ms)
+                return
+            except SpeakerError as exc:
+                # 没网/微软接口不可用时退回本地 espeak，至少还能播报。
+                LOGGER.warning("edge-tts failed, fallback to espeak-ng: %s", exc)
+                backend = "espeak-ng"
 
         binary = self._which("espeak-ng" if backend == "espeak-ng" else "espeak")
         if not binary:
@@ -1044,6 +1686,34 @@ class SpeakerManager:
         )
         if not result.ok or not os.path.isfile(path) or os.path.getsize(path) <= 44:
             raise SpeakerError(f"TTS 合成失败: {_short_output(result.stderr)}")
+        # espeak 默认 22050Hz mono；提前转成 A2DP sink 的 48kHz stereo，
+        # 避免播放时实时做非整数倍重采样造成卡顿/失真。
+        ffmpeg = self._which("ffmpeg")
+        if ffmpeg:
+            converted = path + ".48k.wav"
+            convert = self._run(
+                [
+                    ffmpeg,
+                    "-y",
+                    "-loglevel",
+                    "error",
+                    "-i",
+                    path,
+                    "-ar",
+                    "48000",
+                    "-ac",
+                    "2",
+                    converted,
+                ],
+                timeout=20.0,
+            )
+            if convert.ok and os.path.isfile(converted):
+                os.replace(converted, path)
+            else:
+                try:
+                    os.remove(converted)
+                except OSError:
+                    pass
         _prepend_wav_silence(path, self.tts_pre_roll_ms)
 
     def _play_path(self, path: str, *, text: str = "") -> None:
@@ -1103,7 +1773,20 @@ class SpeakerManager:
                 if self._player is proc:
                     self._player = None
         if proc.returncode != 0:
-            raise SpeakerError(f"播放器退出码 {proc.returncode}: {_short_output(stderr or '')}")
+            detail = _short_output(stderr or "")
+            if not self._sink_alive():
+                # 播放失败且 sink 不在了：立即失效状态并唤醒重连，
+                # 不能只记一条 play_error 继续假装在线。
+                with self._lock:
+                    self._sink_ready = False
+                    self._sink_name = ""
+                    self._sink_id = 0
+                    self._last_error = "播放失败，音频 sink 已消失"
+                self._stop_keepalive()
+                self._wake.set()
+            raise SpeakerError(
+                f"播放器退出码 {proc.returncode}: {detail}"
+            )
         with self._lock:
             self._playing = False
             self._play_error = ""

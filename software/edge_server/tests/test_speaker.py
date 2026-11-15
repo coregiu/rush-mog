@@ -1,5 +1,8 @@
 """蓝牙音箱/语音播报核心逻辑测试（不依赖真实蓝牙/声卡）。"""
 
+import os
+import threading
+
 import pytest
 
 from edge_server.core.speaker import (
@@ -77,6 +80,159 @@ def test_parse_bluetooth_helpers():
     assert info["connected"] is True
 
 
+def test_default_speaker_names(tmp_path):
+    manager = SpeakerManager(
+        {"enabled": False, "audio_dir": str(tmp_path)},
+        runner=FakeRunner(),
+        which=fake_which,
+        temp_dir=str(tmp_path / "tmp"),
+    )
+    assert manager.model == "newmine"
+    assert manager.device_name == "newmine"
+    assert manager.device_names == ("newmine",)
+    assert manager.force_a2dp is False
+    assert manager.keepalive is True
+    assert [item["id"] for item in manager.available_models()] == [
+        "newmine",
+        "am510",
+    ]
+
+
+def test_select_model_switches_device(tmp_path):
+    runner = FakeRunner()
+    manager = SpeakerManager(
+        {
+            "enabled": True,
+            "model": "newmine",
+            "models": {
+                "newmine": {
+                    "device_name": "newmine",
+                    "device_mac": "73:DB:39:F2:15:4B",
+                    "force_a2dp": False,
+                },
+                "am510": {
+                    "device_name": "HONOR AM510",
+                    "device_mac": "28:37:13:7F:10:09",
+                    "force_a2dp": True,
+                },
+            },
+            "audio_dir": str(tmp_path),
+        },
+        runner=runner,
+        which=fake_which,
+        temp_dir=str(tmp_path / "tmp"),
+    )
+    manager.start = lambda: None  # 只验证切型号，不启动真实线程
+    status = manager.select_model("am510")
+    assert status["model"] == "am510"
+    assert manager.device_name == "HONOR AM510"
+    assert manager.device_mac == "28:37:13:7F:10:09"
+    assert manager.force_a2dp is True
+    assert runner.called(
+        "systemctl", "--user", "restart", "wireplumber"
+    )
+
+
+def test_newmine_hfp_sink_does_not_force_a2dp(tmp_path):
+    runner = FakeRunner(
+        sinks=[
+            {
+                "id": 7,
+                "name": "bluez_output.73_DB_39_F2_15_4B.headset-head-unit",
+            }
+        ]
+    )
+    manager = SpeakerManager(
+        {
+            "enabled": True,
+            "model": "newmine",
+            "device_mac": "73:DB:39:F2:15:4B",
+            "audio_dir": str(tmp_path),
+        },
+        runner=runner,
+        which=fake_which,
+        temp_dir=str(tmp_path / "tmp"),
+    )
+    assert manager.force_a2dp is False
+    assert manager._refresh_sink("73:DB:39:F2:15:4B", initial=True) is True
+    assert manager.status()["sink"]["name"].endswith("headset-head-unit")
+    assert not runner.called("pactl", "set-card-profile")
+
+
+def test_select_sink_prefers_a2dp():
+    hfp = {
+        "id": 1,
+        "name": "bluez_output.28_37_13_7F_10_09.headset-head-unit",
+    }
+    a2dp = {
+        "id": 2,
+        "name": "bluez_output.28_37_13_7F_10_09.a2dp-sink",
+    }
+    assert select_sink([hfp, a2dp], "28:37:13:7F:10:09")["id"] == 2
+    assert select_sink([hfp], "28:37:13:7F:10:09", require_a2dp=True) is None
+
+
+def test_force_a2dp_profile_uses_pactl(tmp_path):
+    runner = FakeRunner()
+    manager = SpeakerManager(
+        {"enabled": True, "audio_dir": str(tmp_path)},
+        runner=runner,
+        which=fake_which,
+        temp_dir=str(tmp_path / "tmp"),
+    )
+    manager._force_a2dp_profile("28:37:13:7F:10:09")
+    assert runner.called(
+        "pactl",
+        "set-card-profile",
+        "bluez_card.28_37_13_7F_10_09",
+        "a2dp-sink",
+    )
+
+
+def test_sink_alive_detects_disappeared_sink(tmp_path):
+    name = "bluez_output.73_DB_39_F2_15_4B.a2dp-sink"
+    runner = FakeRunner(sinks=[{"id": 42, "name": name}])
+    manager = SpeakerManager(
+        {"enabled": True, "audio_dir": str(tmp_path)},
+        runner=runner,
+        which=fake_which,
+        temp_dir=str(tmp_path / "tmp"),
+    )
+    manager._sink_name = name
+    manager._sink_ready = True
+    assert manager._sink_alive() is True
+    runner.sinks = []
+    assert manager._sink_alive() is False
+
+
+def test_discover_uses_device_aliases(tmp_path):
+    class DevicesRunner(FakeRunner):
+        def run(self, args, timeout=10.0, **kwargs):
+            command = [str(item) for item in args]
+            if command[:3] == ["bluetoothctl", "devices"]:
+                self.calls.append((list(args), float(timeout)))
+                return CommandResult(
+                    0, "Device 11:22:33:44:55:66 newmine\n", ""
+                )
+            return super().run(args, timeout=timeout, **kwargs)
+
+    runner = DevicesRunner()
+    manager = SpeakerManager(
+        {
+            "enabled": True,
+            "device_name": "HONOR AM510",
+            "device_aliases": ["newmine"],
+            "audio_dir": str(tmp_path),
+        },
+        runner=runner,
+        which=fake_which,
+        temp_dir=str(tmp_path / "tmp"),
+    )
+    assert manager.device_names == ("HONOR AM510", "newmine")
+    assert manager._discover_device() == "11:22:33:44:55:66"
+    assert manager.status()["device"]["name"] == "newmine"
+
+
 def test_parse_sink_helpers():
     sinks = parse_sink_list(
         "42\tbluez_output.73_DB_39_F2_15_4B.1\tmodule-bluez5-device.c\t"
@@ -87,7 +243,7 @@ def test_parse_sink_helpers():
     assert sinks[0]["id"] == 42
     selected = select_sink(sinks, "73:db:39:f2:15:4b")
     assert selected["name"] == "bluez_output.73_DB_39_F2_15_4B.1"
-    assert select_sink(sinks, "AA:BB:CC:DD:EE:FF")["id"] == 42
+    assert select_sink(sinks, "AA:BB:CC:DD:EE:FF") is None
 
     wp = parse_wpctl_status(
         " ├─ Sinks:\n"
@@ -172,6 +328,51 @@ def test_connected_without_sink_reconnects_profile(tmp_path):
     manager._refresh_sink = lambda *args, **kwargs: False
     manager._ensure_connected()
     assert runner.called("bluetoothctl", "connect")
+
+
+def test_prepare_hits_existing_cache(tmp_path):
+    manager = SpeakerManager(
+        {
+            "enabled": True,
+            "audio_dir": str(tmp_path),
+            "tts": {"backend": "espeak-ng", "voice": "cmn"},
+        },
+        runner=FakeRunner(),
+        which=fake_which,
+        temp_dir=str(tmp_path / "tmp"),
+    )
+    cache = manager._tts_cache_path(
+        "你好", "cmn", manager.tts_speed, manager.tts_pitch
+    )
+    os.makedirs(os.path.dirname(cache), exist_ok=True)
+    with open(cache, "wb") as handle:
+        handle.write(b"RIFF" + b"\x00" * 100)
+    result = manager.prepare("你好")
+    assert result["cached"] is True
+
+
+def test_play_say_job_uses_prepared_file(tmp_path):
+    manager = SpeakerManager(
+        {"enabled": True, "audio_dir": str(tmp_path)},
+        runner=FakeRunner(),
+        which=fake_which,
+        temp_dir=str(tmp_path / "tmp"),
+    )
+    path = tmp_path / "say.wav"
+    path.write_bytes(b"RIFF")
+    played = {}
+    manager._play_path = lambda p, text="": played.update(path=p, text=text)
+    job = {
+        "text": "你好",
+        "event": threading.Event(),
+        "path": str(path),
+        "error": "",
+        "cancelled": False,
+    }
+    job["event"].set()
+    manager._play_say_job(job)
+    assert played == {"path": str(path), "text": "你好"}
+    assert not path.exists()
 
 
 def test_queue_say_and_stop_without_threads(tmp_path):

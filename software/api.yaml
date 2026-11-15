@@ -1019,7 +1019,7 @@ paths:
       tags: [Edge Server]
       summary: 蓝牙音箱与语音播报状态
       description: |
-        返回 newmine 蓝牙音箱的连接状态、A2DP sink、音量、TTS 后端和播放队列。
+        返回当前蓝牙音箱（默认 NewMine，可切到 HONOR AM510）的连接状态、A2DP sink、音量、TTS 后端和播放队列。
         `status=ok` 表示已连接且音频输出就绪；`degraded` 表示已连接但 sink 未就绪；
         `starting` 表示搜索/连接中；`error` 表示最近一次连接失败（后台会继续重试）。
       operationId: edgeSpeakerStatus
@@ -1040,9 +1040,11 @@ paths:
   /api/speaker/{action}:
     post:
       tags: [Edge Server]
-      summary: 音箱操作（连接/播报/播放/音量/停止）
+      summary: 音箱操作（连接/播报/播放/音量/停止/切型号）
       description: |
         - `connect`：立即触发一次蓝牙连接检查；
+        - `model`：`{"model":"newmine"}` 或 `{"model":"am510"}`，切换型号并重连；
+        - `prepare`：`{"text":"..."}`，提前合成到缓存（不播放），供输入框预合成；
         - `say`：`{"text":"...","voice":"cmn"}`，走 TTS 后播放；也接受 text/plain；
         - `play`：`{"file":"prompt.wav"}`，文件必须位于 `edge.speaker.audio_dir`；
         - `volume`：`{"volume":70}`，0..100；
@@ -1054,7 +1056,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [connect, say, play, volume, stop]
+            enum: [connect, model, prepare, say, play, volume, stop]
       requestBody:
         required: false
         content:
@@ -1095,9 +1097,9 @@ paths:
   /api/microphone:
     get:
       tags: [Edge Server]
-      summary: newmine HFP 麦克风状态
+      summary: 蓝牙音箱 HFP 麦克风状态
       description: |
-        返回蓝牙耳机麦克风的 HFP 能力、输入源、录音状态、最近录音和音量。
+        返回蓝牙音箱内置麦克风的 HFP 能力、输入源、录音状态、最近录音和音量。
         `available=true` 表示音箱已连接且 card 提供 `headset-head-unit` profile；
         录音时临时切到 HFP，`recording=true`；停止后自动恢复 A2DP。
       operationId: edgeMicrophoneStatus
@@ -2311,7 +2313,7 @@ components:
 
     EdgeMicrophoneStatus:
       type: object
-      description: newmine 蓝牙 HFP 麦克风状态
+      description: 蓝牙 HFP 麦克风状态（NewMine / HONOR AM510）
       required: [ok, enabled, available, recording]
       properties:
         ok: {type: boolean, enum: [true]}
@@ -2342,7 +2344,7 @@ components:
 
     EdgeSpeakerStatus:
       type: object
-      description: newmine 蓝牙音箱 + TTS 播放状态
+      description: 蓝牙音箱 + TTS 播放状态（默认 NewMine，支持 AM510）
       required: [ok, enabled, state, connected, audio_ready]
       properties:
         ok:
@@ -2350,6 +2352,22 @@ components:
           enum: [true]
         enabled:
           type: boolean
+        keepalive:
+          type: boolean
+          description: 是否持续给 A2DP sink 送静音，防止音箱空闲休眠
+        model:
+          type: string
+          example: newmine
+          description: 当前音箱型号 id（newmine / am510 或 config 自定义）
+        models:
+          type: array
+          items:
+            type: object
+            properties:
+              id: {type: string, example: newmine}
+              label: {type: string, example: NewMine}
+              device_name: {type: string, example: newmine}
+              force_a2dp: {type: boolean, example: false}
         state:
           type: string
           enum: [disabled, starting, scanning, connecting, connected, disconnected, error]

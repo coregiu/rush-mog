@@ -16,10 +16,11 @@
 - **速度仲裁**：VLA/Nav2/反向/安全统一到唯一 `/cmd_vel`；
 - **Pi Edge Server**：80 端口网页/API、8080 MJPEG、树莓派直连 STM32 USART3（115200 ASCII）、
   网页手动控制与 ROS `/cmd_vel` 共用串口出口；旧 ESP32 HTTP 桥仅保留历史兼容；
-- **蓝牙耳机（音箱 + 麦克风）**：自动连接 `newmine`（BlueZ + PipeWire A2DP），
-  TTS（espeak-ng 中文）与本地音频排队播放；录音时切 HFP、停止后恢复 A2DP，
+- **蓝牙音箱/麦克风（NewMine / HONOR AM510 可选）**：默认 `newmine`，可切 `am510`
+  （BlueZ + PipeWire A2DP），TTS（espeak-ng 中文）与本地音频排队播放；
+  录音时切 HFP、停止后恢复 A2DP，
   提供 `/api/speaker/*`、`/api/microphone/*`、`/body/say`、`/body/audio_status`、
-  `/body/mic_status`、`/edge/audio`，dashboard 可直接播报/录音；
+  `/body/mic_status`、`/edge/audio`，dashboard 可直接播报/录音和切换型号；
 - **树莓派电源监控**：`vcgencmd get_throttled` + `rpi_volt` 欠压告警，
   驱动 dashboard“电源及转换板”模块，当前正常即报 `ok`，欠压/降频报
   `degraded`/`error`，`/api/power` 可直接查询；
@@ -31,7 +32,7 @@
 | 项目 | 结果 |
 |---|---|
 | `colcon build --packages-select custom_msgs edge_server` | 通过 |
-| `pytest tests -q` | 134 passed |
+| `pytest tests -q` | 143 passed |
 | `tests/end_to_end_check.py` | 7/7 passed |
 | `tests/slam_nav_check.py` + `fake_slam_robot.py` | 6/6 passed |
 
@@ -50,7 +51,7 @@
 - 可选：
   - `python3-smbus2`（Pi I2C 直连 ICM-20948）
   - `pipewire`、`wireplumber`、`libspa-0.2-bluetooth`、`pulseaudio-utils`、
-    `alsa-utils`、`espeak-ng`（蓝牙耳机播放/麦克风 + 中文 TTS；见 §5.6/§5.7）
+    `alsa-utils`、`espeak-ng`（蓝牙音箱播放/麦克风 + 中文 TTS；见 §5.6/§5.7）
   - `nav2_bringup`、`nav2_msgs`（Nav2 后端）
   - `slam_toolbox`（建图）
   - `robot_localization`（EKF）
@@ -413,11 +414,25 @@ ros2 service call /center/healthcheck custom_msgs/srv/HealthCheck \
 `edge_server/edge_web.py`、`edge_server/edge_control.py` 和
 `ros_nodes/edge_server_node.py`。
 
-### 5.6 蓝牙音箱与语音播报（`newmine`）
+### 5.6 蓝牙音箱与语音播报（NewMine / HONOR AM510）
 
-`edge_server_node` 内置 `SpeakerManager`，启动后自动搜索/配对/信任/连接
-`edge.speaker.device_name`（默认 `newmine`），连接成功后等待 PipeWire 创建
-A2DP sink 并设为默认输出；断线后每 `connect_interval_sec` 秒重试。
+`edge_server_node` 内置 `SpeakerManager`，按 `edge.speaker.model` 选择型号
+（默认 `newmine`，可切 `am510`），自动搜索/配对/信任/连接；连接成功后等待
+PipeWire 创建 sink 并设为默认输出；断线后每 `connect_interval_sec` 秒重试。
+dashboard 的“型号”下拉和 `POST /api/speaker/model` 可运行时切换，切换后自动
+断开旧设备、重启用户级 WirePlumber（清理旧 card/profile）并重连；重启服务后
+回到 config 里的 `model`。
+
+型号在 `edge.speaker.models` 中定义（`label` / `device_name` / `device_mac` /
+`force_a2dp`）。只有 `force_a2dp=true` 的型号（AM510）才会在只有 HFP sink 时
+主动执行 `pactl set-card-profile ... a2dp-sink`；NewMine 保持“有 bluez sink 就用”，
+避免反复切 profile 造成断连。首次配对前要 `bluetoothctl pairable on`，否则适配器
+可能不持久化 link key（`Store hint: No`）。
+
+sink 就绪后，`keepalive=true`（默认）会用 `pacat` 持续送 48 kHz 立体声、
+±128 LSB 的 dither（不是全 0，避免音箱把数字静音当成空闲而自动 mute，吞掉下一条
+播报的第一个字）；录音切 HFP 时流退出，恢复 A2DP 后自动重启。不需要保活时设
+`keepalive: false`。
 
 主机依赖（Ubuntu 22.04 / Pi 4B）：
 
@@ -442,17 +457,38 @@ Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
 | 参数 | 默认 | 说明 |
 |---|---|---|
 | `enabled` | `false`（`robot.yaml` 为 `true`） | 总开关 |
-| `device_name` | `newmine` | 按名称发现音箱 |
-| `device_mac` | 空 | 填 MAC 可跳过扫描、快速重连 |
+| `model` | `newmine` | 默认型号；`newmine` / `am510`，dashboard 可运行时切换 |
+| `models.<id>.device_name` | 内置 | 该型号的蓝牙名；先用 `bluetoothctl devices` 确认 |
+| `models.<id>.device_mac` | 空 | 该型号 MAC，填了可跳过扫描、快速重连 |
+| `models.<id>.force_a2dp` | newmine=false / am510=true | 只有 HFP sink 时是否主动切 A2DP |
+| `keepalive` | `true` | 持续给 A2DP sink 送极低电平 dither，防休眠/防静音 mute |
 | `auto_connect` | `true` | 后台自动重连 |
+| `recover_wireplumber` | `true` | `profile-unavailable` 时重启用户级 WirePlumber |
+| `recover_wait_sec` | `15` | 重启 WirePlumber 后等待 A2DP endpoint 注册的秒数 |
 | `connect_interval_sec` | `20` | 巡检/重试周期 |
 | `volume` | `70` | 首次连接音量 0..100 |
 | `audio_dir` | `~/.local/share/rush-mog/audio` | `POST /api/speaker/play` 允许的目录 |
 | `say_topic` / `status_topic` | `/body/say` / `/body/audio_status` | ROS 话题 |
 | `playback_latency_ms` | `250` | paplay 请求缓冲，降低蓝牙抖动卡顿 |
-| `tts.backend` | `auto` | `espeak-ng` / `edge-tts` / `none` |
-| `tts.pre_roll_ms` | `450` | TTS 前补静音，避免 A2DP 唤醒吞掉第一个字 |
+| `tts.backend` | `auto`（`robot.yaml` 为 `edge-tts`） | `edge-tts` / `espeak-ng` / `none` |
+| `tts.pre_roll_ms` | `450`（`robot.yaml` 为 `700`） | TTS 前补静音，避免 A2DP 唤醒吞掉第一个字 |
 | `tts.voice` | `cmn` | espeak-ng 中文音色；英文用 `en-us` |
+
+`edge-tts` 中文更自然，需要 `ffmpeg`（apt）和 `pip install edge-tts`，并保持联网；
+失败会自动回退 `espeak-ng`。espeak 输出会先转成 48kHz stereo，避免播放时做
+22050→48000 的非整数倍实时重采样，减少卡顿/失真。
+
+TTS 使用独立的 `_synth_loop` 预合成：当前一条还在播放时，下一条已经合成好，
+连续播报之间只剩 `pre_roll_ms` 和播放器启动时间；keepalive 也统一用 48kHz
+stereo，避免和 TTS 流切换时重新协商采样率、吞掉第一个字。
+
+常用短语（机器人已启动/已到达目标点/请注意避让/任务完成）在启动时预合成到
+`<audio_dir>/tts_cache`；dashboard 输入停顿 450ms 会调 `POST /api/speaker/prepare`
+提前合成当前文本。`say` 命中缓存时不再等 edge-tts，实测开始播放约 0.06s
+（再加上文件内预滚，`robot.yaml` 为 700ms）。
+
+> 旧配置仍兼容：没有 `model` 时按 `device_name` 推断型号，
+> `device_name`/`device_mac`/`device_aliases` 继续生效。
 
 接口示例：
 
@@ -472,7 +508,8 @@ dashboard 的「蓝牙音箱与语音播报」面板提供连接、停止、音�
 
 ### 5.7 蓝牙麦克风（HFP）
 
-`newmine` 是 headset：A2DP 只负责播放，麦克风在 HFP/HSP profile 下才可用。
+`NewMine` / `HONOR AM510` 都是音箱+麦克风一体设备：A2DP 只负责播放，麦克风在
+HFP/HSP profile 下才可用。
 `MicrophoneManager` 在录音开始前把 PipeWire card 从 `a2dp-sink-*` 切到
 `headset-head-unit`，等待 `bluez_input.<MAC>.headset-head-unit` 输入源，
 用 `parec` 读原始 PCM（s16le / 8000 Hz / mono），同时：
@@ -636,7 +673,7 @@ curl -s http://192.168.3.26/api/modules/ros/health | python3 -m json.tool | grep
 - `lidar.enabled` / `port` / `baud` / `topic` / `frame_id` / `bins` /
   `range_min` / `range_max` / `publish_tf` / `tf_*`
 - `edge.web.port` / `stream_port` / `edge.camera.fps` / `edge.motion.keepalive_ms`
-- `edge.speaker.*`：`enabled` / `device_name` / `device_mac` / `auto_connect` /
+- `edge.speaker.*`：`enabled` / `model` / `models.*` / `auto_connect` /
   `volume` / `audio_dir` / `tts.*`（见 §5.6）
 - `edge.speaker.microphone.*`：`enabled` / `record_dir` / `sample_rate` / `channels` /
   `chunk_ms` / `max_duration_sec` / `volume` / `topic` / `status_topic`（见 §5.7）

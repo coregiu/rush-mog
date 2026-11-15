@@ -603,7 +603,7 @@ class _EdgeRequestHandler(BaseHTTPRequestHandler):
 
         if path.startswith("/api/speaker"):
             action = path[len("/api/speaker") :].strip("/")
-            if action not in {"connect", "say", "play", "volume", "stop"}:
+            if action not in {"connect", "model", "prepare", "say", "play", "volume", "stop"}:
                 self._send_json(
                     404,
                     app.error_payload("not_found", "未知音箱操作"),

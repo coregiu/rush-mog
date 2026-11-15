@@ -11,7 +11,7 @@ edge_server:
   sensor_topics:
     image: "/camera/color/image_raw"  # Astra Pro 彩色（Edge Server 订阅后转 MJPEG）
     laser: "/scan"                  # LD19/LD06/RPLidar 驱动输出
-    audio: "/edge/audio"             # newmine HFP 录音时发布的 AudioData
+    audio: "/edge/audio"             # AM510 HFP 录音时发布的 AudioData
     odom: "/odom"                   # edge_server_node（STM32 遥测）或底盘驱动输出
     joint_states: "/joint_states"
     imu: "/imu/data"                # imu_node（Pi I2C）或旧 base_bridge（STM32 转发）
@@ -104,11 +104,23 @@ edge_server:
       keepalive_ms: 200
       raw_lease_sec: 1.0
       resend_manual: false           # true=按住按钮期间持续重发（旧行为，STM32 LED 会连闪）
-    # 蓝牙音箱/语音播报：newmine 自动连接，A2DP 输出走 PipeWire/PulseAudio
+    # 蓝牙音箱/麦克风：默认 NewMine，dashboard/API 可切到 AM510。
+    # AM510 是 headset class，force_a2dp=true 时才会主动把 profile 切到 A2DP。
     speaker:
       enabled: true
-      device_name: "newmine"
-      device_mac: ""                 # 留空=按名称扫描；建议填实际 MAC 以快速重连
+      model: "newmine"               # newmine | am510
+      models:
+        newmine:
+          label: "NewMine"
+          device_name: "newmine"
+          device_mac: ""             # 留空=按名称扫描；建议填实际 MAC 以快速重连
+          force_a2dp: false
+        am510:
+          label: "HONOR AM510"
+          device_name: "HONOR AM510"
+          device_mac: ""
+          force_a2dp: true
+      keepalive: true                 # 持续给 A2DP 送静音，避免音箱空闲休眠掉线
       auto_connect: true
       connect_interval_sec: 20
       scan_timeout_sec: 10
@@ -123,7 +135,7 @@ edge_server:
       status_rate_hz: 1.0
       # paplay 请求的缓冲；蓝牙链路抖动时可适当加大
       playback_latency_ms: 250
-      # 同一台 newmine 的 HFP 麦克风；录音时临时切 HFP，停止后恢复 A2DP
+      # 同一台音箱的 HFP 麦克风；录音时临时切 HFP，停止后恢复 A2DP
       microphone:
         enabled: true
         record_dir: ""            # 空 = <audio_dir>/mic
@@ -137,12 +149,12 @@ edge_server:
         status_topic: "/body/mic_status"
         status_rate_hz: 1.0
       tts:
-        backend: "auto"
+        backend: "edge-tts"          # 自然中文；失败自动回退 espeak-ng
         voice: "cmn"
         speed: 150
         pitch: 50
         max_chars: 200
-        pre_roll_ms: 450
+        pre_roll_ms: 700
     # 树莓派电源监控：vcgencmd get_throttled + rpi_volt，正常即代表电源及转换板正常
     power:
       enabled: true
@@ -463,7 +475,7 @@ edge_server:
         expected_rate_hz: 1.0
         timeout_sec: 3.0
         required: false
-        description: "newmine Bluetooth HFP microphone status"
+        description: "Bluetooth speaker HFP microphone status"
       speaker:
         type: speaker
         topic: "/body/audio_status"
@@ -471,7 +483,7 @@ edge_server:
         expected_rate_hz: 1.0
         timeout_sec: 3.0
         required: false
-        description: "newmine Bluetooth speaker + TTS playback"
+        description: "Bluetooth speaker + TTS playback"
       arm:
         type: arm
         topic: "/arm/joint_states"

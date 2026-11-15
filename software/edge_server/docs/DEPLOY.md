@@ -48,6 +48,11 @@
   - 麦克风走 HFP：`pulseaudio-utils` 提供 `parec`，录音前切
     `headset-head-unit`，停止后恢复 `a2dp-sink`；部署配置启用
     `edge.speaker.microphone`，录音目录 `/var/lib/edge_server/audio/mic`。
+- 自然中文 TTS（2026-11-15）：
+  - `sudo apt-get install -y ffmpeg`；
+  - `sudo python3 -m pip install edge-tts`；
+  - `deploy.yaml` 设 `edge.speaker.tts.backend: "edge-tts"`；接口不可用时
+    自动回退 `espeak-ng`，espeak 输出会预转 48kHz stereo。
 
 ### 1.2 代码与构建
 
@@ -360,6 +365,11 @@ ssh ubuntu@192.168.3.26 '
 
 ## 7. 蓝牙音箱 / 语音播报
 
+> 2026-11-15 起仓库默认 `model=newmine`（NewMine），可切 `am510`（HONOR AM510）；
+> 型号名/MAC 在 `edge.speaker.models.<id>` 配置。换设备后先 `bluetoothctl devices`
+> 查实际名称/MAC，再更新 `/opt/edge_server/config/deploy.yaml`；本文 2026-11-14
+> 的记录仍指旧 NewMine。
+
 ### 7.1 自动连接
 
 1. 音箱开机，且不要被手机/其他主机占用；
@@ -423,7 +433,7 @@ ros2 topic pub --once /body/say std_msgs/msg/String "{data: 请注意避让}"
 
 ### 7.4 麦克风录音（HFP）
 
-`newmine` 的麦克风只在 HFP/HSP profile 下可用；录音模块会自动：
+`NewMine` / `HONOR AM510` 等蓝牙音箱的麦克风只在 HFP/HSP profile 下可用；录音模块会自动：
 
 1. 停掉当前 A2DP 播放；
 2. `pactl set-card-profile bluez_card.<MAC> headset-head-unit`；

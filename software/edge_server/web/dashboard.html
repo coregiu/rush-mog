@@ -23,6 +23,7 @@
     </div>
 
     <div class="topbar-status">
+      <div id="sync-state" class="sync-state">正在连接 Edge Server …</div>
       <a class="btn" href="index.html">手柄控制</a>
       <button id="refresh-btn" class="btn btn-ghost" type="button" title="立即刷新">
         <span class="btn-icon">↻</span> 刷新
@@ -30,7 +31,6 @@
       <div id="overall-pill" class="status-pill status-unknown">
         <span class="dot"></span><span id="overall-text">等待数据</span>
       </div>
-      <div id="sync-state" class="sync-state">正在连接 Edge Server …</div>
     </div>
 
     <nav class="topbar-actions">
@@ -231,17 +231,17 @@
             <rect class="hw-shell" width="150" height="58" rx="10"/>
             <circle class="hw-dot" cx="14" cy="16" r="4"/>
             <text class="hw-name" x="26" y="20">麦克风</text>
-            <text class="hw-sub" x="14" y="37">USB 全向</text>
+            <text class="hw-sub" x="14" y="37">NewMine / AM510 · HFP</text>
             <text class="hw-state" x="14" y="51">未知</text>
-            <title>全向麦克风 · USB /audio/raw</title>
+            <title>麦克风 · NewMine / AM510 · HFP · /body/mic_status</title>
           </g>
           <g class="hw-node" data-hw="speaker" transform="translate(700,380)">
             <rect class="hw-shell" width="150" height="58" rx="10"/>
             <circle class="hw-dot" cx="14" cy="16" r="4"/>
             <text class="hw-name" x="26" y="20">音箱</text>
-            <text class="hw-sub" x="14" y="37">Bluetooth</text>
+            <text class="hw-sub" x="14" y="37">NewMine / AM510 · A2DP</text>
             <text class="hw-state" x="14" y="51">未知</text>
-            <title>蓝牙音箱 · Bluetooth</title>
+            <title>音箱 · NewMine / AM510 · A2DP · /body/audio_status</title>
           </g>
           <g class="hw-node" data-hw="chassis" transform="translate(700,450)">
             <rect class="hw-shell" width="150" height="58" rx="10"/>
@@ -441,7 +441,7 @@
             </g>
             <g class="hotspot" data-device="mic" transform="translate(306,322)" tabindex="0">
               <circle class="hotspot-halo" r="13"/><circle class="hotspot-dot" r="3"/>
-              <title>麦克风 · USB 全向 · /audio/raw</title>
+              <title>麦克风 · NewMine / AM510 · HFP · /body/mic_status</title>
             </g>
             <g class="hotspot" data-device="imu" transform="translate(446,330)" tabindex="0">
               <circle class="hotspot-halo" r="15"/><circle class="hotspot-dot" r="3"/>
@@ -449,7 +449,7 @@
             </g>
             <g class="hotspot" data-device="speaker" transform="translate(226,330)" tabindex="0">
               <circle class="hotspot-halo" r="18"/><circle class="hotspot-dot" r="3"/>
-              <title>音箱 · Bluetooth · /body/audio_status</title>
+              <title>音箱 · NewMine / AM510 · A2DP · /body/audio_status</title>
             </g>
             <g class="hotspot" data-device="pi" transform="translate(367,355)" tabindex="0">
               <circle class="hotspot-halo" r="14"/><circle class="hotspot-dot" r="3"/>
@@ -654,6 +654,13 @@
           <div class="speaker-actions">
             <button id="speaker-connect" class="btn btn-ghost" type="button">连接音箱</button>
             <button id="speaker-stop" class="btn btn-ghost" type="button">停止播放</button>
+            <label class="speaker-model" for="speaker-model">
+              <span>型号</span>
+              <select id="speaker-model" title="切换后立即重连；重启服务回到 config 的 model">
+                <option value="newmine">NewMine</option>
+                <option value="am510">HONOR AM510</option>
+              </select>
+            </label>
             <label class="speaker-volume" for="speaker-volume">
               <span>音量</span>
               <input id="speaker-volume" type="range" min="0" max="100" step="5" value="70">
@@ -676,7 +683,7 @@
 
           <div class="mic-block" id="mic-block" data-status="unknown">
             <div class="mic-head">
-              <span class="eyebrow">HFP MICROPHONE · newmine</span>
+              <span class="eyebrow">HFP MICROPHONE · BLUETOOTH</span>
               <span class="status-chip status-unknown" id="mic-state">未知</span>
             </div>
             <div class="mic-actions">

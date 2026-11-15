@@ -311,11 +311,23 @@ edge_server:
       keepalive_ms: 200
       raw_lease_sec: 1.0
       resend_manual: false
-    # 蓝牙音箱/语音播报（仿真默认关闭；实车 robot.yaml/deploy.yaml 打开）
+    # 蓝牙音箱/麦克风：默认 NewMine，dashboard/API 可切到 AM510。
+    # 仿真默认关闭；实车 robot.yaml/deploy.yaml 打开。
     speaker:
       enabled: false
-      device_name: "newmine"
-      device_mac: ""              # 留空则按名称扫描发现；填 MAC 可快速重连
+      model: "newmine"               # newmine | am510
+      models:
+        newmine:
+          label: "NewMine"
+          device_name: "newmine"
+          device_mac: ""             # 留空=按名称扫描；建议填实际 MAC
+          force_a2dp: false
+        am510:
+          label: "HONOR AM510"
+          device_name: "HONOR AM510"
+          device_mac: ""
+          force_a2dp: true
+      keepalive: true                 # 持续给 A2DP 送静音，避免音箱空闲休眠掉线
       auto_connect: true
       connect_interval_sec: 20
       scan_timeout_sec: 10
@@ -328,7 +340,7 @@ edge_server:
       status_rate_hz: 1.0
       # paplay 请求的缓冲；蓝牙链路抖动时可适当加大
       playback_latency_ms: 250
-      # 同一台 newmine 的 HFP 麦克风；录音时临时切 HFP，停止后恢复 A2DP
+      # 同一台音箱的 HFP 麦克风；录音时临时切 HFP，停止后恢复 A2DP
       microphone:
         enabled: false
         record_dir: ""            # 空 = <audio_dir>/mic
@@ -422,7 +434,7 @@ edge_server:
         expected_rate_hz: 1.0
         timeout_sec: 3.0
         required: false
-        description: "newmine Bluetooth HFP microphone status"
+        description: "Bluetooth speaker HFP microphone status"
       speaker:
         type: speaker
         topic: "/body/audio_status"

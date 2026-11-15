@@ -30,18 +30,18 @@ const MODULE_META = {
   center: { name: 'CENTER SERVER', subtitle: 'SmolVLA · 推理中心', glyph: 'C', order: 2 },
 };
 
-// hardware/README.md 的 BOM 清单（10 项；麦轮底盘与电机驱动合并，Astra RGB-D 合并）
+// hardware/README.md 的 BOM 清单（按功能合并展示；音箱/麦克风为 NewMine / AM510 可选）
 const HARDWARE_MODULES = [
   { id: 'pi', name: '板载计算机', model: 'Raspberry Pi 4B', glyph: 'PI' },
   { id: 'stm32', name: 'STM 控制板', model: 'STM32F103C8T6', glyph: 'MCU' },
-  { id: 'lidar', name: '雷达', model: 'D6 / LD19', glyph: 'LID' },
+  { id: 'lidar', name: '激光雷达', model: 'D6 / LD19', glyph: 'LID' },
   { id: 'camera', name: '深度相机', model: 'Astra Pro · RGB-D', glyph: 'CAM' },
   { id: 'imu', name: '陀螺仪', model: 'ICM-20948', glyph: 'IMU' },
   { id: 'cliff', name: '悬崖传感器', model: 'TCRT5000 ×2', glyph: 'CLF' },
   { id: 'chassis', name: '电机驱动+编码器', model: 'JGB37-520 ×4 · L298N', glyph: 'CHS' },
   { id: 'power', name: '电源及转换板', model: '12V → 5V / 3.3V', glyph: 'PWR' },
-  { id: 'mic', name: '麦克风', model: 'USB 全向', glyph: 'MIC' },
-  { id: 'speaker', name: '音箱', model: 'Bluetooth', glyph: 'SPK' },
+  { id: 'mic', name: '麦克风', model: 'NewMine / AM510 · HFP', glyph: 'MIC' },
+  { id: 'speaker', name: '音箱', model: 'NewMine / AM510 · A2DP', glyph: 'SPK' },
 ];
 
 const COMMAND_LABELS = {
@@ -1010,6 +1010,16 @@ function rosDevice(id) {
   return devices.find((device) => device && device.id === id) || null;
 }
 
+// 麦克风与音箱是同一台蓝牙设备，优先显示实际连接名。
+function speakerDeviceLabel() {
+  const speaker = state.speaker;
+  const device = (speaker && speaker.device) || {};
+  const models = (speaker && speaker.models) || [];
+  const current = models.find((item) => item.id === (speaker && speaker.model));
+  return String(device.name || '').trim()
+    || String((current && current.label) || 'NewMine');
+}
+
 function deviceMetricChips(device) {
   const chips = [];
   if (!device) return chips;
@@ -1252,7 +1262,7 @@ function hardwareState(id) {
         const detail = mic.recording
           ? `HFP 录音中 · ${fmtDuration((mic.duration_ms || 0) / 1000)}`
           : (mic.available
-            ? 'newmine HFP 麦克风就绪（录音时自动切 HFP）'
+            ? `${speakerDeviceLabel()} HFP 麦克风就绪（录音时自动切 HFP）`
             : (mic.error || '音箱未连接或不支持 HFP 麦克风'));
         return {
           status,
@@ -1267,7 +1277,7 @@ function hardwareState(id) {
       const device = rosDevice('microphone');
       return {
         status: device ? device.status : 'unknown',
-        detail: deviceDetail(device, '未接入 · newmine HFP 麦克风'),
+        detail: deviceDetail(device, `未接入 · ${speakerDeviceLabel()} HFP 麦克风`),
         chips: deviceMetricChips(device),
       };
     }
@@ -1952,6 +1962,20 @@ function renderSpeaker() {
   const stopBtn = $('#speaker-stop');
   if (stopBtn) stopBtn.disabled = !speaker || speaker.enabled === false;
 
+  const modelSelect = $('#speaker-model');
+  if (modelSelect) {
+    const models = speaker && Array.isArray(speaker.models) ? speaker.models : [];
+    const signature = models.map((item) => `${item.id}:${item.label}`).join('|');
+    if (models.length && modelSelect.dataset.signature !== signature) {
+      modelSelect.innerHTML = models.map((item) =>
+        `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label || item.id)}</option>`
+      ).join('');
+      modelSelect.dataset.signature = signature;
+    }
+    if (speaker && speaker.model) modelSelect.value = speaker.model;
+    modelSelect.disabled = !speaker || speaker.enabled === false;
+  }
+
   const volume = $('#speaker-volume');
   if (volume && !state.speakerVolumeEditing) {
     const value = numberOrNull(sink.volume);
@@ -2036,6 +2060,24 @@ function bindSpeakerEvents() {
     });
   }
 
+  // 输入停顿后提前合成，点击“语音播报”时直接命中缓存。
+  const textInput = $('#speaker-text');
+  if (textInput) {
+    let prepareTimer = null;
+    textInput.addEventListener('input', () => {
+      clearTimeout(prepareTimer);
+      const value = textInput.value.trim();
+      if (!value) return;
+      prepareTimer = setTimeout(() => {
+        fetchJson(API.speakerAction('prepare'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: value }),
+        }, 8000).catch(() => {});
+      }, 450);
+    });
+  }
+
   const quick = $('#speaker-quick');
   if (quick) {
     quick.addEventListener('click', (event) => {
@@ -2065,6 +2107,22 @@ function bindSpeakerEvents() {
         await speakerAction('stop');
       } catch (error) {
         toast(`停止播放失败：${error.message}`, 'error');
+      }
+    });
+  }
+
+  const model = $('#speaker-model');
+  if (model) {
+    model.addEventListener('change', async () => {
+      const target = model.value;
+      model.disabled = true;
+      try {
+        await speakerAction('model', { model: target });
+      } catch (error) {
+        toast(`切换音箱型号失败：${error.message}`, 'error');
+        if (state.speaker && state.speaker.model) model.value = state.speaker.model;
+      } finally {
+        model.disabled = false;
       }
     });
   }
@@ -2151,7 +2209,7 @@ function renderMicrophone() {
     } else if (mic.recording) {
       maxEl.textContent = `HFP 录音中 · ${mic.source || '--'} · 最长 ${fmtNumber(mic.max_duration_sec, 0)}s · 停止后自动恢复 A2DP`;
     } else if (mic.available) {
-      maxEl.textContent = `newmine HFP 麦克风就绪 · ${mic.sample_rate || '--'} Hz / ${mic.channels || 1}ch`
+      maxEl.textContent = `${speakerDeviceLabel()} HFP 麦克风就绪 · ${mic.sample_rate || '--'} Hz / ${mic.channels || 1}ch`
         + (mic.last_file_name ? ` · 最近 ${mic.last_file_name}` : '');
     } else {
       maxEl.textContent = mic.error || '音箱未连接或不支持 HFP 麦克风';

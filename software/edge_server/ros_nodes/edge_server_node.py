@@ -742,6 +742,26 @@ class EdgeServerNode(Node):
                 "message": "已触发音箱连接",
                 "speaker": self.speaker.status(),
             }
+        if name in {"model", "select"}:
+            model = fields.get("model", fields.get("value", ""))
+            status = self.speaker.select_model(model)
+            self._record_event(
+                "speaker",
+                f"切换音箱型号: {str(model)[:32]}",
+                source="api",
+                status="info",
+            )
+            return {
+                "ok": True,
+                "message": f"已切换音箱型号: {str(model)[:32]}",
+                "speaker": status,
+            }
+        if name in {"prepare", "warm"}:
+            payload = self.speaker.prepare(
+                fields.get("text", fields.get("message", "")),
+                voice=str(fields.get("voice", "") or ""),
+            )
+            return payload
         if name == "say":
             text = fields.get("text", fields.get("message", ""))
             try:

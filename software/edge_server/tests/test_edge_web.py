@@ -670,6 +670,16 @@ def test_speaker_api(web_server):
 
     status, _, body = request(
         port,
+        "/api/speaker/model",
+        method="POST",
+        data=json.dumps({"model": "am510"}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert status == 200
+    assert runtime.speaker_actions[-1] == ("model", {"model": "am510"})
+
+    status, _, body = request(
+        port,
         "/api/speaker/say",
         method="POST",
         data=json.dumps({"text": ""}),
