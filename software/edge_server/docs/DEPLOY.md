@@ -110,7 +110,37 @@ sudo apt-get install -y \
   python3-opencv python3-numpy python3-yaml python3-serial \
   build-essential cmake
 ```
-SLAM / 导航依赖（2026-11-14）：`ros-humble-slam-toolbox` 已安装，可直接 `ros2 launch edge_server slam_stack.launch.py`；`ros-humble-robot-localization` 已安装，可用 `ekf.launch.py`；`ros-humble-navigation2`/`nav2_bringup` **尚未安装**，没有 Nav2 时 `navigation_node` 的 `backend: auto` 会回退到内置直航。
+
+执行前确认配置，可按下面的执行：
+```bash
+# 1. 安装依赖
+sudo apt update && sudo apt install -y curl gnupg2 ca-certificates software-properties-common
+sudo add-apt-repository universe
+
+# 2. 导入ROS密钥，保存到 /usr/share/keyrings/ros-archive-keyring.gpg
+sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
+
+# 3. 写入USTC ROS2源到 /etc/apt/sources.list.d/ros2.list
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] https://mirrors.ustc.edu.cn/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+
+# 4. 更新apt缓存
+sudo apt update
+```
+
+SLAM / 导航依赖：`ros-humble-slam-toolbox` , `ros-humble-navigation2`, `ros-humble-navigation2`
+安装ros-humble-slam-toolbox, ros-humble-robot-localization, ros-humble-navigation2
+```bash
+sudo apt-get install -y ros-humble-slam-toolbox
+sudo apt-get install -y ros-humble-robot-localization
+sudo apt-get install -y ros-humble-navigation2
+
+echo "source /opt/ros/humble/setup.zsh" >> ~/.zshrc
+source ~/.zshrc
+ros2 launch --help
+
+````
+
+ros-humble-slam-toolbox安装后，可直接 `ros2 launch edge_server slam_stack.launch.py`；`ros-humble-robot-localization` 安装后，可用 `ekf.launch.py`；`ros-humble-navigation2`/`nav2_bringup` ，没有 Nav2 时 `navigation_node` 的 `backend: auto` 会回退到内置直航。
 
 ### 2.3 系统级外设配置
 **UART3（STM32 串口）**：在 `/boot/firmware/config.txt` 末尾追加：
@@ -140,12 +170,18 @@ sudo python3 -m pip install edge-tts
 `software/edge_server` → `/opt/edge_server/src/edge_server`，`software/custom_msgs` → `/opt/edge_server/src/custom_msgs`；同步命令见 §4.2，首次可手工 `scp`/`tar` 复制。构建：
 ```bash
 cd /opt/edge_server
-source /opt/ros/humble/setup.bash
+# 注意后缀，不同sh下使用不同后缀。如果权限不够就赋权，不能加sudo
+source /opt/ros/humble/setup.zsh
 colcon build --packages-select custom_msgs edge_server
 ```
 生成 `/opt/edge_server/build|install|log`；运行使用 `/opt/edge_server/install/setup.bash`。
 
 ### 2.5 部署配置 deploy.yaml
+```bash
+cp /opt/edge_server/src/edge_server/edge_server/config/* /opt/edge_server/config
+mv robot.yaml deploy.yaml
+```
+
 `/opt/edge_server/config/deploy.yaml` 是远程专用配置，不在仓库里：
 - Web `0.0.0.0:80`、MJPEG `0.0.0.0:8080`、ROS 健康网关 `127.0.0.1:8090`；配置键见 §8.2。
 - STM32 串口 `/dev/ttyAMA1`（GPIO4/5 → UART3），115200 8N1。2026-11-14 从 USB 串口（`/dev/ttyUSB0@9600`）改为 GPIO UART，`dtoverlay=uart3` 已写入 `/boot/firmware/config.txt`；接线 Pi GPIO4(TXD3)→STM32 PB11(RX)、GPIO5(RXD3)→PB10(TX)，必须共地（§8.3）。
