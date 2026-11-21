@@ -87,7 +87,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "start_camera",
                 default_value="false",
-                description="start the Astra Pro color/depth driver (ros-humble-orbbec-camera)",
+                description="start the Astra Pro color/depth driver (legacy astra_camera for 2bc5:0403, or orbbec_camera for newer models)",
             ),
             DeclareLaunchArgument(
                 "base_transport",

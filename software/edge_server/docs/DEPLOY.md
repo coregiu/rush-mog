@@ -73,6 +73,7 @@ ssh $PI 'sudo systemctl restart edge_server'
 |---|---|---|
 | `/opt/edge_server/src/edge_server` | `software/edge_server` 的源码副本 | 是 |
 | `/opt/edge_server/src/custom_msgs` | `software/custom_msgs` 的源码副本 | 是 |
+| `/opt/edge_server/src/ros2_astra_camera` | legacy Astra 驱动源码（初代 Astra Pro 必需，§6.6） | 否，手工 clone |
 | `/opt/edge_server/config/deploy.yaml` | 远程专用运行配置（`EDGE_SERVER_CONFIG`） | 否 |
 | `/opt/edge_server/install/` | 构建产物，**不要手改**；部署 launch 在 `share/edge_server/launch/edge_server_deploy.launch.py` | 由 colcon 生成 |
 | `/opt/edge_server/build/`、`log/` | 构建中间物、构建日志 | 由 colcon 生成 |
@@ -161,7 +162,7 @@ ssh $HOST 'ls -d /opt/ros/humble 2>/dev/null || echo no-ros'
 |---|---|---|---|
 | P1 apt 源 | 要做（含 ubuntu-ports） | 已就绪 | 见 §2.1 |
 | P2 ROS 2 | 要装 | 已装 `/opt/ros/humble` | 见 §2.2 |
-| P3 外设 | 要做 | 全部跳过 | 无 UART/I2C/音箱，见 §2.3 |
+| P3 外设 | 要做 | 只接了深度相机（§6.6），无 UART/I2C/音箱 | 见 §2.3 |
 | P4 代码+构建 | 要做 | 重做（同步 + 增量构建 1 s） | 见 §2.4 |
 | P5 运行配置 | 要做 | 重做（7 项裁剪） | 见 §2.5 |
 | P6 systemd | 要做 | **重写单元的残文件** | 见 §2.6 |
@@ -325,6 +326,25 @@ python3 -c 'import edge_tts; print("edge-tts-ok")'
 
 首次配对音箱见 §6.1（`bluetoothctl pair/trust/connect`）；配对一次后由 `edge_server_node`
 按 `edge.speaker.connect_interval_sec`（默认 20 s）自动重连。
+
+**5) 深度相机（Astra Pro）**
+
+初代 Astra Pro 不能用 apt 的 `ros-humble-orbbec-camera`，要编译 legacy `astra_camera`；
+完整步骤（认型号、依赖、编译、udev、帧率约束、systemd、排错）见 **§6.6**。最短路径：
+
+```bash
+lsusb | grep 2bc5                      # 期望 2bc5:0403 + 2bc5:0501
+sudo apt-get install -y libuvc-dev libgflags-dev ros-humble-image-geometry \
+  ros-humble-image-transport ros-humble-tf2-eigen ros-humble-rclcpp-components \
+  ros-humble-camera-info-manager
+cd /opt/edge_server/src && git clone https://github.com/orbbec/ros2_astra_camera.git
+cd /opt/edge_server && bash -lc 'source /opt/ros/humble/setup.bash && \
+  colcon build --packages-select astra_camera_msgs astra_camera --cmake-args -DCMAKE_BUILD_TYPE=Release'
+sudo cp /opt/ros/humble/share/orbbec_camera/udev/99-obsensor-libusb.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+验收：`ls -l /dev/astra_pro` 存在（0666）、`ros2 topic hz /camera/color/image_raw` ≈15 Hz。
 
 ### 2.4 代码落盘与构建（P4）
 
@@ -553,13 +573,15 @@ WantedBy=multi-user.target
 
 **两条档位的验收差异**
 
-| 检查项 | 实车（硬件齐全） | 开发机（无硬件，本次实测） |
+| 检查项 | 实车（硬件齐全） | 开发机（Astra Pro 已接，本次实测） |
 |---|---|---|
 | `curl -o /dev/null -w '%{http_code}' /` | 200 | 200 |
 | `/dashboard.html` | 200 | 200 |
-| `:8080/stream` | 200（相机在跑） | 503（无 `/camera/color/image_raw`，正常） |
+| `:8080/stream` | 200 | 200（Astra Pro 彩色，实测 ~1.2 MB/4 s） |
+| `/status` → `camera` | 1 | 1 |
 | `/status` → `serial_connected` | true | false（无串口） |
 | `/status` → `ros_status` | ok / degraded | degraded |
+| health `camera` / `depth_camera` | ok | ok（13–15 Hz / 27 Hz） |
 | `/api/modules/ros/health` → `ready` | true | true |
 | 同上 → `healthy` | 全绿时 true | false |
 | 日志 `Loaded edge_server config` | 有 | 有 |
@@ -571,10 +593,13 @@ systemctl is-active   → active          systemctl is-enabled → enabled
 ss -ltn               → 0.0.0.0:80   0.0.0.0:8080   127.0.0.1:8090
 restart → web 200     → 1.6 s（Pi 实测约 6 s，§3.3）
 / 200 | /dashboard.html 200 | :8080/stream 503 | :8090/ros/health 200
-/status   → serial_connected=false, encoder_ok=false, ros_status=degraded, ros_ready=true
+/status   → camera=1, serial_connected=false, encoder_ok=false, ros_status=degraded, ros_ready=true
 health    → ready=true, healthy=false, status=degraded
-            summary: total=12 enabled=11 ok=1 degraded=2 unknown=8 disabled=1
-            camera/depth_camera/lidar/imu/arm/battery=unknown, base/cliff=degraded, odom=ok, power=disabled
+            summary: total=12 enabled=11 ok=3 degraded=2 unknown=6 disabled=1
+            camera/depth_camera=ok(required=true), odom=ok, base/cliff=degraded,
+            lidar/imu/microphone/speaker/arm/battery=unknown, power=disabled
+相机      → rush-mog-camera active+enabled；/camera/color 15Hz、/camera/depth 27Hz、
+            depth encoding=16UC1；/stream 200 且首帧 640×480 可解码（mean 87/std 75）
 stop      → 端口全部释放，is-active=inactive；start 后 3 个端口恢复
 单元与模板 → diff 仅 User= 一行不同
 ```
@@ -587,6 +612,8 @@ stop      → 端口全部释放，is-active=inactive；start 后 3 个端口恢
 [ ] P2 ros2 --help 正常；colcon 可用；cv2/numpy/yaml/serial 可导入
 [ ] P3 实车：/dev/ttyAMA1 存在且在 dialout 组；/dev/rush_lidar -> ttyAMA2；i2cdetect 见 0x68；
        systemctl --user is-active pipewire pipewire-pulse wireplumber 全 active
+[ ] P3 相机：/dev/astra_pro 存在；systemctl is-active rush-mog-camera=active；
+       ros2 topic hz /camera/color/image_raw ≈15 Hz、/camera/depth/image_raw 有数据
 [ ] P4 src 两个包到位（launch/edge_server_deploy.launch.py 存在）；colcon build 成功；
        ros2 pkg prefix edge_server 正常
 [ ] P5 deploy.yaml 关键值正确（web 80/8080、state 指 /var/lib、required/strict_unknown 符合档位）
@@ -640,7 +667,7 @@ curl -s -o /dev/null -w 'stream=%{http_code}\n' http://192.168.3.26:8080/stream
 curl -s http://192.168.3.26/status; echo
 curl -s http://192.168.3.26/api/modules/ros/health; echo
 ```
-预期（当前没接相机时）：`web=200`、`dash=200`；`stream=503`（没有 `/camera/color/image_raw`，正常）；STM32 已接线时 `/status` 里 `"serial_connected":true`、`"encoder_ok":true`，没接或没上电时为 `false`；`"ros_status":"degraded"`（缺相机/雷达/IMU，属预期）；健康接口 `"ready":true`、`"healthy":false`，`reason` 列出缺哪些设备。`degraded` 不代表服务坏了，`ready:true` 才是关键。
+预期（本机已接 Astra Pro）：`web=200`、`dash=200`、`stream=200`（没接相机的机器是 `503`，也正常）；STM32 已接线时 `/status` 里 `"serial_connected":true`、`"encoder_ok":true`，没接或没上电时为 `false`；`"ros_status":"degraded"`（缺相机/雷达/IMU，属预期）；健康接口 `"ready":true`、`"healthy":false`，`reason` 列出缺哪些设备。`degraded` 不代表服务坏了，`ready:true` 才是关键。
 
 ### 3.4 整机开关机
 **上电**：先接好相机、雷达、STM32 串口再上电（避免热插拔 USB）；等约 2～3 分钟（实机 `systemd-analyze`：kernel 7s + userspace 2min19s，主要在等网络）；服务自动启动，按 §3.3 验证。没起来时：
@@ -1110,28 +1137,118 @@ curl -s http://127.0.0.1:8090/ros/health/devices/lidar | python3 -m json.tool
 再在 `edge_server/core/lidar.py` 增加对应协议解析（`lidar.protocol` 扩展）。
 
 ### 6.6 Astra Pro 深度相机
-驱动 `ros-humble-orbbec-camera`（已安装）；udev `/etc/udev/rules.d/99-obsensor-libusb.rules`（已从 `/opt/ros/humble/share/orbbec_camera/udev/` 复制）。
-```bash
-# 不建议经 Hub；插 Pi 4 USB3 口，Astra Pro 是 USB2.0 设备
-lsusb | grep -i 2bc5          # 应看到 Orbbec/Astra（2bc5:0403 等）
 
+> **先认型号再选驱动。** 初代 **Astra Pro**（`2bc5:0403` + `2bc5:0501`）必须用 legacy
+> `astra_camera`（OpenNI2 + libuvc）；新版 `ros-humble-orbbec-camera`（Orbbec SDK 2.x）
+> 驱动不了它，会报 `Device response size(0) < response header size(10), propertyId: 1000`
+> 并每 11 秒 reset 一次。Astra Pro Plus / Astra 2 / Gemini 系列才用 `orbbec_camera`。
+> 两个驱动可以共存，`astra.launch.py` 按已安装包自动选（legacy 优先）。
+
+**1) 认设备**
+
+```bash
+lsusb | grep 2bc5
+# Bus 001 Device 006: ID 2bc5:0403 Orbbec ... Astra Pro           <- 深度/IR，厂商私有接口（无内核驱动）
+# Bus 001 Device 005: ID 2bc5:0501 Orbbec ... Astra Pro HD Camera <- 彩色，UVC（uvcvideo 接管）
+```
+
+**2) 装依赖 + 编译 legacy 驱动**
+
+```bash
+sudo apt-get install -y libuvc-dev libgflags-dev \
+  ros-humble-image-geometry ros-humble-image-transport ros-humble-tf2-eigen \
+  ros-humble-rclcpp-components ros-humble-camera-info-manager
+
+cd /opt/edge_server/src
+git clone https://github.com/orbbec/ros2_astra_camera.git
+cd /opt/edge_server && bash -lc 'source /opt/ros/humble/setup.bash && \
+  colcon build --packages-select astra_camera_msgs astra_camera \
+  --cmake-args -DCMAKE_BUILD_TYPE=Release'
+```
+
+实测版本 `f7e71d9`（2023-11-08）：x86_64 编译约 70 s，Pi 4B 约 4–6 分钟。源码放
+`/opt/edge_server/src/ros2_astra_camera`（rsync 只覆盖 `src/edge_server`，不会动它）。
+
+**3) udev（建 `/dev/astra_pro` 并给 0666）**
+
+```bash
+# 装了 orbbec_camera 时用它自带规则（同时覆盖新机型）
+sudo cp /opt/ros/humble/share/orbbec_camera/udev/99-obsensor-libusb.rules /etc/udev/rules.d/
+# 只有 legacy 源码时用它的规则（内容对 0403 等价）
+# sudo cp /opt/edge_server/src/ros2_astra_camera/astra_camera/scripts/56-orbbec-usb.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+ls -l /dev/astra_pro            # 期望 -> bus/usb/001/00x，且 0666
+```
+
+**4) 启动与默认参数**
+
+```bash
 ros2 launch edge_server astra.launch.py
-# 话题：/camera/color/image_raw、/camera/depth/image_raw、
-#       /camera/color/camera_info、/camera/depth/camera_info
+# 也可随整车 bringup：ros2 launch edge_server robot_bringup.launch.py start_camera:=true
 ```
-`astra.launch.py` 默认：`depth_registration:=true`（深度对齐彩色，bbox 可直接采深度）；`enable_point_cloud:=false`（Pi 4B 省 CPU/带宽）；640×480@10Hz；发布 `base_link → camera_link` 静态 TF，默认 `x=0.08,y=0,z=0.22`。
 
-Edge 侧：`edge.camera.topic`/`perception.image_topic` 已切到 `/camera/color/image_raw`；`perception.depth_topic` 为 `/camera/depth/image_raw`，`prefer_depth: true`；`target_detector_node` 用深度 bbox 中心区域中值优先测距，深度不可用再回退激光/bbox 高度；health `depth_camera` 监控深度话题，dashboard 增加「深度相机」卡片；`robot_bringup.launch.py start_camera:=true` 可随整车启动。
+`astra.launch.py` 默认：`color 640×480@15`、`depth 640×480@15`、`depth_registration:=true`、
+`enable_point_cloud:=false`、`enable_ir:=false`，并发布 `base_link → camera_link` 静态 TF
+（默认 `x=0.08, y=0, z=0.22`，按实车安装位置改 `tf_*`）。
 
-验收：
+> **帧率硬约束（踩过）**：这块相机的彩色流在 640×480 只支持 **30 / 15 fps**（MJPG、YUYV 都一样）。
+> 传 `color_fps:=10` 会让 libuvc 返回 `Invalid mode`，随后驱动对已置空的句柄解引用，
+> **直接 `exit code -11` 段错误**——不是驱动坏了，是模式非法。
+
+> **深度配准**：legacy 驱动的 `depth_registration:=true` 是**硬件就地配准**——OpenNI 把深度流
+> 对齐到彩色后仍发布在 `/camera/depth/image_raw`，**不会**另开 `depth_registered` 话题。
+> 因此 bbox 中心可以直接在同一像素坐标取深度。
+
+**5) 常驻：systemd**
+
 ```bash
-ros2 topic hz /camera/color/image_raw   # ≈10 Hz
-ros2 topic hz /camera/depth/image_raw   # ≈10 Hz
-ros2 topic echo /camera/depth/image_raw --once --field encoding   # 16UC1/32FC1
-ros2 topic echo /camera/depth/camera_info --once
-ros2 run tf2_ros tf2_echo base_link camera_link
+sed 's/^User=.*/User=ubuntu/; s/^Group=.*/Group=ubuntu/' \
+  software/tools/systemd/rush-mog-camera.service | \
+  sudo tee /etc/systemd/system/rush-mog-camera.service > /dev/null
+sudo systemctl daemon-reload && sudo systemctl enable --now rush-mog-camera
 ```
-现状与可选服务：本机尚未插 Astra Pro（`lsusb` 没有 `2bc5`），驱动未启动。已安装并 enable 可选的 `rush-mog-camera.service`（`ConditionPathExists=/dev/astra_pro`）：相机插上且 Orbbec udev 规则生效后，重启或 `sudo systemctl start rush-mog-camera` 即启动；模板 `software/tools/systemd/rush-mog-camera.service`；手动调试仍推荐 `ros2 launch edge_server astra.launch.py`。若 Orbbec 驱动无法识别老款 Astra Pro，先确认 `lsusb`/`ros2 topic list`；仍不行则换 Astra Pro Plus/Gemini 2/D435i，Edge 侧话题/深度分支不用改。
+（本机把 `ubuntu` 换成 `eagle`。）`ConditionPathExists=/dev/astra_pro`：没插相机时静默跳过，
+拔掉再插上只需 `sudo systemctl restart rush-mog-camera`。
+
+**6) 验收（2026-11-21 实测）**
+
+```bash
+systemctl is-active rush-mog-camera                        # active
+ros2 topic hz /camera/color/image_raw                     # ≈15 Hz
+ros2 topic hz /camera/depth/image_raw                     # ≈27 Hz（设备按支持集协商）
+ros2 topic echo /camera/depth/image_raw --once --field encoding   # 16UC1（单位 mm）
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/stream   # 200
+curl -s http://127.0.0.1/api/modules/ros/health | python3 -c \
+  "import json,sys;[print(d['id'],d['status']) for d in json.load(sys.stdin)['devices'] if 'camera' in d['id']]"
+# camera ok / depth_camera ok
+```
+
+**7) 页面取流**
+
+- 首页 `http://<host>/`：**点画面才开始推流**，状态从 `Click picture to start` → `Connecting...` → 画面；
+  再点一次停止（省带宽）。走 `http://<host>:8080/stream`。
+- Dashboard `http://<host>/dashboard.html`：进页面自动连「视频监控」面板，加载成功显示 `LIVE`，
+  失败显示「等待相机」并每 8 s 重试。
+- `:80/stream` 只是 302 到 `:8080/stream`；MJPEG 不占 80，网页/控制不受影响。
+
+**8) 排错**
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| `Device response size(0) < response header size(10), propertyId: 1000`，每 11 s reset | 用 `orbbec_camera` 驱动初代 `0403` | 按本节步骤 2 装 legacy `astra_camera` |
+| `set uvc ctrl error Invalid mode` 后 `process has died ... exit code -11` | 彩色分辨率/帧率非法（如 10 fps） | `color_fps:=30` 或 `15` |
+| `attempt to claim already-claimed interface` | uvcvideo 占着彩色接口 | legacy 驱动一般能自动 detach；仍失败时 `echo -n 1-3.1:1.0 > /sys/bus/usb/drivers/uvcvideo/unbind`（接口名用 `ls /sys/bus/usb/devices/*:1.0` 查） |
+| 只有彩色或只有深度 | USB2 带宽不足、经 Hub、与 webcam 抢带宽 | 直插主机 USB 口；降 `depth_fps`；别和 UVC 摄像头共用 Hub |
+| `/stream` 503 | 没有 `/camera/color/image_raw` | `ros2 topic hz` → `journalctl -u rush-mog-camera`；再查 health `camera` |
+| 拔插后不恢复 | USB 复位后节点还抱着旧句柄 | `sudo systemctl restart rush-mog-camera` |
+
+**9) Edge 侧配置**
+
+`edge.camera.topic` 与 `perception.image_topic` 为 `/camera/color/image_raw`；
+`perception.depth_topic` 为 `/camera/depth/image_raw`、`depth_scale: 0.001`（mm→m）、`prefer_depth: true`。
+`target_detector_node` 先用深度 bbox 中心区域中值测距，深度不可用时回退激光/bbox 高度。
+health 的 `camera`/`depth_camera` 在接上相机后已设为 `required: true`：相机掉线会让整体健康变成
+`error`；只想报警不阻断时改回 `false`。
 
 ### 6.7 悬崖传感器（STM32 PB3/PB4）
 悬崖传感器接在 STM32 的 PB3/PB4，由 `body_control` 固件本地做 10ms 采样、30ms 消抖，并在触发时封锁运动。Edge 侧要看到状态，STM32 必须上报悬崖掩码：
@@ -1347,6 +1464,9 @@ sudo systemctl start edge_server
 | `ros2 topic hz /scan` 无数据 | `/dev/rush_lidar` 不存在、波特率/协议不对或节点未启动 | `ls -l /dev/rush_lidar`；`ros2 topic echo /lidar/status`；检查 `lidar.port/baud` 和 `dtoverlay=uart4` |
 | `/lidar/status` 的 `crc_errors` 持续增加 | 波特率不对、线缆干扰或协议不是 LD19 | 确认 D6 说明书波特率（230400/921600）、共地、TX/RX 交叉、缩短线缆 |
 | 没有 `/camera/color/image_raw` 或 `/camera/depth/image_raw` | Astra 未插好、USB 供电/带宽不足、驱动未启动 | `lsusb \| grep 2bc5`；`ros2 launch edge_server astra.launch.py`；插 USB3 口、不经 Hub、降分辨率/帧率 |
+| `Device response size(0) < response header size(10), propertyId: 1000`，每 11 s reset | 用 `orbbec_camera`（新 SDK）驱动初代 Astra Pro（2bc5:0403） | 编译 legacy `astra_camera`，见 §6.6 |
+| `set uvc ctrl error Invalid mode` 后 `exit code -11` | 彩色模式非法（640×480 只支持 30/15 fps） | `color_fps:=30` 或 `15`，见 §6.6 |
+| 拔插相机后 `/stream` 一直 503 | USB 复位后驱动抱着旧句柄 | `sudo systemctl restart rush-mog-camera` |
 | `/camera/depth/image_raw` 有图但目标测距明显偏 | 深度未对齐到彩色/外参不对 | `depth_registration:=true`；检查 `base_link→camera_link` TF；必要时 `prefer_depth:=false` |
 | dashboard 悬崖卡片一直“无遥测” | STM32 固件还是 8 字段 `$B`，没有 cliff_mask | 重新编译/烧录 `body_control`；`ros2 topic echo /base/status --once` 应看到 9 个字段 |
 | 悬崖卡片左右状态反了/一直 CLIFF | 模块 DO 空闲电平与 `CLIFF_*_TRIGGER_LEVEL` 相反，或 PB3/PB4 悬空 | 调模块电位器；按实际改 `cliff_sensor.h` 触发宏；确认共地 |
@@ -1398,8 +1518,11 @@ sudo systemctl start edge_server
 | 雷达设备 | `/dev/rush_lidar`（UART4 GPIO8/9） |
 | 雷达状态 | `ros2 topic echo /lidar/status --once` |
 | 悬崖状态 | `ros2 topic echo /body/cliff_status --once` |
-| Astra USB 规则 | `/etc/udev/rules.d/99-obsensor-libusb.rules` |
-| Astra 启动 | `ros2 launch edge_server astra.launch.py` |
+| Astra USB 规则 | `/etc/udev/rules.d/99-obsensor-libusb.rules`（或 legacy 的 `56-orbbec-usb.rules`） |
+| Astra 驱动源码 | `/opt/edge_server/src/ros2_astra_camera`（legacy，初代 Astra Pro 必须） |
+| 相机设备 | `/dev/astra_pro`（2bc5:0403，深度/IR；彩色是 2bc5:0501 UVC） |
+| 相机服务 | `rush-mog-camera.service`（`ConditionPathExists=/dev/astra_pro`） |
+| Astra 启动 | `ros2 launch edge_server astra.launch.py`（自动选 legacy/orbbec 驱动） |
 | WirePlumber 音频规则 | `/home/ubuntu/.config/wireplumber/bluetooth.lua.d/51-rush-mog.lua` |
 | RTKit 授权 | `/etc/polkit-1/localauthority/50-local.d/50-rush-mog-rtkit.pkla` |
 | WiFi 省电关闭 | `/etc/systemd/system/wifi-powersave-off.service` |

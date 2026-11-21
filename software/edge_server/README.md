@@ -653,7 +653,11 @@ dashboard 的 BOM「电源及转换板」卡片使用该状态；health monitor 
 
 ### 5.9 Astra Pro 深度相机
 
-Astra Pro 同时提供 RGB 和深度，使用 Orbbec ROS2 驱动（`ros-humble-orbbec-camera`）。
+Astra Pro 同时提供 RGB 和深度。**驱动要按型号选**：初代 Astra Pro（`2bc5:0403` + `2bc5:0501`）
+必须用 legacy `astra_camera`（OpenNI2 + libuvc）；apt 里的 `ros-humble-orbbec-camera`（Orbbec SDK 2.x）
+驱动不了它（报 `Device response size(0) < response header size(10)` 并 11 s 一次 reset），
+只适用于 Astra Pro Plus / Astra 2 / Gemini 等新机型。两个驱动可共存，`astra.launch.py` 自动优先 legacy。
+
 本包提供：
 
 - `launch/astra.launch.py`：Astra 驱动 + `base_link → camera_link` 静态 TF；
@@ -661,17 +665,29 @@ Astra Pro 同时提供 RGB 和深度，使用 Orbbec ROS2 驱动（`ros-humble-o
 - health `depth_camera` 监控 `/camera/depth/image_raw`；
 - dashboard 的「深度相机」硬件卡片。
 
-安装与 USB：
+安装（初代 Astra Pro）：
 
 ```bash
-sudo apt install ros-humble-orbbec-camera
-sudo cp /opt/ros/humble/share/orbbec_camera/udev/99-obsensor-libusb.rules \
-  /etc/udev/rules.d/
+# 1) 依赖 + legacy 驱动源码（实测版本 f7e71d9，2023-11-08）
+sudo apt-get install -y libuvc-dev libgflags-dev ros-humble-image-geometry \
+  ros-humble-image-transport ros-humble-tf2-eigen ros-humble-rclcpp-components \
+  ros-humble-camera-info-manager
+cd /opt/edge_server/src && git clone https://github.com/orbbec/ros2_astra_camera.git
+cd /opt/edge_server && bash -lc 'source /opt/ros/humble/setup.bash && \
+  colcon build --packages-select astra_camera_msgs astra_camera --cmake-args -DCMAKE_BUILD_TYPE=Release'
+
+# 2) udev：建 /dev/astra_pro 并置 0666
+sudo apt install ros-humble-orbbec-camera          # 只为拿 99-obsensor-libusb.rules；也可用 legacy 的 56-orbbec-usb.rules
+sudo cp /opt/ros/humble/share/orbbec_camera/udev/99-obsensor-libusb.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
+ls -l /dev/astra_pro
 ```
 
-Astra Pro 是 USB 2.0 设备，插 Pi 4 的 USB 3.0 口，**不要经 Hub**，峰值约
-0.8A；建议深度/彩色都降到 640×480@10Hz。启动：
+新机型（Astra Pro Plus / Gemini）只装 `ros-humble-orbbec-camera` 即可，不需要 legacy 驱动。
+
+Astra Pro 是 USB 2.0 设备，插主机 USB 口，**不要经 Hub**，峰值约 0.8A。
+帧率有硬约束：**彩色 640×480 只支持 30 / 15 fps**（写 10 fps 会让 libuvc 报
+`Invalid mode` 并让驱动空指针段错误）；本包默认彩色 15、深度 15。启动：
 
 ```bash
 ros2 launch edge_server astra.launch.py
@@ -698,10 +714,11 @@ TF 默认 `base_link → camera_link` 为 `x=0.08, y=0, z=0.22`，按实际安�
 验收：
 
 ```bash
-ros2 topic hz /camera/color/image_raw
-ros2 topic hz /camera/depth/image_raw
-ros2 topic echo /camera/depth/camera_info --once
+ros2 topic hz /camera/color/image_raw                 # ≈15 Hz
+ros2 topic hz /camera/depth/image_raw                 # 实测 ≈27 Hz（设备按支持集协商）
+ros2 topic echo /camera/depth/image_raw --once --field encoding   # 16UC1（mm）
 ros2 run tf2_ros tf2_echo base_link camera_link
+curl -s -o /dev/null -w 'stream=%{http_code}\n' http://192.168.3.26:8080/stream   # 200
 curl -s http://192.168.3.26/api/modules/ros/health | python3 -m json.tool | grep -A3 depth_camera
 ```
 

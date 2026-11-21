@@ -9,7 +9,7 @@ RushMog智能系统包括语音控制系统，车体控制系统，视觉分析�
 - 激光雷达系统。`edge_server` 内置 `lidar_node`（LD19/D6 47 字节协议，UART4 `/dev/rush_lidar`）发布 `/scan` 和 `base_link→laser_link` TF；`slam_toolbox` 建图，`AMCL` 定位。硬件方案见 [hardware/SLAM_NAV.md](../hardware/SLAM_NAV.md)。
 - VLA推理系统。由 `software/center_server` 的 SmolVLA HTTP 服务执行真实策略推理；Center 启动后向 Edge 握手上报 IP/端口，机载 `vla_inference_node` 经 `GET /api/center` 自动发现并异步调用，Center 不可用时规则桩降级。部署见 [center_server/deploy/README.md](center_server/deploy/README.md)。
 - 机械臂系统。PCA9685 驱动，`/arm/trajectory` 接口；抓取/放置轨迹待 IK 接入。
-- 深度相机系统。Astra Pro 经 `orbbec_camera` 输出 RGB/深度，`target_detector_node` 优先用深度做目标测距；`edge_server` dashboard 提供深度相机健康卡片。
+- 深度相机系统。Astra Pro 输出 RGB/深度（初代用 legacy `astra_camera`，新机型用 `orbbec_camera`，`astra.launch.py` 自动选），`target_detector_node` 优先用深度做目标测距；`edge_server` dashboard 提供深度相机健康卡片与 MJPEG 视频监控。
 - SLAM/导航/目标搜索系统。由 `software/edge_server` 的 ROS 包 `edge_server` 实现：建图、定位健康度、Nav2/直航、目标检测、前沿探索、目标确认与接近。
 - 电源监控系统。树莓派 Edge Server 读取 `vcgencmd get_throttled` 与 `rpi_volt`，通过 `/api/power`、`/body/power_status` 和 dashboard「电源及转换板」模块展示欠压/降频/温度状态；当前正常即表示电源及转换板正常。
 - 健康检查系统。由 `software/edge_server` 的 `health_monitor_node` 实现：ROS 节点/话题 + 相机/雷达/IMU/麦克风/音箱/机械臂/底盘/电池等设备健康，HTTP 供同机 Edge Server/dashboard 代理。
