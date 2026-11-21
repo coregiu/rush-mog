@@ -173,16 +173,31 @@ SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="r
 `robot.yaml` 的 `base.port` 可改为 `/dev/rush_base`；并确认 `python3-serial` 已安装。
 
 激光雷达（D6/LD19，UART4 GPIO8/9）：
+GPIO8=物理 pin24（UART4 TXD，接雷达 RX，可不接）；GPIO9=物理 pin21（UART4 RXD，接雷达 TX，必须接）；
+GND 必须共地；D6 一般 5V/1A 独立供电。GPIO8/9 与 SPI0 CE0/CE1 复用，**必须关闭 SPI0**。
+D6 标配 10 芯线**颜色会重复**（黄色 Tx/IO3、白色 GND/IO1、绿色 Rx/IO2），必须按管脚号：0=+5V、1=GND、2=Tx→GPIO9(pin21)、3=Rx→GPIO8(pin24)、4=GND；5–9 为 NPN I/O 不要接。D6 启动电流 >1.5A，建议独立 5V 并与 Pi 共地。详见 [DEPLOY.md §6.5.1](docs/DEPLOY.md)。
 ```ini
 # /boot/firmware/config.txt
-dtoverlay=uart4
+# dtparam=spi=on          # 关闭，让出 GPIO8/9
+dtoverlay=uart3           # 保留：STM32 USART3 GPIO4/5
+dtoverlay=uart4           # D6 -> /dev/ttyAMA2
 ```
 ```bash
-# /etc/udev/rules.d/99-rush-mog.rules；设备名以 `ls /dev/ttyAMA*` 为准
-KERNEL=="ttyAMA3", SYMLINK+="rush_lidar"
+# udev：按 platform device 匹配，避免 ttyAMA 编号变化（仓库模板 software/tools/systemd/）
+sudo cp 99-rush-mog-lidar.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
+ls -l /dev/rush_lidar      # -> ttyAMA2（fe201800.serial）
+sudo dmesg | grep fe201800 # 应看到 ttyAMA2
 ```
-`robot.yaml` 默认 `lidar.port: /dev/rush_lidar`、`baud: 230400`，
+无数据时先诊断（供电/接线/波特率/协议）：
+```bash
+sudo systemctl stop rush-mog-lidar.service   # 避免与节点抢串口
+sudo python3 /opt/edge_server/tools/lidar_probe.py
+# 拔掉雷达、短接 GPIO8(pin24) 与 GPIO9(pin21)，做 Pi UART4 回环自检：
+sudo python3 /opt/edge_server/tools/lidar_probe.py --ports /dev/rush_lidar --bauds 115200 --send 55aa55aa
+sudo systemctl start rush-mog-lidar.service
+```
+`robot.yaml` 默认 `lidar.port: /dev/rush_lidar`、`baud: 921600`（国科光芯 D6 固定 921600；LD19/LD06 用 230400），
 `frame_id: laser_link`，并发布 `base_link → laser_link` 静态 TF（按实际安装位置改
 `tf_x/tf_y/tf_z/tf_yaw_deg`）。单独验证：
 ```bash
@@ -203,7 +218,7 @@ sudo setcap cap_net_bind_service=+ep /usr/bin/python3
 `http://<pi-ip>:8080/stream`。
 
 其他启动前确认：
-- 激光驱动已发布 `/scan`（`robot_bringup` 默认启动 `lidar_node`；未接雷达可 `start_lidar:=false`）；
+- 激光驱动 `lidar_node` 已由 `rush-mog-lidar.service` 常驻；`/scan` 有数据即表示 UART4 正常。无数据时看 `/lidar/status` 的 `state`（`receiving`/`no_data`）并用 `tools/lidar_probe.py` 诊断；
 - 相机驱动已发布 `/camera/color/image_raw`（Astra Pro；Edge Server 订阅并转成 MJPEG）；
 - 12V/5V/6V 共地，急停释放。
 
@@ -826,7 +841,7 @@ ros2 topic echo /center/scenario_status
 - `health.publish_rate` / `startup_grace_sec` / `strict_unknown`
 - `health.http.host` / `port` / `api_key`
 - `base.transport` / `port` / `baud` / `body_command.*`
-- `lidar.enabled` / `port` / `baud` / `topic` / `frame_id` / `bins` /
+- `lidar.enabled` / `port` / `baud` / `topic` / `frame_id` / `bins` / `no_data_timeout_sec` / `start_command_hex` /
   `range_min` / `range_max` / `publish_tf` / `tf_*`
 - `edge.web.port` / `stream_port` / `edge.camera.fps` / `edge.motion.keepalive_ms`
 - `edge.speaker.*`：`enabled` / `model` / `models.*` / `auto_connect` /

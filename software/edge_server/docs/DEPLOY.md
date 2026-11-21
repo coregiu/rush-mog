@@ -543,17 +543,18 @@ curl -s http://192.168.3.26/api/microphone | python3 -m json.tool
 如果仍卡顿，优先把 Pi 的 WiFi 切到 **5GHz**（当前 `wlan0` 在 2.4GHz channel 1，与蓝牙共用天线），或靠近路由器/音箱；这是无线共存问题，软件缓冲只能缓解，不能完全消除 2.4GHz 干扰。
 
 ### 6.5 激光雷达（D6/LD19）
+
+> 接线：GPIO8=物理 pin24（TXD4，接雷达 RX，可不接），GPIO9=物理 pin21（RXD4，接雷达 TX，必须接），GND 共地，D6 通常 5V/1A 独立供电；`GPIO8/9` 与 `SPI0 CE0/CE1` 复用，必须 `# dtparam=spi=on` 关闭 SPI0。
 代码已内置 `lidar_node`（`edge_server/core/lidar.py` + `ros_nodes/lidar_node.py`），支持 LD19/LD06/D6 的 47 字节协议（`0x54 0x2C`，CRC-8 0x4D）。接线与系统配置：
 ```ini
 # /boot/firmware/config.txt
-dtoverlay=uart4          # GPIO8/9，D6 激光；不要同时启用 spi0
+dtoverlay=uart4          # GPIO8/9，D6 激光；必须同时关闭 spi0（见下）
 ```
 ```bash
-# /etc/udev/rules.d/99-rush-mog.rules（设备名以 ls /dev/ttyAMA* 为准，此处 ttyAMA3 为例）
-sudo tee /etc/udev/rules.d/99-rush-mog.rules >/dev/null <<'RULE'
-KERNEL=="ttyAMA3", SYMLINK+="rush_lidar"
-RULE
+# 仓库模板：software/tools/systemd/99-rush-mog-lidar.rules
+sudo cp 99-rush-mog-lidar.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
+# 用 platform device 匹配（fe201800.serial=UART4），不要写死 ttyAMA 编号
 
 # 重启后确认
 ls -l /dev/rush_lidar /dev/ttyAMA*
@@ -563,7 +564,7 @@ ls -l /dev/rush_lidar /dev/ttyAMA*
 lidar:
   enabled: true
   port: "/dev/rush_lidar"
-  baud: 230400             # 按 D6 说明书；有些批次是 921600
+  baud: 921600             # 国科光芯 D6 固定 921600；LD19/LD06 为 230400
   protocol: "ld19"
   topic: "/scan"
   frame_id: "laser_link"
@@ -592,7 +593,116 @@ ros2 topic echo /scan --once    # ranges 长度 360，frame_id=laser_link
 ros2 topic echo /lidar/status --once
 ros2 run tf2_ros tf2_echo base_link laser_link
 ```
-现状与可选服务：本机未接 D6、未启用 `dtoverlay=uart4`，所以 `/dev/rush_lidar` 暂时不存在（`ros-humble-slam-toolbox` 已安装）。已安装并 enable 可选的 `rush-mog-lidar.service`：单元 `/etc/systemd/system/rush-mog-lidar.service`（仓库模板 `software/tools/systemd/rush-mog-lidar.service`），`ConditionPathExists=/dev/rush_lidar`，设备不存在时静默跳过；接好线、创建 udev symlink 并重启后，服务会自动启动 `lidar_node`。接好硬件后：确认 `config.txt` 有 `dtoverlay=uart4` → 建 udev symlink → `sudo reboot`（或 `sudo systemctl start rush-mog-lidar`）。波特率或协议不同，改 `lidar.baud`/`lidar.protocol`；设备名不同，改 udev 规则或 `lidar.port`。
+现状（2026-11-15）：已启用 `dtoverlay=uart4`、关闭 SPI0、创建 `/dev/rush_lidar`，`rush-mog-lidar.service` 已 active；但 UART4 上未收到任何字节（GPIO9 无电平跳变），需检查雷达供电/共地/TX→GPIO9 接线。诊断前先 `sudo systemctl stop rush-mog-lidar.service`，再执行 `sudo python3 /opt/edge_server/tools/lidar_probe.py`；`/lidar/status` 的 `state=no_data` 表示串口已开但无数据。单元模板在 `software/tools/systemd/`，`ConditionPathExists=/dev/rush_lidar`，设备不存在时静默跳过；接好线、创建 udev symlink 并重启后自动启动。波特率/协议不同改 `lidar.baud`/`lidar.protocol`；设备名不同改 udev 规则或 `lidar.port`。
+
+#### 6.5.1 故障排查：孪生页面激光雷达状态显示 `unknown`
+
+**现象**：线接好、`rush-mog-lidar.service` 也是 active，但 dashboard 数字孪生页面的「激光雷达」卡片一直显示 `unknown`。
+
+**先理解数据链路**（`web/dashboard.js`）：
+
+```text
+D6 串口 -> lidar_node -> /scan (sensor_msgs/LaserScan, ~10Hz)
+                              |
+                              v
+                    health_monitor_node 的 lidar 设备
+                              |
+                              v
+              GET /api/modules 的 ros.devices[lidar]
+                              |
+                              v
+                 dashboard.js: rosDevice('lidar')
+```
+
+`unknown` 的含义是 **health_monitor 从未收到过 `/scan` 消息**，不是“服务没启动”。只要 `/scan` 有数据，卡片会自动变成 `ok`；无需重启 dashboard。
+
+排查顺序（每步都能独立定位）：
+
+```bash
+# 0) 服务与节点状态
+systemctl is-active rush-mog-lidar.service
+source /opt/ros/humble/setup.bash && source /opt/edge_server/install/setup.bash
+ros2 topic echo /lidar/status --once --full-length
+```
+
+`/lidar/status` 的判定：
+
+| state | packets/errors | 含义 | 下一步 |
+|---|---|---|---|
+| `receiving` | packets>0, scans>0 | 雷达数据正常 | 查 `/scan` 与 health，不是硬件问题 |
+| `no_data` | packets=0, crc=0, header=0 | **串口已打开，但一个字节都没收到** | 供电/接线/雷达不输出（最常见） |
+| `no_data` | packets=0, crc/header>0 | 有字节但帧头/CRC 不对 | 波特率或协议不匹配 |
+| `error` | last_error 非空 | 串口打不开/权限/设备不存在 | 查 `/dev/rush_lidar`、dialout、udev |
+
+`/lidar/status` 还提供 `rx_bytes`（串口收到的原始字节数）：`rx_bytes=0` 表示完全没有电气数据；`rx_bytes>0` 但 `packets=0` 表示有字节但帧头/CRC 不对（波特率或协议问题）。
+
+```bash
+# 1) UART4 / 设备节点 / 引脚
+ls -l /dev/rush_lidar            # 应为 -> ttyAMA2
+sudo dmesg | grep fe201800       # 应有 ttyAMA2
+for f in $(sudo find /sys/kernel/debug/pinctrl -name pinmux-pins); do
+  sudo grep -E "pin (8|9) " "$f" # 应为 fe201800.serial ... function alt4
+done
+
+# 2) 原始字节（先停服务，避免两个进程抢串口）
+sudo systemctl stop rush-mog-lidar.service
+sudo python3 /opt/edge_server/tools/lidar_probe.py --bauds 921600,460800,230400,115200
+sudo systemctl start rush-mog-lidar.service
+
+# 3) Pi 侧 UART 回环（排除 Pi/overlay 问题）
+#    拔掉雷达，短接 GPIO8(物理 pin24) 与 GPIO9(物理 pin21)，然后：
+sudo systemctl stop rush-mog-lidar.service
+sudo python3 /opt/edge_server/tools/lidar_probe.py \
+  --ports /dev/rush_lidar --bauds 115200 --send 55aa55aa
+# 期望读到 4 字节 55 aa 55 aa；若成功说明 Pi UART4/overlay/udev 都正常
+sudo systemctl start rush-mog-lidar.service
+
+# 4) 健康接口
+curl -s http://127.0.0.1:8090/ros/health/devices/lidar | python3 -m json.tool
+```
+
+**国科光芯 D6 的硬件要点（最容易踩坑）**：
+
+1. **波特率固定 921600**（8N1，无校验），不是 LD19 的 230400；本现场已把
+   `deploy.yaml` / `robot.yaml` 改为 `lidar.baud: 921600`。
+2. D6 标配 **10 芯线**，**颜色会重复**（黄色有 Tx 和 IO_3，白色有 GND 和 IO_1，
+   绿色有 Rx 和 IO_2，黑色有 GND 和 IO_2 In）。**必须按管脚号接线，不能按颜色**：
+   - 管脚 0：红色 `+5V` → Pi 5V（pin2/4）
+   - 管脚 1：白色 `GND` → Pi GND（pin6/9/14/20/25/30/34/39）
+   - 管脚 2：黄色 `Tx` → **Pi GPIO9 / 物理 pin21（RXD4）**
+   - 管脚 3：绿色 `Rx` → **Pi GPIO8 / 物理 pin24（TXD4）**
+   - 管脚 4：黑色 `GND`（与管脚 1 内部连通，可再接一根地）
+   - 管脚 5–9 是 NPN 输入/输出，接激光雷达做区域保护时才用，**不要接 Pi UART**。
+3. 供电：D6 标称 **5V，启动电流 >1.5A，运行约 500mA，纹波 <40mV**。
+   - 不建议直接从 Pi 5V 排针取电；优先用 D6 标配 5V 适配器/独立电源，**与 Pi 共地**；
+   - 若必须用 Pi 供电，使用官方 5V/3A 以上电源，并确认 `vcgencmd get_throttled`
+     没有 `0x50000`（历史上发生过欠压/降频）；
+   - 若雷达电机不转，先怀疑供电/线序，而不是代码。
+4. 通电后 D6 **默认自动旋转并输出点云**，一般不需要启动命令；少数批次需要
+   `lidar.start_command_hex`（例如 `a5 40`），可用 probe 的 `--send` 验证。
+5. 如果改用 D6 标配的 **TTL 转 USB 板**：插 Pi USB，设备通常是 `/dev/ttyUSB0`，
+   把 `lidar.port` 改成 `/dev/ttyUSB0`，并同步修改 systemd 的
+   `ConditionPathExists`/udev（或先手工 `ros2 run edge_server lidar_node` 验证）。
+
+**本次实测记录（2026-11-15，供对照）**：
+
+- `dtoverlay=uart4` 已启用，SPI0 已关闭；`GPIO8/9 = fe201800.serial, alt4`；
+- `/dev/rush_lidar -> ttyAMA2` 存在，`rush-mog-lidar.service` active；
+- `/lidar/status`：`state=no_data`、`packets=0`、`crc_errors=0`、`header_errors=0`；
+- `/scan` 无消息（`ros2 topic hz /scan` 无输出），因此 dashboard 显示 `unknown`；
+- 临时发布 `/scan`（10Hz、360 点）后 health 的 `lidar` 立即变为 `ok`，证明 dashboard/health 数据链路正常，`unknown` 只是因为真实串口没有数据；
+- `lidar_probe` 在 921600/460800/230400/115200 下 **bytes=0**；
+- GPIO9/GPIO8 2 秒内 **0 个边沿**；GPIO9 加下拉后仍读到 **1**（外部 TX 空闲为高，
+  说明 TX 线已接、雷达有电，但没有数据跳变）；
+- **Pi 侧 UART4 内部回环（PL011 LBE）成功收到 `55 aa 01 02`** → Pi UART/overlay 正常；
+- 结论：Pi 侧软件/驱动正常，问题在 **D6 没有输出数据**：重点查 10 芯线管脚 0/1/2/3 是否正确、
+  5V 启动电流是否足够、雷达电机是否旋转。接好后 `/lidar/status` 会变为
+  `state=receiving`、`scans>0`，`/scan` 约 10Hz，health 的 `lidar` 自动变 `ok`，
+  dashboard 孪生页面无需刷新即可恢复。
+
+若 probe 能看到字节但 `/lidar/status` 仍是 `no_data` 且 `crc_errors` 增长，说明 D6
+这批固件的帧格式不是 LD19 47 字节；把 `lidar_probe.py` 打印的 `sample=...` 保留下来，
+再在 `edge_server/core/lidar.py` 增加对应协议解析（`lidar.protocol` 扩展）。
 
 ### 6.6 Astra Pro 深度相机
 驱动 `ros-humble-orbbec-camera`（已安装）；udev `/etc/udev/rules.d/99-obsensor-libusb.rules`（已从 `/opt/ros/humble/share/orbbec_camera/udev/` 复制）。

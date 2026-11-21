@@ -59,6 +59,14 @@ class LidarNode(Node):
         self.status_rate_hz = max(
             0.1, float(lidar_cfg.get("status_rate_hz", 1.0))
         )
+        # 串口已打开但一直没收到数据时用于诊断（供电/接线/波特率/协议）
+        self.no_data_timeout_sec = max(
+            0.5, float(lidar_cfg.get("no_data_timeout_sec", 2.0))
+        )
+        # 少数雷达需要上位机先发启动命令；默认空=不发送（LD19/D6 常见为自动输出）
+        self.start_command_hex = str(
+            lidar_cfg.get("start_command_hex", "") or ""
+        ).strip()
 
         self.publish_tf = bool(lidar_cfg.get("publish_tf", True))
         self.tf_parent = str(lidar_cfg.get("tf_parent", "base_link") or "base_link")
@@ -73,6 +81,7 @@ class LidarNode(Node):
         self._serial = None
         self._connected = False
         self._state = "disabled" if not self.enabled else "starting"
+        self._rx_bytes = 0
         self._packets = 0
         self._scans = 0
         self._crc_errors = 0
@@ -130,7 +139,33 @@ class LidarNode(Node):
 
     def on_status_timer(self) -> None:
         now = time.monotonic()
+        warning = ""
         with self._lock:
+            age_ms = (
+                int(max(0.0, now - self._last_packet_at) * 1000.0)
+                if self._last_packet_at > 0
+                else -1
+            )
+            if (
+                self._connected
+                and self._state in {"receiving", "no_data"}
+                and (age_ms < 0 or age_ms > int(self.no_data_timeout_sec * 1000.0))
+            ):
+                if self._state != "no_data":
+                    self._state = "no_data"
+                    if self._rx_bytes > 0 or self._crc_errors or self._header_errors:
+                        self._last_error = (
+                            f"收到 {self._rx_bytes} 字节但无有效 LD19 帧"
+                            f"（crc={self._crc_errors}, header={self._header_errors}）："
+                            "检查 lidar.baud / lidar.protocol（D6 可能不是 LD19 帧）"
+                        )
+                    else:
+                        self._last_error = (
+                            "串口已打开但一个字节都没收到：检查雷达 5V/地、"
+                            "TX→GPIO9(pin21)、RX→GPIO8(pin24)；D6 固定 921600、启动电流>1.5A；"
+                            "可用 tools/lidar_probe.py 诊断"
+                        )
+                    warning = self._last_error
             payload = {
                 "ok": True,
                 "enabled": bool(self.enabled),
@@ -141,25 +176,25 @@ class LidarNode(Node):
                 "protocol": self.protocol,
                 "topic": self.topic,
                 "frame_id": self.frame_id,
+                "rx_bytes": int(self._rx_bytes),
                 "packets": int(self._packets),
                 "scans": int(self._scans),
                 "crc_errors": int(self._crc_errors),
                 "header_errors": int(self._header_errors),
                 "last_scan_points": int(self._last_scan_points),
                 "last_speed_dps": int(self._last_speed_dps),
-                "packet_age_ms": (
-                    int(max(0.0, now - self._last_packet_at) * 1000.0)
-                    if self._last_packet_at > 0
-                    else -1
-                ),
+                "packet_age_ms": age_ms,
                 "scan_age_ms": (
                     int(max(0.0, now - self._last_scan_at) * 1000.0)
                     if self._last_scan_at > 0
                     else -1
                 ),
                 "last_error": str(self._last_error),
+                "no_data_timeout_sec": float(self.no_data_timeout_sec),
                 "uptime_ms": int((now - self._started_monotonic) * 1000.0),
             }
+        if warning:
+            self.get_logger().warn(f"lidar: {warning}")
         self.pub_status.publish(String(data=json.dumps(payload, ensure_ascii=False)))
 
     # ------------------------------------------------------------- serial loop
@@ -186,6 +221,7 @@ class LidarNode(Node):
                     self._state = "receiving"
                     self._last_error = ""
                 self.get_logger().info(f"lidar serial connected: {self.port}@{self.baud}")
+                self._send_start_command(serial_port)
                 self._read_serial(serial_port)
             except Exception as exc:  # noqa: BLE001
                 self._set_error(f"{type(exc).__name__}: {exc}")
@@ -202,6 +238,26 @@ class LidarNode(Node):
                         pass
         self._set_state("disabled")
 
+    def _send_start_command(self, serial_port) -> None:
+        """可选的雷达启动命令（例如少数 D6 固件需要上位机触发）。"""
+
+        text = str(self.start_command_hex or "").replace(" ", "").replace("0x", "")
+        if not text:
+            return
+        try:
+            command = bytes.fromhex(text)
+        except ValueError:
+            self._set_error(f"start_command_hex 非法: {self.start_command_hex}")
+            return
+        try:
+            serial_port.write(command)
+            serial_port.flush()
+            self.get_logger().info(
+                f"lidar start command sent: {command.hex(' ')}"
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._set_error(f"发送启动命令失败: {exc}")
+
     def _read_serial(self, serial_port) -> None:
         buffer = bytearray()
         while not self._closing.is_set():
@@ -209,6 +265,8 @@ class LidarNode(Node):
             if not chunk:
                 continue
             buffer.extend(chunk)
+            with self._lock:
+                self._rx_bytes += len(chunk)
             while len(buffer) >= PACKET_SIZE:
                 index = buffer.find(bytes([PACKET_HEADER]))
                 if index < 0:
@@ -235,6 +293,7 @@ class LidarNode(Node):
                     self._last_packet_at = time.monotonic()
                     self._last_speed_dps = int(packet.speed_dps)
                     self._state = "receiving"
+                    self._last_error = ""
                 scan = self.accumulator.add_packet(packet)
                 if scan is not None:
                     self._publish_scan(scan)

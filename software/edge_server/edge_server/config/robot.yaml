@@ -26,7 +26,7 @@ edge_server:
   lidar:
     enabled: true
     port: "/dev/rush_lidar"
-    baud: 230400
+    baud: 921600          # 国科光芯 D6 固定 921600；LD19/LD06 改回 230400
     protocol: "ld19"
     topic: "/scan"
     status_topic: "/lidar/status"
@@ -39,6 +39,8 @@ edge_server:
     min_points: 30
     reconnect_sec: 2.0
     status_rate_hz: 1.0
+    no_data_timeout_sec: 2.0      # 串口打开但无数据 -> state=no_data（诊断用）
+    start_command_hex: ""          # 少数雷达需要启动命令，如 "a5 40"；默认空
     publish_tf: true
     tf_parent: "base_link"
     tf_x: 0.0
