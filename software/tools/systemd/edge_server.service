@@ -1,0 +1,51 @@
+# Rush-MoG Edge Server（网页/手柄/STM32 串口/图传 + ROS 健康网关）
+#
+# 安装：
+#   sudo cp edge_server.service /etc/systemd/system/edge_server.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now edge_server
+#
+# 换用户/换 UID 时只改这 4 处：User=ubuntu、两处 /run/user/1000、user@1000.service。
+# 例：用户是 eagle（UID 仍是 1000），只改 User=：
+#   sudo sed -i 's/^User=.*/User=eagle/' /etc/systemd/system/edge_server.service
+# 若 UID 不是 1000（用 `id -u <user>` 查），把 1000 一并换掉：
+#   sudo sed -i 's#/run/user/1000#/run/user/1002#g; s/user@1000\.service/user@1002.service/' \
+#     /etc/systemd/system/edge_server.service
+#
+# 前置条件（详见 docs/DEPLOY.md §2）：
+#   - /opt/edge_server/install/setup.bash 已由 colcon build 生成；
+#   - /opt/edge_server/config/deploy.yaml 存在（EDGE_SERVER_CONFIG）；
+#   - /var/lib/edge_server/{ros,audio} 与 /var/log/edge_server/ros 属于运行用户；
+#   - 该用户已 `loginctl enable-linger`，否则 /run/user/1000 在未登录时不存在。
+
+[Unit]
+Description=Rush-MoG Edge Server (web :80, MJPEG :8080, ROS health :8090)
+Documentation=file:///opt/edge_server/src/edge_server/docs/DEPLOY.md
+After=network-online.target bluetooth.service user@1000.service
+Wants=network-online.target bluetooth.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/edge_server
+# 运行配置与运行目录：部署期唯一真相来源
+Environment=EDGE_SERVER_CONFIG=/opt/edge_server/config/deploy.yaml
+Environment=ROS_HOME=/var/lib/edge_server/ros
+Environment=ROS_LOG_DIR=/var/log/edge_server/ros
+# 用户级 PipeWire/PulseAudio 与 D-Bus（蓝牙音箱播放/录音必需）
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=PULSE_SERVER=unix:/run/user/1000/pulse/native
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+# 绑定 80 端口而不需要 root 运行
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+# SIGINT 让 launch 正常收尾（两个节点一起退出）；超时强杀
+KillSignal=SIGINT
+TimeoutStopSec=10
+Restart=on-failure
+RestartSec=5
+# 服务里写死 bash -lc：登录 shell 是 zsh 时 setup.bash 会算错前缀（DEPLOY.md §7.1）
+ExecStart=/bin/bash -lc 'source /opt/ros/humble/setup.bash && source /opt/edge_server/install/setup.bash && exec ros2 launch edge_server edge_server_deploy.launch.py'
+
+[Install]
+WantedBy=multi-user.target

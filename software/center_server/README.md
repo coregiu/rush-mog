@@ -678,10 +678,10 @@ ssh ubuntu@192.168.3.26 'systemctl is-active edge_server; journalctl -u edge_ser
       fallback_to_rules: true
 ```
 
-> 当前 deploy launch 只启动 `edge_server_node`/`health_monitor_node` 等最小集；
-> 需要真实远程 VLA 闭环时，再把 `vla_inference_node` 加入
-> `/opt/edge_server/deploy/edge_server.launch.py`，并确保 `/center/synced_data`
-> 有数据源。只验证握手/健康时不需要。
+> 当前 deploy launch（`software/edge_server/launch/edge_server_deploy.launch.py`）只启动
+> `edge_server_node` + `health_monitor_node` 这两个节点；需要真实远程 VLA 闭环时，
+> 把 `vla_inference_node` 加进该 launch，并确保 `/center/synced_data` 有数据源。
+> 只验证握手/健康时不需要。
 
 #### 9.3.2 Center Server（Windows）
 
@@ -1050,7 +1050,8 @@ curl -s -X POST http://127.0.0.1:8000/v1/infer \
 7. **握手注册表在内存**：Edge 重启后需等待下一次 heartbeat（默认 ≤10s）才能
    重新发现；不落盘、不支持多 Center 同时注册（同 module 覆盖）。
 8. **Edge 最小部署未默认启动 `vla_inference_node`**：当前
-   `/opt/edge_server/deploy/edge_server.launch.py` 只跑 Web/健康/IMU 等；
+   `launch/edge_server_deploy.launch.py` 只跑 Web/健康两个节点（IMU、雷达等驱动
+   由 `robot_bringup` 或单独 launch 拉起）；
    启用远程 VLA 闭环需把该节点加入 launch 并提供 `/center/synced_data`。
 
 详细设计（模块、协议、错误处理、扩展点）见 [`DESIGN.md`](DESIGN.md)。
