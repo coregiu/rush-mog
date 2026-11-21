@@ -30,7 +30,7 @@ def _announcer(cfg=None, **kwargs):
     cfg = cfg or _config(
         enabled=True,
         edge_url="http://127.0.0.1:9",
-        public_host="192.168.4.50",
+        public_host="192.168.3.25",
     )
     service = kwargs.pop("service", None) or InferenceService(cfg)
     announcer = HandshakeAnnouncer(
@@ -49,7 +49,7 @@ def test_payload_reports_ip_port_and_endpoints():
     cfg = _config(
         enabled=True,
         edge_url="http://192.168.3.26",
-        public_host="192.168.4.50",
+        public_host="192.168.3.25",
     )
     service = InferenceService(cfg)
     announcer = HandshakeAnnouncer(
@@ -62,7 +62,7 @@ def test_payload_reports_ip_port_and_endpoints():
     try:
         payload = announcer._payload("startup")
         assert payload["module"] == "center"
-        assert payload["ip"] == "192.168.4.50"
+        assert payload["ip"] == "192.168.3.25"
         assert payload["port"] == 8123
         assert payload["health_path"] == "/v1/health"
         assert payload["params_path"] == "/v1/params"
@@ -99,7 +99,7 @@ def test_announce_now_tracks_success_and_sends_reason():
 
     def sender(url, payload, timeout, api_key):
         sent.append((url, dict(payload)))
-        return 200, {"ok": True, "infer_url": "http://192.168.4.50:8000/v1/infer"}
+        return 200, {"ok": True, "infer_url": "http://192.168.3.25:8000/v1/infer"}
 
     announcer, service = _announcer(sender=sender)
     try:
@@ -228,7 +228,7 @@ def edge_http():
 
 def test_handshake_posts_json_to_edge(edge_http):
     server, url = edge_http
-    cfg = _config(enabled=True, edge_url=url, public_host="192.168.4.50")
+    cfg = _config(enabled=True, edge_url=url, public_host="192.168.3.25")
     announcer, service = _announcer(cfg=cfg)
     try:
         assert announcer.announce_now("startup")["ok"] is True
@@ -238,7 +238,7 @@ def test_handshake_posts_json_to_edge(edge_http):
         assert payload["module"] == "center"
         assert payload["port"] == 8000
         assert payload["infer_port"] == 8000
-        assert payload["ip"] == "192.168.4.50"
+        assert payload["ip"] == "192.168.3.25"
         status = announcer.status()
         assert status["connected"] is True
         assert status["last_response"]["infer_url"].endswith("/v1/infer")

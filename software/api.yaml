@@ -3011,10 +3011,10 @@ components:
           enum: [http, https]
         base_url:
           type: string
-          example: "http://192.168.4.50:8000"
+          example: "http://192.168.3.25:8000"
         infer_url:
           type: string
-          example: "http://192.168.4.50:8000/v1/infer"
+          example: "http://192.168.3.25:8000/v1/infer"
         health_url:
           type: string
         params_url:
