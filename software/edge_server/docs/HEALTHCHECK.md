@@ -285,7 +285,7 @@ Edge Server 需要用一个接口回答三个问题：
       "ready": true, "enabled": true, "required": true, "connected": true,
       "data_fresh": true, "topic": "/camera/color/image_raw",
       "message_type": "sensor_msgs/msg/Image", "publisher_count": 1,
-      "age_sec": 0.05, "rate_hz": 14.9, "expected_rate_hz": 15.0,
+      "age_sec": 0.05, "rate_hz": 9.8, "expected_rate_hz": 10.0,
       "detail": "ok", "metrics": {"width": 640, "height": 480, "encoding": "bgr8", "bytes": 921600}
     },
     {
@@ -521,7 +521,7 @@ string metrics_json
 
 | id | type | 反馈话题 | 必需 | 期望频率 | 说明 |
 |---|---|---|---|---|---|
-| `camera` | camera | `/camera/color/image_raw` | 是 | 15 Hz | 空图/宽高为 0 判非法 |
+| `camera` | camera | `/camera/color/image_raw` | 是 | 10 Hz | Pi 4B 实测 7–10 Hz；空图/宽高为 0 判非法 |
 | `depth_camera` | camera | `/camera/depth/image_raw` | 否 | 10 Hz | Astra Pro 深度；空深度帧判非法 |
 | `cliff` | cliff | `/body/cliff_status` | 否 | 1 Hz | STM32 悬崖掩码；触发/无遥测判非法 |
 | `lidar` | lidar | `/scan` | 是 | 10 Hz | 空 ranges 判非法 |

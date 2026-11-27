@@ -510,7 +510,9 @@ edge_server:
         type: camera
         topic: "/camera/color/image_raw"
         message_type: "sensor_msgs/msg/Image"
-        expected_rate_hz: 15.0
+        # Pi 4B 单线程 MJPEG 解码实测 7–10 Hz；x86_64 可达 15。min_rate_ratio=0.5，
+        # 设为 10 时 5 Hz 以上即 ok，不会因 Pi 的 10 Hz 上限误报 degraded。
+        expected_rate_hz: 10.0
         timeout_sec: 2.0
         required: true
       depth_camera:

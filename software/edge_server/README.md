@@ -714,7 +714,7 @@ TF 默认 `base_link → camera_link` 为 `x=0.08, y=0, z=0.22`，按实际安�
 验收：
 
 ```bash
-ros2 topic hz /camera/color/image_raw                 # ≈15 Hz
+ros2 topic hz /camera/color/image_raw                 # Pi 4B 约 7–10 Hz；x86 约 15 Hz
 ros2 topic hz /camera/depth/image_raw                 # 实测 ≈27 Hz（设备按支持集协商）
 ros2 topic echo /camera/depth/image_raw --once --field encoding   # 16UC1（mm）
 ros2 run tf2_ros tf2_echo base_link camera_link

@@ -5,6 +5,8 @@
 > 相关文档：设计文档 [`DESIGN.md`](DESIGN.md) ｜ 健康检查契约 [`HEALTHCHECK.md`](HEALTHCHECK.md) ｜ 硬件分析 [`../../../hardware/SLAM_NAV.md`](../../../hardware/SLAM_NAV.md)
 >
 > **2026-11-21 更新（本次重新整理）**：§2 重写为「从空机器到开机自启」的 P0–P7 手动流程，新增 §2.0 目标机变量表、§2.5 配置裁剪清单、§2.6 单元全文与字段说明、§2.7 验收对照与打勾清单；部署 launch 版本化为 `launch/edge_server_deploy.launch.py`（随 `colcon build` 安装，不再手工复制）；systemd 单元版本化为 `software/tools/systemd/edge_server.service`；§7.5 补充单元残缺/端口权限/运行目录/linger 等新故障；实测环境为 x86_64 开发机（`eagle@172.31.4.88`），树莓派路径保持原样。
+>
+> **2026-11-28 更新（Astra Pro 实机部署）**：在 `192.168.3.26` 上定位并修复 dashboard「深度相机离线」：机器只装了 `ros-humble-orbbec-camera`，它会一路回退去驱动初代 `2bc5:0403`，日志每 11 s 报 `Device response size(0) < response header size(10)`。§6.6 补充驱动自检、`libusb-1.0-0-dev` 依赖、GitHub 直连失败时的 tarball 获取、重启与验收命令。
 
 ## 目录
 - 0. 速查与三条铁律
@@ -334,17 +336,28 @@ python3 -c 'import edge_tts; print("edge-tts-ok")'
 
 ```bash
 lsusb | grep 2bc5                      # 期望 2bc5:0403 + 2bc5:0501
-sudo apt-get install -y libuvc-dev libgflags-dev ros-humble-image-geometry \
-  ros-humble-image-transport ros-humble-tf2-eigen ros-humble-rclcpp-components \
-  ros-humble-camera-info-manager
-cd /opt/edge_server/src && git clone https://github.com/orbbec/ros2_astra_camera.git
+sudo apt-get install -y libuvc-dev libusb-1.0-0-dev libgflags-dev \
+  ros-humble-image-geometry ros-humble-image-transport ros-humble-tf2-eigen \
+  ros-humble-rclcpp-components ros-humble-camera-info-manager
+cd /opt/edge_server/src
+# 方式 A：GitHub 可直连
+git clone --depth 1 https://github.com/orbbec/ros2_astra_camera.git
+# 方式 B：clone 卡住/报 GnuTLS recv error 时，用 tarball（分支是 master，不是 main）
+# curl -L --retry 3 -o /tmp/astra.tar.gz \
+#   https://codeload.github.com/orbbec/ros2_astra_camera/tar.gz/refs/heads/master
+# tar xzf /tmp/astra.tar.gz -C /tmp
+# mv /tmp/ros2_astra_camera-master /opt/edge_server/src/ros2_astra_camera
 cd /opt/edge_server && bash -lc 'source /opt/ros/humble/setup.bash && \
-  colcon build --packages-select astra_camera_msgs astra_camera --cmake-args -DCMAKE_BUILD_TYPE=Release'
+  colcon build --packages-select astra_camera_msgs astra_camera \
+  --parallel-workers 2 --cmake-args -DCMAKE_BUILD_TYPE=Release'
 sudo cp /opt/ros/humble/share/orbbec_camera/udev/99-obsensor-libusb.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules && sudo udevadm trigger
+sudo systemctl restart rush-mog-camera
 ```
 
-验收：`ls -l /dev/astra_pro` 存在（0666）、`ros2 topic hz /camera/color/image_raw` ≈15 Hz。
+验收：`ros2 pkg prefix astra_camera` 有输出（不是 `Package not found`）、`ls -l /dev/astra_pro`
+存在（0666）、`ros2 topic hz /camera/color/image_raw` 有稳定数据（Pi 4B 实测约 7–10 Hz，
+x86 开发机可到 15 Hz）、`/status` 的 `camera` 为 `1`。
 
 ### 2.4 代码落盘与构建（P4）
 
@@ -613,7 +626,7 @@ stop      → 端口全部释放，is-active=inactive；start 后 3 个端口恢
 [ ] P3 实车：/dev/ttyAMA1 存在且在 dialout 组；/dev/rush_lidar -> ttyAMA2；i2cdetect 见 0x68；
        systemctl --user is-active pipewire pipewire-pulse wireplumber 全 active
 [ ] P3 相机：/dev/astra_pro 存在；systemctl is-active rush-mog-camera=active；
-       ros2 topic hz /camera/color/image_raw ≈15 Hz、/camera/depth/image_raw 有数据
+       ros2 topic hz /camera/color/image_raw 有稳定数据（Pi 4B 约 7–10 Hz）、/camera/depth/image_raw 有数据
 [ ] P4 src 两个包到位（launch/edge_server_deploy.launch.py 存在）；colcon build 成功；
        ros2 pkg prefix edge_server 正常
 [ ] P5 deploy.yaml 关键值正确（web 80/8080、state 指 /var/lib、required/strict_unknown 符合档位）
@@ -1144,6 +1157,23 @@ curl -s http://127.0.0.1:8090/ros/health/devices/lidar | python3 -m json.tool
 > 并每 11 秒 reset 一次。Astra Pro Plus / Astra 2 / Gemini 系列才用 `orbbec_camera`。
 > 两个驱动可以共存，`astra.launch.py` 按已安装包自动选（legacy 优先）。
 
+**0) 先自检：launch 实际会选哪个驱动**
+
+`astra.launch.py` 的选择顺序是 `astra_camera` → `orbbec_camera`。**只装了
+`orbbec_camera` 时它不会报错退出，而是回退到新 SDK**；后者对初代 `2bc5:0403`
+的失败表现正是每 11 s reset 一次，所以先确认包在不在：
+
+```bash
+bash -lc 'source /opt/ros/humble/setup.bash; source /opt/edge_server/install/setup.bash; \
+  echo -n "astra_camera: "; ros2 pkg prefix astra_camera 2>&1; \
+  echo -n "orbbec_camera: "; ros2 pkg prefix orbbec_camera 2>&1'
+```
+
+- `astra_camera` 有路径：继续步骤 4 启动。
+- `astra_camera: Package not found` + `orbbec_camera` 有路径：**这就是 dashboard
+  相机离线的根因**，按步骤 2 安装 legacy 驱动，不要只重启服务。
+- 两个都没有：先装 `ros-humble-orbbec-camera`，再补 legacy（两者可以共存）。
+
 **1) 认设备**
 
 ```bash
@@ -1155,19 +1185,34 @@ lsusb | grep 2bc5
 **2) 装依赖 + 编译 legacy 驱动**
 
 ```bash
-sudo apt-get install -y libuvc-dev libgflags-dev \
+sudo apt-get install -y libuvc-dev libusb-1.0-0-dev libgflags-dev \
   ros-humble-image-geometry ros-humble-image-transport ros-humble-tf2-eigen \
   ros-humble-rclcpp-components ros-humble-camera-info-manager
 
 cd /opt/edge_server/src
-git clone https://github.com/orbbec/ros2_astra_camera.git
+# 方式 A：GitHub 可直连
+git clone --depth 1 https://github.com/orbbec/ros2_astra_camera.git
+# 方式 B：git clone 卡住/报 GnuTLS recv error（国内网络常见）时用 tarball。
+# 注意默认分支是 master（不是 main），下错分支会得到 14 字节的 404 文本：
+# curl -L --retry 3 -o /tmp/astra.tar.gz \
+#   https://codeload.github.com/orbbec/ros2_astra_camera/tar.gz/refs/heads/master
+# tar xzf /tmp/astra.tar.gz -C /tmp
+# mv /tmp/ros2_astra_camera-master /opt/edge_server/src/ros2_astra_camera
+
 cd /opt/edge_server && bash -lc 'source /opt/ros/humble/setup.bash && \
   colcon build --packages-select astra_camera_msgs astra_camera \
-  --cmake-args -DCMAKE_BUILD_TYPE=Release'
+  --parallel-workers 2 --cmake-args -DCMAKE_BUILD_TYPE=Release'
 ```
 
-实测版本 `f7e71d9`（2023-11-08）：x86_64 编译约 70 s，Pi 4B 约 4–6 分钟。源码放
-`/opt/edge_server/src/ros2_astra_camera`（rsync 只覆盖 `src/edge_server`，不会动它）。
+> **依赖坑**：只装 `libuvc-dev` 不够，它的 `libuvc.pc` 依赖 `libusb-1.0.pc`；
+> 缺 `libusb-1.0-0-dev` 时 CMake 会报 `None of the required 'libuvc' found` /
+> `libuvc is not found`。先 `pkg-config --cflags --libs libuvc` 确认能打印
+> `-I/usr/include/libusb-1.0 -luvc -lusb-1.0` 再 build。
+
+实测版本 `f7e71d9`（2023-11-08）：x86_64 编译约 70 s；Pi 4B 约 10–15 分钟
+（本次从零编译 `astra_camera_msgs` 约 3.5 分钟、`astra_camera` 约 15 分钟，受 SD 卡和
+同时运行的 `edge_server` 影响）。源码放 `/opt/edge_server/src/ros2_astra_camera`
+（rsync 只覆盖 `src/edge_server`，不会动它）。
 
 **3) udev（建 `/dev/astra_pro` 并给 0666）**
 
@@ -1205,23 +1250,35 @@ ros2 launch edge_server astra.launch.py
 sed 's/^User=.*/User=ubuntu/; s/^Group=.*/Group=ubuntu/' \
   software/tools/systemd/rush-mog-camera.service | \
   sudo tee /etc/systemd/system/rush-mog-camera.service > /dev/null
-sudo systemctl daemon-reload && sudo systemctl enable --now rush-mog-camera
+sudo systemctl daemon-reload
+sudo systemctl enable rush-mog-camera
+sudo systemctl restart rush-mog-camera
 ```
-（本机把 `ubuntu` 换成 `eagle`。）`ConditionPathExists=/dev/astra_pro`：没插相机时静默跳过，
-拔掉再插上只需 `sudo systemctl restart rush-mog-camera`。
+（本机把 `ubuntu` 换成 `eagle`。）**已经 enable 的机器也必须 `restart`**：`enable --now`
+对运行中的旧实例是空操作，不会让它换到新编译的驱动。`ConditionPathExists=/dev/astra_pro`：
+没插相机时静默跳过；拔掉再插上、或换驱动/重编译后，都执行
+`sudo systemctl restart rush-mog-camera`。
 
-**6) 验收（2026-11-21 实测）**
+**6) 验收（2026-11-21 / 2026-11-28 实测）**
 
 ```bash
 systemctl is-active rush-mog-camera                        # active
-ros2 topic hz /camera/color/image_raw                     # ≈15 Hz
-ros2 topic hz /camera/depth/image_raw                     # ≈27 Hz（设备按支持集协商）
+journalctl -u rush-mog-camera -n 50 --no-pager              # 不再出现 propertyId: 1000 / 每 11 s reset
+ros2 node list | grep -i camera                            # /camera/camera
+ros2 topic hz /camera/color/image_raw                     # Pi 4B 约 7–10 Hz；x86 约 15 Hz
+ros2 topic hz /camera/depth/image_raw                     # ≈15–27 Hz（设备按支持集协商）
 ros2 topic echo /camera/depth/image_raw --once --field encoding   # 16UC1（单位 mm）
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/stream   # 200
 curl -s http://127.0.0.1/api/modules/ros/health | python3 -c \
   "import json,sys;[print(d['id'],d['status']) for d in json.load(sys.stdin)['devices'] if 'camera' in d['id']]"
 # camera ok / depth_camera ok
+curl -s http://127.0.0.1/status | python3 -c \
+  "import json,sys; print('camera=', json.load(sys.stdin)['camera'])"   # camera= 1
 ```
+
+dashboard 的「深度相机」卡片读的是 `health.devices[camera|depth_camera]` 与
+`/status.camera`；只要上面前两项通过，刷新 `http://192.168.3.26/dashboard.html`
+即可看到 `RGB 10Hz / DEP 15Hz / MJPEG OK`，不再是「未接入」。
 
 **7) 页面取流**
 
@@ -1247,8 +1304,45 @@ curl -s http://127.0.0.1/api/modules/ros/health | python3 -c \
 `edge.camera.topic` 与 `perception.image_topic` 为 `/camera/color/image_raw`；
 `perception.depth_topic` 为 `/camera/depth/image_raw`、`depth_scale: 0.001`（mm→m）、`prefer_depth: true`。
 `target_detector_node` 先用深度 bbox 中心区域中值测距，深度不可用时回退激光/bbox 高度。
-health 的 `camera`/`depth_camera` 在接上相机后已设为 `required: true`：相机掉线会让整体健康变成
-`error`；只想报警不阻断时改回 `false`。
+仓库 `robot.yaml` 里 health 的 `camera`/`depth_camera` 是 `required: true`（相机掉线会让整体健康变成
+`error`）；部署机 `deploy.yaml` 目前是 `required: false`，这样没接相机时只报 `degraded`。确认相机
+长期在线后，把 `deploy.yaml` 的两项改成 `true` 才能让掉线升级为 `error`。
+
+**10) 2026-11-28 实机部署记录（192.168.3.26）**
+
+初始现象：`lsusb` 能看到 `2bc5:0403`/`2bc5:0501`，`/dev/astra_pro` 也存在，
+`rush-mog-camera` 是 active，但 dashboard 一直「深度相机离线」：
+
+```text
+/status                          camera=0
+/api/modules/ros/health          camera/depth_camera: unknown, publisher_count=0
+journalctl -u rush-mog-camera    每 11 s:
+  Failed to initialize device ... Device response size(0) < response header size(10), propertyId: 1000
+ros2 pkg prefix astra_camera     Package not found
+ros2 pkg prefix orbbec_camera    /opt/ros/humble
+```
+
+根因就是 **只装了新版 `orbbec_camera`，`astra.launch.py` 回退到它去驱动初代 0403**。
+按本节步骤 2–5 处理后（本次 GitHub clone 报 `GnuTLS recv error`，改用 codeload tarball
+`master` 分支；先装 `libusb-1.0-0-dev` 才通过 CMake；`colcon build` 实测
+`astra_camera_msgs` 约 3.5 分钟、`astra_camera` 约 15 分钟），重启服务后的实测结果：
+
+```text
+systemctl is-active rush-mog-camera        active
+ros2 pkg prefix astra_camera               /opt/edge_server/install/astra_camera
+ros2 topic hz /camera/color/image_raw      约 9–10 Hz（受 USB 带宽/CPU 影响）
+ros2 topic hz /camera/depth/image_raw      约 18–25 Hz
+ros2 topic echo ... --field encoding       16UC1
+curl :8080/stream                          200，10 s 约 600 KB
+/status                                    camera=1
+health                                     camera ok(10 Hz)、depth_camera ok(17.7 Hz)
+```
+
+> 颜色流在 Pi 4B + 当前 USB Hub 上实测约 7–10 Hz，不是 15 Hz；单线程 MJPEG 解码
+> 把 `astra_camera_node` 跑满一个核。因此 `robot.yaml`/`deploy.yaml` 的 health
+> `camera.expected_rate_hz` 已按 Pi 实测定为 **10 Hz**（`min_rate_ratio=0.5`，5 Hz 以上即 ok），
+> MJPEG 也按 `edge.camera.fps=10` 输出。若要求满 15 Hz，先把相机直插 Pi 的 USB 口
+> （当前接在 Hub 上）并减少同时运行的节点，再复测。
 
 ### 6.7 悬崖传感器（STM32 PB3/PB4）
 悬崖传感器接在 STM32 的 PB3/PB4，由 `body_control` 固件本地做 10ms 采样、30ms 消抖，并在触发时封锁运动。Edge 侧要看到状态，STM32 必须上报悬崖掩码：
@@ -1460,6 +1554,7 @@ sudo systemctl start edge_server
 | `colcon: command not found` | PATH 异常，或 colcon 没装 | `command -v colcon`；`sudo apt install python3-colcon-common-extensions` |
 | `ros2: command not found` | PATH 异常，或 zsh 下 source 失败 | 按 §7.1 处理 |
 | 手动跑报 `Permission denied`（80 端口） | 普通用户不能绑 <1024 | 用 `sudo`，或交给 systemd（unit 有 `CAP_NET_BIND_SERVICE`） |
+| dashboard「深度相机」一直离线，`/status` 的 `camera=0`，topic 在但 `publisher_count=0` | 只装了 `orbbec_camera`，`astra.launch.py` 回退到新 SDK；初代 `0403` 初始化失败并每 11 s reset | `ros2 pkg prefix astra_camera`；按 §6.6 装 legacy `astra_camera`，再 `sudo systemctl restart rush-mog-camera` |
 | `/stream` 一直 503 | 没有 `/camera/color/image_raw` | `ros2 topic hz /camera/color/image_raw`；先起 Astra 驱动 |
 | `ros2 topic hz /scan` 无数据 | `/dev/rush_lidar` 不存在、波特率/协议不对或节点未启动 | `ls -l /dev/rush_lidar`；`ros2 topic echo /lidar/status`；检查 `lidar.port/baud` 和 `dtoverlay=uart4` |
 | `/lidar/status` 的 `crc_errors` 持续增加 | 波特率不对、线缆干扰或协议不是 LD19 | 确认 D6 说明书波特率（230400/921600）、共地、TX/RX 交叉、缩短线缆 |
