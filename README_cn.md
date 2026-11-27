@@ -2,6 +2,9 @@
 
 [English Version](README.md)
 
+![](images/rush-mog.png)
+
+
 Rush Mog是一款致敬Unimog的VLA控制的智能万向轮小车。基于树莓派 + 深度相机 + stm32f103 + L298N + IMU传感器 + 激光雷达 + 机械臂 + VLA推理，实现支持手机WIFI的PS2模拟器、语音控制和VLA智能控制三种模式，并支持机械臂操作的智能小车。同时提供动作编程，可自定义组合效果的动作指令。
 
 ## 功能说明
@@ -73,7 +76,4 @@ Rush Mog是一款致敬Unimog的VLA控制的智能万向轮小车。基于树莓
 
 启动小车后，使用手机连接RUSH-MOG WIFI。连接成功后打开手机浏览器，输入${edge_server}，打开PS2手柄页面，操控小车。
 
-## 成品效果
-
-![](images/AGO.png)
 

@@ -2,6 +2,8 @@
 
 [中文版](README_cn.md)
 
+![](images/rush-mog.png)
+
 Rush Mog is an intelligent omnidirectional-wheel car inspired by the Unimog and controlled by VLA (Vision-Language-Action). Built on a Raspberry Pi + depth camera + STM32F103 + L298N + IMU sensor + LiDAR + robotic arm + VLA inference, it supports three control modes — a phone-based Wi-Fi PS2 emulator, voice control, and VLA intelligent control — together with robotic-arm operation. It also provides action programming, allowing users to define combined action commands.
 
 ## Features
@@ -72,7 +74,3 @@ For details, see: [Software Design Notes and Code](software/README.md).
 ![](software/edge_server/ps2.png)
 
 After starting the car, connect your phone to the RUSH-MOG Wi-Fi network provided by the Pi Edge Server. Open your phone's browser at ${edge_server} to load the PS2 controller page and operate the car.
-
-## Final Product Showcase
-
-![](images/AGO.png)
