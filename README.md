@@ -1,3 +1,5 @@
+
+
 # Rush Mog
 
 [中文版](README_cn.md)
@@ -74,3 +76,5 @@ For details, see: [Software Design Notes and Code](software/README.md).
 ![](software/edge_server/ps2.png)
 
 After starting the car, connect your phone to the RUSH-MOG Wi-Fi network provided by the Pi Edge Server. Open your phone's browser at ${edge_server} to load the PS2 controller page and operate the car.
+
+
