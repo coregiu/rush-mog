@@ -1,8 +1,10 @@
 # edge_server 部署与运维手册
 
-> **文档说明**：本文是 Edge Server 在 Raspberry Pi 4B 上的部署与运维唯一手册，覆盖装机、发布、启停、外设接入和排障。内容合并自原 `DEPLOY.md` 与 `OPERATIONS.md`（含其第 9 节“蓝牙手动连接”），并吸收了 `CODE_MAP.md` 中属于运维的“分层排查地图”和“最小验证命令”。设计与代码结构见设计文档，健康检查字段见健康检查契约，机械/电气分析见硬件文档。
+> **文档说明**：本文是 Edge Server 的部署与运维唯一手册，覆盖装机、发布、启停、外设接入和排障。内容合并自原 `DEPLOY.md` 与 `OPERATIONS.md`（含其第 9 节“蓝牙手动连接”），并吸收了 `CODE_MAP.md` 中属于运维的“分层排查地图”和“最小验证命令”。设计与代码结构见设计文档，健康检查字段见健康检查契约，机械/电气分析见硬件文档。
 >
-> 相关文档：设计文档 [`../design/DESIGN.md`](../design/DESIGN.md) ｜ 健康检查契约 [`../HEALTHCHECK.md`](../HEALTHCHECK.md) ｜ 硬件分析 [`../../../../hardware/SLAM_NAV.md`](../../../../hardware/SLAM_NAV.md)
+> 相关文档：设计文档 [`DESIGN.md`](DESIGN.md) ｜ 健康检查契约 [`HEALTHCHECK.md`](HEALTHCHECK.md) ｜ 硬件分析 [`../../../hardware/SLAM_NAV.md`](../../../hardware/SLAM_NAV.md)
+>
+> **2026-11-21 更新（本次重新整理）**：§2 重写为「从空机器到开机自启」的 P0–P7 手动流程，新增 §2.0 目标机变量表、§2.5 配置裁剪清单、§2.6 单元全文与字段说明、§2.7 验收对照与打勾清单；部署 launch 版本化为 `launch/edge_server_deploy.launch.py`（随 `colcon build` 安装，不再手工复制）；systemd 单元版本化为 `software/tools/systemd/edge_server.service`；§7.5 补充单元残缺/端口权限/运行目录/linger 等新故障；实测环境为 x86_64 开发机（`eagle@172.31.4.88`），树莓派路径保持原样。
 
 ## 目录
 - 0. 速查与三条铁律
@@ -16,15 +18,18 @@
 - 8. 速查表
 
 ## 0. 速查与三条铁律
-### 0.1 这台机器
+### 0.1 目标机器
 ```text
-目标机    ubuntu@192.168.3.26（Raspberry Pi 4B，Ubuntu 22.04 arm64）
+实车      ubuntu@192.168.3.26（Raspberry Pi 4B，Ubuntu 22.04 arm64）
+开发机    eagle@172.31.4.88（x86_64，Ubuntu 22.04.5；2026-11-21 在此完成整套部署验证）
 部署目录  /opt/edge_server
-服务      edge_server.service（User=ubuntu，开机自启）
+服务      edge_server.service（开机自启，User 见 §2.0）
 运行配置  /opt/edge_server/config/deploy.yaml（EDGE_SERVER_CONFIG）
-串口      /dev/ttyAMA1（GPIO4/5 → UART3），115200 8N1
+串口      /dev/ttyAMA1（GPIO4/5 → UART3），115200 8N1（仅实车有）
 ```
-入口地址、路径和端口统一列在 §8.1；AP 模式下手机连 `RUSH-MOG` Wi-Fi 后访问 `http://192.168.3.26/`。
+仓库根目录在开发机上是 `/home/eagle/workspace/projects/rush-mog`；Windows/WSL 环境对应
+`F:\CODE\rush-mog` 与 `/mnt/f/CODE/rush-mog`。入口地址、路径和端口统一列在 §8.1；AP 模式下手机连
+`RUSH-MOG` Wi-Fi 后访问 `http://192.168.3.26/`。
 
 ### 0.2 一条命令重启
 ```bash
@@ -46,12 +51,14 @@ ssh $PI 'sudo systemctl restart edge_server'
      └─ edge_server.service（User=ubuntu，开机自启）
          └─ /bin/bash -lc 'source /opt/ros/humble/setup.bash
                           && source /opt/edge_server/install/setup.bash
-                          && exec ros2 launch /opt/edge_server/deploy/edge_server.launch.py'
+                          && exec ros2 launch edge_server edge_server_deploy.launch.py'
              ├─ edge_server_node    → Web :80、MJPEG :8080、串口 /dev/ttyAMA1（GPIO4/5 UART3）
              └─ health_monitor_node → ROS 健康网关 127.0.0.1:8090
 ```
 - 服务里写死了 `bash -lc`，所以**登录 shell 是 zsh 也不影响服务启动**；受影响的只是手工 SSH 命令。
-- 部署 launch 只启动 Edge Server + 健康网关，不启动 SLAM/Nav2/感知全栈（全栈见 §5）。
+- 部署 launch 是仓库里的 `launch/edge_server_deploy.launch.py`，随 `colcon build` 装进
+  `install/.../share/edge_server/launch/`，**不再是手工复制的外挂文件**；它只启动 Edge Server +
+  健康网关，不启动 SLAM/Nav2/感知全栈（全栈见 §5）。
 - 运行配置由 `EDGE_SERVER_CONFIG=/opt/edge_server/config/deploy.yaml` 指定，优先级高于 `install/.../config/robot.yaml`。
 
 | 层 | 内容 | 启停方式 |
@@ -66,41 +73,141 @@ ssh $PI 'sudo systemctl restart edge_server'
 |---|---|---|
 | `/opt/edge_server/src/edge_server` | `software/edge_server` 的源码副本 | 是 |
 | `/opt/edge_server/src/custom_msgs` | `software/custom_msgs` 的源码副本 | 是 |
+| `/opt/edge_server/src/ros2_astra_camera` | legacy Astra 驱动源码（初代 Astra Pro 必需，§6.6） | 否，手工 clone |
 | `/opt/edge_server/config/deploy.yaml` | 远程专用运行配置（`EDGE_SERVER_CONFIG`） | 否 |
-| `/opt/edge_server/deploy/edge_server.launch.py` | 部署用 launch，只起两个节点 | 否，单独复制 |
-| `/etc/systemd/system/edge_server.service` | systemd 单元 | 否，单独复制 |
-| `/opt/edge_server/install/` | 构建产物，**不要手改** | 由 colcon 生成 |
+| `/opt/edge_server/install/` | 构建产物，**不要手改**；部署 launch 在 `share/edge_server/launch/edge_server_deploy.launch.py` | 由 colcon 生成 |
 | `/opt/edge_server/build/`、`log/` | 构建中间物、构建日志 | 由 colcon 生成 |
+| `/etc/systemd/system/edge_server.service` | systemd 单元（仓库模板 `software/tools/systemd/edge_server.service`） | 否，单独安装 |
+| `/var/lib/edge_server/ros` | `ROS_HOME`（节点级配置/缓存） | 否，需手工建（§2.6） |
+| `/var/lib/edge_server/edge_params.json` | 网页/接口保存的运行参数 | 运行时生成 |
+| `/var/lib/edge_server/audio` | 音箱播放素材与录音（`/api/speaker/play` 只允许此目录） | 否，需手工建 |
+| `/var/log/edge_server/ros` | `ROS_LOG_DIR`，ROS 自己的日志 | 否，需手工建 |
 
 配置优先级（`edge_server/utils/config.py`）：
 ```text
 ROS 参数 config_file  >  环境变量 EDGE_SERVER_CONFIG  >  install/.../config/config.yaml
 ```
-仓库里的 `edge_server/config/robot.yaml` 是版本管理的实车默认值；本机以 `deploy.yaml` 为准，改 `robot.yaml` 不会影响本机。仓库里的 `launch/edge_server.launch.py` 是全量 ROS 启动文件，服务没有用它。
+仓库里的 `edge_server/config/robot.yaml` 是版本管理的实车默认值；部署机以 `deploy.yaml` 为准，改
+`robot.yaml` 不会影响已部署机器。仓库里的 `launch/edge_server.launch.py` 是全量联调启动文件，
+服务用的是 `launch/edge_server_deploy.launch.py`（只两个节点）。
 
 ### 1.3 本地开发目录 → 部署目录
 ```text
-本地开发机（源码，Git 管理）F:\CODE\rush-mog\software\edge_server
-（WSL：/mnt/f/CODE/rush-mog/software/edge_server）
-│  rsync / tar 复制（手动发布，不是自动同步）
+本地开发机（源码，Git 管理）：<repo>/software/edge_server
+（开发机 ~/workspace/projects/rush-mog；Windows 侧 F:\CODE\rush-mog；WSL /mnt/f/CODE/rush-mog）
+│  rsync / tar 复制（手动发布，不是自动同步，§2.4）
 ▼
-192.168.3.26:/opt/edge_server/src/edge_server（源码副本，非 git 工作区，非软链接）
+<目标机>:/opt/edge_server/src/edge_server（源码副本，非 git 工作区，非软链接）
 │  colcon build
 ▼
-/opt/edge_server/install/edge_server（实际运行产物：Python 包、launch、config、web）
-│  systemd 启动
+/opt/edge_server/install/edge_server（运行产物：Python 包、launch、config、web）
+│  systemd 启动（ros2 launch edge_server edge_server_deploy.launch.py）
 ▼
 edge_server_node + health_monitor_node
 ```
-本地是唯一开发源；远端 `src` 只是发布快照，改本地不会自动影响远端，也不能“热更新”。`install/` 是构建产物，重新 build 会覆盖。发布流程见 §4。
+本地是唯一开发源；远端 `src` 只是发布快照，改本地不会自动影响远端，也不能“热更新”。
+`install/` 是构建产物，重新 build 会覆盖。发布流程见 §4。
 
 ## 2. 安装与首次部署
-### 2.1 系统与 apt 源
-- 修复 arm64 apt 源：原配置用 `mirrors.aliyun.com/ubuntu/`，arm64 包实际在 `ubuntu-ports/`，已改为 `mirrors.aliyun.com/ubuntu-ports/`。
-- 备份 `/etc/apt/sources.list.bak.rushmog`；注释 `deb-src` 源，减少索引下载量。
-- 添加 ROS 2 apt 源：keyring `/usr/share/keyrings/ros-archive-keyring.gpg`，source `/etc/apt/sources.list.d/ros2.list`，使用 USTC 镜像 `https://mirrors.ustc.edu.cn/ros2/ubuntu`。
 
-### 2.2 ROS 2 Humble 与依赖
+> 本章是**从一台空机器到服务开机自启**的完整手动流程：P0 定变量 → P1 系统源 → P2 ROS → P3 外设
+> → P4 代码与构建 → P5 运行配置 → P6 systemd → P7 验收。每一步都有「验收门槛」，不通过不要往下走；
+> 出错先查 §7.5。命令都可直接粘贴，只把 `$HOST`、`$USER` 等换成 §2.0 表里的值。
+>
+> 预计耗时：x86_64 有 ROS 环境约 15 分钟；树莓派从裸系统开始约 60–90 分钟（`custom_msgs` 首次编译约 7 分钟）。
+
+### 2.0 目标机变量与前置检查（P0）
+
+先把这张表填好，后文所有命令都用它：
+
+| 变量 | 实车（树莓派 4B） | 开发机（2026-11-21 实测） | 用途 |
+|---|---|---|---|
+| `$HOST` | `ubuntu@192.168.3.26` | `eagle@172.31.4.88` | ssh / rsync 目标 |
+| `$USER` / UID | `ubuntu` / `1000` | `eagle` / `1000` | systemd `User=`、`/run/user/<uid>` |
+| 架构 / 系统 | aarch64 / Ubuntu 22.04 | x86_64 / Ubuntu 22.04.5 | 只影响 apt 源与构建耗时 |
+| `$DEPLOY` | `/opt/edge_server` | `/opt/edge_server` | colcon 工作区 |
+| Web / MJPEG | `80` / `8080` | `80` / `8080` | 80 需要 `CAP_NET_BIND_SERVICE` |
+| 健康网关 | `127.0.0.1:8090` | `127.0.0.1:8090` | 仅本机可访问 |
+| 硬件 | STM32(UART3)、D6 雷达(UART4)、Astra Pro(USB)、ICM-20948(I2C1)、NewMine 音箱 | 无 | 决定 §2.5 的裁剪项 |
+
+```bash
+HOST=ubuntu@192.168.3.26      # 按上表改
+USER_NAME=ubuntu              # 按上表改
+```
+
+**前置检查**（四条全过再开始）：
+
+```bash
+# 1) 能登录、有 sudo、能联网
+ssh $HOST 'id && (sudo -n true 2>/dev/null && echo sudo-ok || echo sudo-needs-password)'
+
+# 2) 系统与架构：期望 Ubuntu 22.04.x + aarch64(实车) / x86_64(开发机)
+ssh $HOST '. /etc/os-release && echo "$PRETTY_NAME" && dpkg --print-architecture'
+
+# 3) 磁盘：/opt 与 /var 至少留 8G（build + install + 日志）
+ssh $HOST 'df -h /opt /var | tail -n +2'
+
+# 4) 是否已有 ROS（有则 §2.2 只做验收，不重装）
+ssh $HOST 'ls -d /opt/ros/humble 2>/dev/null || echo no-ros'
+```
+
+**本次部署的实际起点**：开发机已预装 ROS Humble + colcon，`/opt/edge_server` 里有一轮上一会话留下的
+半成品——`config/deploy.yaml` 存在、`colcon build` 能过，但 `/etc/systemd/system/edge_server.service`
+被写成了**只有 5 行 `Environment=` 的残文件**（没有 `[Unit]`/`[Service]`/`ExecStart`），所以
+`systemctl start` 报 `Unit ... has a bad unit file setting`、`is-enabled` 是 `static`。
+本次从 P4 重新同步、重建，P6 重写单元后拉起。**这正是"部署到一半"最典型的样子**，下面的流程能从头复现。
+
+**各阶段是否需要重做，一眼对照：**
+| 阶段 | 裸树莓派 | 本次开发机 | 说明 |
+|---|---|---|---|
+| P1 apt 源 | 要做（含 ubuntu-ports） | 已就绪 | 见 §2.1 |
+| P2 ROS 2 | 要装 | 已装 `/opt/ros/humble` | 见 §2.2 |
+| P3 外设 | 要做 | 只接了深度相机（§6.6），无 UART/I2C/音箱 | 见 §2.3 |
+| P4 代码+构建 | 要做 | 重做（同步 + 增量构建 1 s） | 见 §2.4 |
+| P5 运行配置 | 要做 | 重做（7 项裁剪） | 见 §2.5 |
+| P6 systemd | 要做 | **重写单元的残文件** | 见 §2.6 |
+| P7 验收 | 要做 | 通过（degraded） | 见 §2.7 |
+
+### 2.1 系统与 apt 源（P1）
+
+**1) 修复 arm64 apt 源（只对树莓派做）**
+
+Ubuntu 的 arm64 包在 `ubuntu-ports`，不在 `ubuntu`；源写错会满屏 `404 Not Found`。
+
+```bash
+sudo cp /etc/apt/sources.list /etc/apt/sources.list.bak.rushmog
+sudo sed -i 's|mirrors.aliyun.com/ubuntu/|mirrors.aliyun.com/ubuntu-ports/|g' /etc/apt/sources.list
+sudo sed -i '/^deb-src/s/^/#/' /etc/apt/sources.list     # 注释 deb-src，少下一半索引
+grep -c 'ubuntu-ports' /etc/apt/sources.list             # 期望 ≥1（通常 2–4 行）
+```
+
+> x86_64 开发机**不要**改成 `ubuntu-ports`，保持 `ubuntu`。
+
+**2) 加 ROS 2 apt 源（USTC 镜像，两台机器都要）**
+
+```bash
+sudo apt update
+sudo apt install -y curl gnupg2 ca-certificates software-properties-common
+sudo add-apt-repository -y universe
+sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+  -o /usr/share/keyrings/ros-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] https://mirrors.ustc.edu.cn/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" \
+  | sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+sudo apt update
+```
+
+**门槛**
+```bash
+apt-cache policy ros-humble-ros-base | head -3     # 必须有 Candidate: 行
+```
+
+> `raw.githubusercontent.com` 国内常不可达：挂代理，或从任意可访问镜像取内容一致的 `ros.key`
+> （该文件是二进制 keyring，直接 `curl -o` 落盘即可，不要 `gpg --dearmor` 二次处理）。
+
+### 2.2 ROS 2 Humble 与构建依赖（P2）
+
+**1) 必需包**
+
 ```bash
 sudo apt-get install -y \
   ros-humble-ros-base ros-humble-cv-bridge ros-humble-tf2-ros \
@@ -110,88 +217,415 @@ sudo apt-get install -y \
   python3-opencv python3-numpy python3-yaml python3-serial \
   build-essential cmake
 ```
-SLAM / 导航依赖（2026-11-14）：`ros-humble-slam-toolbox` 已安装，可直接 `ros2 launch edge_server slam_stack.launch.py`；`ros-humble-robot-localization` 已安装，可用 `ekf.launch.py`；`ros-humble-navigation2`/`nav2_bringup` **尚未安装**，没有 Nav2 时 `navigation_node` 的 `backend: auto` 会回退到内置直航。
 
-### 2.3 系统级外设配置
-**UART3（STM32 串口）**：在 `/boot/firmware/config.txt` 末尾追加：
-```ini
-dtoverlay=uart3
+**2) 可选包**（只装要用的，不装不影响部署模式启动）
+
+```bash
+sudo apt-get install -y ros-humble-slam-toolbox ros-humble-robot-localization ros-humble-navigation2
 ```
-重启后生成 `/dev/ttyAMA1`，供 `edge_server_node` 直连 STM32 USART3。`enable_uart=1` 只启用 GPIO14/15 的 UART0，**不能代替** `uart3`。
 
-**蓝牙音频栈**：
+| 不装的后果 | 影响面 |
+|---|---|
+| `slam-toolbox` | `slam_stack.launch.py` 起不来，2D 建图不可用 |
+| `robot-localization` | `ekf.launch.py` 起不来（默认不启动，不影响部署模式） |
+| `navigation2` | `navigation_node` 的 `backend: auto` 回退内置直航，其余不受影响 |
+
+**3) 交互式环境变量**（systemd 不依赖它，自己会 source，见 §2.6）
+
+```bash
+echo 'source /opt/ros/humble/setup.bash' >> ~/.bashrc     # bash
+echo 'source /opt/ros/humble/setup.zsh'  >> ~/.zshrc      # zsh（树莓派默认 zsh）
+```
+
+**门槛**
+```bash
+source /opt/ros/humble/setup.bash
+ros2 --help > /dev/null && echo ros2-ok
+command -v colcon
+python3 -c 'import cv2, numpy, yaml, serial; print("py-deps-ok")'
+```
+
+> **zsh 坑**（§7.1）：zsh 里 `source .../setup.bash` 会把前缀算错，报
+> `no such file or directory: /opt/edge_server/setup.sh`。交互用 `setup.zsh`，
+> 非交互命令一律 `bash -lc "..."`。
+
+### 2.3 系统级外设配置（P3）
+
+> 这一节全是**仓库之外**的系统配置（`/boot/firmware/config.txt`、udev、用户级音频服务）。
+> 重装系统必须重做；不做也不影响服务启动，只是对应设备在健康页一直是 `unknown`。
+> 无硬件的开发机可整节跳过。
+
+**1) UART3 —— STM32 串口（实车必做）**
+
+```bash
+echo 'dtoverlay=uart3' | sudo tee -a /boot/firmware/config.txt
+sudo usermod -aG dialout $USER_NAME        # 读写串口权限，重新登录后生效
+sudo reboot
+```
+
+重启后验收：
+```bash
+ls -l /dev/ttyAMA1                     # 期望 crw-rw---- root dialout
+id -nG | grep -o dialout               # 期望 dialout
+grep uart3 /boot/firmware/config.txt
+```
+
+`enable_uart=1` 只启用 GPIO14/15 的 UART0，**不能代替** `dtoverlay=uart3`（踩坑记录见 §7.2）。
+
+**2) UART4 —— D6/LD19 激光雷达（接雷达再做）**
+
+```bash
+sudo sed -i 's|^dtparam=spi=on|# dtparam=spi=on|' /boot/firmware/config.txt   # GPIO8/9 与 SPI0 复用
+echo 'dtoverlay=uart4' | sudo tee -a /boot/firmware/config.txt
+sudo reboot
+
+# udev 规则：目标机上通常没有仓库，从开发机（仓库根目录）推过去
+scp software/tools/systemd/99-rush-mog-lidar.rules $HOST:/tmp/
+ssh $HOST 'sudo install -m 644 /tmp/99-rush-mog-lidar.rules /etc/udev/rules.d/ && \
+           sudo udevadm control --reload-rules && sudo udevadm trigger'
+```
+
+验收：
+```bash
+ls -l /dev/rush_lidar                  # 期望 -> ttyAMA2
+sudo dmesg | grep fe201800             # 期望出现 ttyAMA2
+```
+
+> udev 规则按 platform device（`fe201800.serial`）匹配，不要写死 `ttyAMA*` 编号——重新插拔后编号会变。
+
+**3) I2C —— ICM-20948**
+
+```bash
+sudo apt install -y i2c-tools python3-smbus2
+grep -q '^dtparam=i2c_arm=on' /boot/firmware/config.txt || \
+  echo 'dtparam=i2c_arm=on' | sudo tee -a /boot/firmware/config.txt
+sudo reboot
+```
+
+验收：
+```bash
+ls -l /dev/i2c-1
+sudo i2cdetect -y 1                    # 期望 0x68（SA0 接地）或 0x69
+```
+
+**4) 蓝牙音频 + 中文 TTS**
+
 ```bash
 sudo apt-get install -y pipewire pipewire-pulse wireplumber \
-  libspa-0.2-bluetooth pulseaudio-utils alsa-utils espeak-ng
-sudo loginctl enable-linger ubuntu
-```
-启用用户级 `pipewire`、`pipewire-pulse`、`wireplumber`。BlueZ 已配对/信任 `newmine`（`73:DB:39:F2:15:4B`）；首次配对用 `bluetoothctl pair/trust/connect`，之后由 `edge_server_node` 按 `edge.speaker.connect_interval_sec` 自动重连。麦克风走 HFP：`pulseaudio-utils` 提供 `parec`，录音前切 `headset-head-unit`，停止后恢复 `a2dp-sink`；部署配置启用 `edge.speaker.microphone`，录音目录 `/var/lib/edge_server/audio/mic`。
-
-**自然中文 TTS（2026-11-15）**：
-```bash
-sudo apt-get install -y ffmpeg
+  libspa-0.2-bluetooth pulseaudio-utils alsa-utils ffmpeg espeak-ng
 sudo python3 -m pip install edge-tts
+sudo loginctl enable-linger $USER_NAME      # 不登录也保留用户级 PipeWire（systemd 里 XDG_RUNTIME_DIR 依赖它）
 ```
-`deploy.yaml` 设 `edge.speaker.tts.backend: "edge-tts"`；接口不可用时自动回退 `espeak-ng`，espeak 输出会预转 48kHz stereo。
 
-> 蓝牙/音频栈是系统级配置（apt 包、`loginctl enable-linger`、用户级 PipeWire/WirePlumber、systemd 的 `XDG_RUNTIME_DIR`），不在仓库里。重装系统后需按本节和 §2.6 重建，再重启 `edge_server`。
+验收：
+```bash
+systemctl --user is-active pipewire pipewire-pulse wireplumber   # 三个都 active
+command -v parec paplay espeak-ng ffmpeg
+python3 -c 'import edge_tts; print("edge-tts-ok")'
+```
 
-### 2.4 代码与构建
-`software/edge_server` → `/opt/edge_server/src/edge_server`，`software/custom_msgs` → `/opt/edge_server/src/custom_msgs`；同步命令见 §4.2，首次可手工 `scp`/`tar` 复制。构建：
+首次配对音箱见 §6.1（`bluetoothctl pair/trust/connect`）；配对一次后由 `edge_server_node`
+按 `edge.speaker.connect_interval_sec`（默认 20 s）自动重连。
+
+**5) 深度相机（Astra Pro）**
+
+初代 Astra Pro 不能用 apt 的 `ros-humble-orbbec-camera`，要编译 legacy `astra_camera`；
+完整步骤（认型号、依赖、编译、udev、帧率约束、systemd、排错）见 **§6.6**。最短路径：
+
+```bash
+lsusb | grep 2bc5                      # 期望 2bc5:0403 + 2bc5:0501
+sudo apt-get install -y libuvc-dev libgflags-dev ros-humble-image-geometry \
+  ros-humble-image-transport ros-humble-tf2-eigen ros-humble-rclcpp-components \
+  ros-humble-camera-info-manager
+cd /opt/edge_server/src && git clone https://github.com/orbbec/ros2_astra_camera.git
+cd /opt/edge_server && bash -lc 'source /opt/ros/humble/setup.bash && \
+  colcon build --packages-select astra_camera_msgs astra_camera --cmake-args -DCMAKE_BUILD_TYPE=Release'
+sudo cp /opt/ros/humble/share/orbbec_camera/udev/99-obsensor-libusb.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+验收：`ls -l /dev/astra_pro` 存在（0666）、`ros2 topic hz /camera/color/image_raw` ≈15 Hz。
+
+### 2.4 代码落盘与构建（P4）
+
+**1) 首次创建部署目录**（只有第一次需要）
+
+```bash
+ssh $HOST 'sudo mkdir -p /opt/edge_server/src && sudo chown -R '"$USER_NAME"':'"$USER_NAME"' /opt/edge_server'
+```
+
+**2) 同步源码**（开发机 → 目标机，两个包都要）
+
+```bash
+cd /path/to/rush-mog                  # 仓库根目录（本项目当前为 ~/workspace/projects/rush-mog）
+rsync -avz --delete --exclude='__pycache__' --exclude='.pytest_cache' \
+  software/edge_server/ $HOST:/opt/edge_server/src/edge_server/
+rsync -avz --delete --exclude='__pycache__' --exclude='.pytest_cache' \
+  software/custom_msgs/ $HOST:/opt/edge_server/src/custom_msgs/
+```
+
+没有 rsync / 网络只通单跳时的等价做法（U 盘也行）：
+
+```bash
+tar czf edge_src.tgz -C software edge_server custom_msgs
+scp edge_src.tgz $HOST:/tmp/
+ssh $HOST 'sudo tar xzf /tmp/edge_src.tgz -C /opt/edge_server/src && sudo chown -R '"$USER_NAME"':'"$USER_NAME"' /opt/edge_server/src'
+```
+
+验收：
+```bash
+ssh $HOST 'ls /opt/edge_server/src/edge_server/launch/edge_server_deploy.launch.py \
+              /opt/edge_server/src/custom_msgs/package.xml'
+```
+
+> `src/` 是发布快照：不是 git 工作区、不是软链接，本地提交不会自己过去（铁律 2，§0.3）。
+> `--delete` 只清理这两个目录**内部**，不会碰 `config/`、`install/`、`build/`。
+
+**3) 构建**
+
+```bash
+ssh $HOST 'bash -lc "source /opt/ros/humble/setup.bash && cd /opt/edge_server && \
+  colcon build --packages-select custom_msgs edge_server"'
+```
+
+| 场景 | 耗时（参考） |
+|---|---|
+| 首次全量（含 Pi 4B 编 `custom_msgs`） | 约 7 分钟 |
+| 只改 Python（`--packages-select edge_server`） | 1–10 秒 |
+
+改了 `package.xml`、`setup.py`、新增 launch 时**必须**重新 `colcon build`；只改 `config/deploy.yaml` 不用。
+
+验收：
+```bash
+ssh $HOST 'bash -lc "source /opt/ros/humble/setup.bash && source /opt/edge_server/install/setup.bash && \
+  ros2 pkg prefix edge_server && \
+  ros2 launch edge_server edge_server_deploy.launch.py --show-args"'
+# 期望：打印 .../install/edge_server，以及 config_file 参数说明
+```
+
+### 2.5 运行配置 deploy.yaml（P5）
+
+远程运行配置**不在仓库里**：由 `robot.yaml` 复制后按环境裁剪，`EDGE_SERVER_CONFIG` 指向它，
+优先级高于 `install/.../config/robot.yaml`（§1.2）。改完只需重启服务，不用重新构建。
+
+**1) 复制**
+
 ```bash
 cd /opt/edge_server
-source /opt/ros/humble/setup.bash
-colcon build --packages-select custom_msgs edge_server
+mkdir -p config
+cp src/edge_server/edge_server/config/robot.yaml config/deploy.yaml
 ```
-生成 `/opt/edge_server/build|install|log`；运行使用 `/opt/edge_server/install/setup.bash`。
 
-### 2.5 部署配置 deploy.yaml
-`/opt/edge_server/config/deploy.yaml` 是远程专用配置，不在仓库里：
-- Web `0.0.0.0:80`、MJPEG `0.0.0.0:8080`、ROS 健康网关 `127.0.0.1:8090`；配置键见 §8.2。
-- STM32 串口 `/dev/ttyAMA1`（GPIO4/5 → UART3），115200 8N1。2026-11-14 从 USB 串口（`/dev/ttyUSB0@9600`）改为 GPIO UART，`dtoverlay=uart3` 已写入 `/boot/firmware/config.txt`；接线 Pi GPIO4(TXD3)→STM32 PB11(RX)、GPIO5(RXD3)→PB10(TX)，必须共地（§8.3）。
-- 状态文件 `/var/lib/edge_server/edge_params.json`。
-- 蓝牙音箱：`edge.speaker` 启用，`device_name=newmine`、`device_mac=73:DB:39:F2:15:4B`；音频目录 `/var/lib/edge_server/audio`；A2DP 输出走本机 PipeWire（sink `bluez_output.73_DB_39_F2_15_4B.a2dp-sink`）。
-- 电源监控：`edge.power` 启用，读取 `vcgencmd get_throttled` 与 `rpi_volt`，发布 `/body/power_status`；dashboard「电源及转换板」使用该状态。
-- 健康检查：监控 camera/depth_camera/lidar/cliff/imu/base/odom/speaker/microphone/power 共 10 个设备，`check_nodes=false`、`safety_required=false`；音箱/麦克风/电源 `online=false` 或电源异常时对应设备显示 `degraded`。
-- `/opt/edge_server/deploy/edge_server.launch.py` 只启动 `edge_server_node` + `health_monitor_node`，不启动 SLAM/Nav2/感知全栈。
+**2) 按环境裁剪**（在 `/opt/edge_server/config` 下执行）
 
-### 2.6 systemd 单元
-单元文件 `/etc/systemd/system/edge_server.service`：运行用户 `ubuntu`；`AmbientCapabilities=CAP_NET_BIND_SERVICE` 用于绑定 80；`After=network-online.target bluetooth.service user@1000.service`，并通过 `Wants=` 拉起 `bluetooth.service`；`KillSignal=SIGINT`、`TimeoutStopSec=10`（停止语义见 §3.6）。关键环境变量：
+| 场景 | 命令 | 不改的后果 |
+|---|---|---|
+| 所有环境：状态文件进 `/var/lib` | `sed -i 's#^    state_file: .*#    state_file: "/var/lib/edge_server/edge_params.json"#' deploy.yaml` | 参数写进 `~/.config/...`，换运行用户后丢失 |
+| 实车 UART3 串口 | `sed -i 's#^    port: "/dev/ttyUSB0".*#    port: "/dev/ttyAMA1"#' deploy.yaml` | 串口打不开，`serial_connected=false` |
+| 有蓝牙音箱 | `sed -i 's#^      audio_dir: .*#      audio_dir: "/var/lib/edge_server/audio"#' deploy.yaml` | 素材/录音散落到 `~/.local/share`，systemd 下可能不可写 |
+| 无蓝牙音箱 | `sed -i '/^    speaker:/,/^    power:/ s/^      enabled: true/      enabled: false/' deploy.yaml`<br>`sed -i '/^      microphone:/,/^      tts:/ s/^        enabled: true/        enabled: false/' deploy.yaml` | 每 20 s 重连失败，日志刷屏 |
+| 非树莓派（无 vcgencmd） | `sed -i '/^    power:/,/^    ros_health_url:/ s/^      enabled: true/      enabled: false/' deploy.yaml` | `vcgencmd: not found`，电源模块恒 error |
+| 部署模式（只跑两个节点） | `sed -i 's/^    check_nodes: true/    check_nodes: false/; s/^    safety_required: true/    safety_required: false/' deploy.yaml` | 15 个未启动节点让整体健康恒为 `error` |
+| 无硬件但要显示 `degraded` | 见下方 awk | 缺相机/雷达/IMU 直接把整体打成 `error` |
+
+```bash
+# 未接入的硬件标为可选：camera / lidar / imu / base / odom
+awk '/^      [a-z_]+:$/ {dev=$1; sub(":","",dev)}
+     /^        required: true/ {if (dev ~ /^(camera|lidar|imu|base|odom)$/) sub("required: true","required: false")}
+     {print}' deploy.yaml > deploy.yaml.new && mv deploy.yaml.new deploy.yaml
+```
+
+**为什么要同时动 `required` 和 `strict_unknown`**（`edge_server/core/health_monitor.py` 的判定）：
+
+| `required` | `strict_unknown` | 无数据时的整体状态 | 适用 |
+|---|---|---|---|
+| `true` | 任意 | `error` | 实车硬件齐全：缺设备必须报警 |
+| `false` | `true` | `degraded` | 硬件未接的开发机/半成品车（本次采用） |
+| `false` | `false` | `ok` | 慎用：什么都没接也显示正常 |
+
+**3) 门槛：YAML 能被解析且关键值正确**
+
+```bash
+python3 - <<'PY'
+import yaml
+c = yaml.safe_load(open('/opt/edge_server/config/deploy.yaml'))['edge_server']
+e = c['edge']
+print('web      ', e['web']['port'], e['web']['stream_port'])
+print('base     ', c['base']['port'], c['base']['baud'])
+print('state    ', e['state_file'])
+print('speaker  ', e['speaker']['enabled'], 'mic', e['speaker']['microphone']['enabled'])
+print('power    ', e['power']['enabled'])
+print('health   ', c['health']['check_nodes'], c['health']['safety_required'], c['health']['strict_unknown'])
+print('required ', {k: v.get('required') for k, v in c['health']['devices'].items() if 'required' in v})
+PY
+```
+
+期望（本次开发机）：`web 80 8080`、`base /dev/ttyAMA1 115200`、
+`state /var/lib/edge_server/edge_params.json`、`speaker False mic False power False`、
+`health False False True`。
+
+> 接好硬件后建议把 `camera/lidar/imu/base/odom` 的 `required` 改回 `true`：缺设备直接 `error`
+> 比 `degraded` 更早暴露问题。
+
+### 2.6 systemd 单元与首次启动（P6）
+
+单元已版本化：仓库 `software/tools/systemd/edge_server.service` → 目标机
+`/etc/systemd/system/edge_server.service`。
+
+**1) 创建运行目录并交给运行用户**
+
+```bash
+sudo install -d -o $USER_NAME -g $USER_NAME -m 755 \
+  /var/lib/edge_server /var/lib/edge_server/ros \
+  /var/lib/edge_server/audio /var/lib/edge_server/audio/mic \
+  /var/log/edge_server /var/log/edge_server/ros
+```
+
+> 漏建的典型症状：`ROS_LOG_DIR` 不可写导致节点起不来；`/api/speaker/play` 返回 404。
+
+**2) 安装单元**（用户不是 `ubuntu` 就改 `User=`；UID 不是 1000 还要改 `/run/user/1000` 与 `user@1000.service`）
+
+目标机上已经有仓库时（本次开发机就是这种）：
+
+```bash
+sed 's/^User=.*/User=eagle/' software/tools/systemd/edge_server.service | \
+  sudo tee /etc/systemd/system/edge_server.service > /dev/null
+sudo chmod 644 /etc/systemd/system/edge_server.service
+```
+
+目标机上没有仓库时（实车常态），在开发机仓库根目录执行：
+
+```bash
+sed 's/^User=.*/User=ubuntu/' software/tools/systemd/edge_server.service > /tmp/edge_server.service
+scp /tmp/edge_server.service $HOST:/tmp/
+ssh $HOST 'sudo install -m 644 /tmp/edge_server.service /etc/systemd/system/edge_server.service'
+```
+
+**3) 启用并启动**
+
+```bash
+sudo loginctl enable-linger $USER_NAME      # 轻量/无图形登录时也要有 /run/user/1000
+sudo systemctl daemon-reload
+sudo systemctl enable --now edge_server
+```
+
+**4) 门槛**
+
+```bash
+systemctl is-active edge_server        # active
+systemctl is-enabled edge_server       # enabled
+ss -ltn | grep -E ':80 |:8080 |:8090 ' # 三条都在监听
+sudo journalctl -u edge_server -n 30 --no-pager | grep -E 'Loaded edge_server config|started'
+# 期望：Loaded edge_server config: /opt/edge_server/config/deploy.yaml
+#       edge_server_node started: web={'bound': True ...}, mjpeg={'bound': True ...}
+```
+
+**5) 单元全文**（与仓库模板一致；改了模板就重新安装一次）
+
 ```ini
+[Unit]
+Description=Rush-MoG Edge Server (web :80, MJPEG :8080, ROS health :8090)
+Documentation=file:///opt/edge_server/src/edge_server/docs/DEPLOY.md
+After=network-online.target bluetooth.service user@1000.service
+Wants=network-online.target bluetooth.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/edge_server
+# 运行配置与运行目录：部署期唯一真相来源
 Environment=EDGE_SERVER_CONFIG=/opt/edge_server/config/deploy.yaml
+Environment=ROS_HOME=/var/lib/edge_server/ros
 Environment=ROS_LOG_DIR=/var/log/edge_server/ros
+# 用户级 PipeWire/PulseAudio 与 D-Bus（蓝牙音箱播放/录音必需）
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=PULSE_SERVER=unix:/run/user/1000/pulse/native
 Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
-```
-后三项让播放器连到用户级 PipeWire/Pulse。启用并启动：
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable edge_server
-sudo systemctl start edge_server
-```
-运行目录：ROS home `/var/lib/edge_server/ros`，ROS 日志 `/var/log/edge_server/ros`，应用日志 `journalctl -u edge_server`。
+# 绑定 80 端口而不需要 root 运行
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+# SIGINT 让 launch 正常收尾（两个节点一起退出）；超时强杀
+KillSignal=SIGINT
+TimeoutStopSec=10
+Restart=on-failure
+RestartSec=5
+# 服务里写死 bash -lc：登录 shell 是 zsh 时 setup.bash 会算错前缀（§7.1）
+ExecStart=/bin/bash -lc 'source /opt/ros/humble/setup.bash && source /opt/edge_server/install/setup.bash && exec ros2 launch edge_server edge_server_deploy.launch.py'
 
-### 2.7 当前状态（截至 2026-11-15）
-| 项 | 状态 |
-|---|---|
-| `edge_server.service` | `active`，已开机自启；端口 `0.0.0.0:80`、`0.0.0.0:8080`、`127.0.0.1:8090` |
-| STM32 | `serial_connected=true`（`/dev/ttyAMA1@115200`） |
-| ROS 相机驱动 | 未启动，`camera=0`，`/stream` 返回 503 |
-| 蓝牙音箱 | 2026-11-14 实测 `newmine` 已连 A2DP sink `bluez_output.73_DB_39_F2_15_4B.a2dp-sink`、`online=true`；断开后 20s 内自动重连，`/api/speaker/say` 可中文播报（`espeak-ng`），health `speaker=ok` |
-| 蓝牙麦克风 | HFP 可用，`/api/microphone/start\|stop` 实测成功（8 kHz mono WAV，`/edge/audio` 10 Hz AudioData），停止后 A2DP 自动恢复，health `microphone=ok` |
-| 电源监控 | `/api/power` `status=ok`，`throttled_raw=0x50000`（历史欠压/降频已恢复，`warning=true`），`in0_lcrit_alarm=0`，health `power=ok` |
-| 激光雷达 | 代码/`lidar_node`/`rush-mog-lidar.service` 已安装并 enable；未接 D6、未启用 `dtoverlay=uart4`，`/dev/rush_lidar` 不存在，service 因 `ConditionPathExists` 静默跳过 |
-| Astra Pro | `ros-humble-orbbec-camera` + Orbbec udev 已装；`lsusb` 无 `2bc5`，驱动未启动，`camera`/`depth_camera` 为 `unknown` |
-| ICM-20948 | `i2c-tools`/`python3-smbus2` 已装，`imu.enabled=true`，`imu_node` 已部署（启动失败每 2s 重试）；I2C1 扫描为空（无 0x68/0x69），每 2s 重试，health `imu=unknown` |
-| 音箱现状 | `newmine` 连续 `br-connection-page-timeout`/`profile-unavailable`，扫描不到广播；软件已做 20s 重连、A2DP 重协商和 WirePlumber 自愈（180s 冷却），仍需音箱开机/充电并断开手机；麦克风随音箱恢复 |
-| 悬崖 | STM32 已上报 9 字段 `$B`（`cliff_mask` 可用）；当前 `mask=3`，PB3/PB4 均判触发；若传感器不在桌沿，查模块供电/DO 电平/触发宏 |
-| ROS 健康整体 | `degraded`（缺相机/雷达/IMU/底盘数据），属预期 |
+[Install]
+WantedBy=multi-user.target
+```
+
+各字段的作用与"为什么这么写"：
+
+| 字段 | 作用 | 去掉会怎样 |
+|---|---|---|
+| `User=` | 用普通用户跑，不用 root | 需 root，权限过大 |
+| `AmbientCapabilities=CAP_NET_BIND_SERVICE` | 非 root 绑 80 | `Permission denied`，web 起不来 |
+| `ROS_HOME` / `ROS_LOG_DIR` | 构建与运行日志固定落 `/var` | 日志散落 `~/.ros`，`sudo` 下会写不进 |
+| `XDG_RUNTIME_DIR` / `PULSE_SERVER` / `DBUS_SESSION_BUS_ADDRESS` | 连到用户级 PipeWire 与 D-Bus | 蓝牙播放/录音报连接失败 |
+| `KillSignal=SIGINT` + `TimeoutStopSec=10` | launch 正常收尾，10 s 后强杀（§3.6） | 默认 SIGTERM，节点可能不清理 |
+| `Restart=on-failure` + `RestartSec=5` | 崩溃自动拉起（配置写错会连挂 5 次后被 systemd 停下，看 `journalctl` 即可） | 崩了就一直是 failed |
+| `ExecStart` 里 `bash -lc` + 两个 `source` | 与服务登录 shell 无关，环境确定 | zsh 下算错前缀，`ros2: command not found` |
+| `After=/Wants=network-online.target bluetooth.service` | 等网络与蓝牙就绪 | 开机抢跑，重连要等下一轮 |
+
+### 2.7 部署结果对照与从零检查清单（P7）
+
+**两条档位的验收差异**
+
+| 检查项 | 实车（硬件齐全） | 开发机（Astra Pro 已接，本次实测） |
+|---|---|---|
+| `curl -o /dev/null -w '%{http_code}' /` | 200 | 200 |
+| `/dashboard.html` | 200 | 200 |
+| `:8080/stream` | 200 | 200（Astra Pro 彩色，实测 ~1.2 MB/4 s） |
+| `/status` → `camera` | 1 | 1 |
+| `/status` → `serial_connected` | true | false（无串口） |
+| `/status` → `ros_status` | ok / degraded | degraded |
+| health `camera` / `depth_camera` | ok | ok（13–15 Hz / 27 Hz） |
+| `/api/modules/ros/health` → `ready` | true | true |
+| 同上 → `healthy` | 全绿时 true | false |
+| 日志 `Loaded edge_server config` | 有 | 有 |
+
+**本次实测记录（2026-11-21 20:40，eagle-desktop / x86_64 / Ubuntu 22.04.5 / ROS Humble）**
+
+```text
+systemctl is-active   → active          systemctl is-enabled → enabled
+ss -ltn               → 0.0.0.0:80   0.0.0.0:8080   127.0.0.1:8090
+restart → web 200     → 1.6 s（Pi 实测约 6 s，§3.3）
+/ 200 | /dashboard.html 200 | :8080/stream 503 | :8090/ros/health 200
+/status   → camera=1, serial_connected=false, encoder_ok=false, ros_status=degraded, ros_ready=true
+health    → ready=true, healthy=false, status=degraded
+            summary: total=12 enabled=11 ok=3 degraded=2 unknown=6 disabled=1
+            camera/depth_camera=ok(required=true), odom=ok, base/cliff=degraded,
+            lidar/imu/microphone/speaker/arm/battery=unknown, power=disabled
+相机      → rush-mog-camera active+enabled；/camera/color 15Hz、/camera/depth 27Hz、
+            depth encoding=16UC1；/stream 200 且首帧 640×480 可解码（mean 87/std 75）
+stop      → 端口全部释放，is-active=inactive；start 后 3 个端口恢复
+单元与模板 → diff 仅 User= 一行不同
+```
+
+**从零部署检查清单**（复制到记事本，逐条打勾）
+
+```text
+[ ] P0 能 ssh、有 sudo；系统 Ubuntu 22.04；/opt 与 /var 剩余 > 8G
+[ ] P1 apt update 通过；apt-cache policy ros-humble-ros-base 有 Candidate
+[ ] P2 ros2 --help 正常；colcon 可用；cv2/numpy/yaml/serial 可导入
+[ ] P3 实车：/dev/ttyAMA1 存在且在 dialout 组；/dev/rush_lidar -> ttyAMA2；i2cdetect 见 0x68；
+       systemctl --user is-active pipewire pipewire-pulse wireplumber 全 active
+[ ] P3 相机：/dev/astra_pro 存在；systemctl is-active rush-mog-camera=active；
+       ros2 topic hz /camera/color/image_raw ≈15 Hz、/camera/depth/image_raw 有数据
+[ ] P4 src 两个包到位（launch/edge_server_deploy.launch.py 存在）；colcon build 成功；
+       ros2 pkg prefix edge_server 正常
+[ ] P5 deploy.yaml 关键值正确（web 80/8080、state 指 /var/lib、required/strict_unknown 符合档位）
+[ ] P6 /var 四个目录属于运行用户；单元安装并 daemon-reload；is-active=active、is-enabled=enabled
+[ ] P7 80/8080/8090 在监听；/ 返回 200；journal 有 Loaded config 与 started
+[ ] 收尾：本地 pytest 基线 180 passed；留 /opt/edge_server/backup 回滚点（§4.6）
+```
 
 ## 3. 日常启停与验证
 ### 3.1 启停与状态
 ```bash
-PI=ubuntu@192.168.3.26
+PI=ubuntu@192.168.3.26        # 开发机换成 eagle@172.31.4.88
 
 ssh $PI 'systemctl status edge_server --no-pager'   # 看状态
 ssh $PI 'sudo systemctl start edge_server'
@@ -216,7 +650,7 @@ ssh ubuntu@192.168.3.26 'sudo journalctl -u edge_server -b --no-pager'      # �
 ROS 自己的日志在 `/var/log/edge_server/ros/`（由 unit 里的 `ROS_LOG_DIR` 指定）。
 
 ### 3.3 启动后验证
-`restart` 是异步的：命令返回时节点还没绑好端口（实测约 6 秒），紧接着 `curl` 可能得到 `000`。先轮询就绪：
+`restart` 是异步的：命令返回时节点还没绑好端口（Pi 实测约 6 秒，x86_64 开发机约 1.6 秒），紧接着 `curl` 可能得到 `000`。先轮询就绪：
 ```bash
 for i in $(seq 1 20); do
   code=$(curl -s -m 2 -o /dev/null -w '%{http_code}' http://192.168.3.26/ || true)
@@ -233,7 +667,7 @@ curl -s -o /dev/null -w 'stream=%{http_code}\n' http://192.168.3.26:8080/stream
 curl -s http://192.168.3.26/status; echo
 curl -s http://192.168.3.26/api/modules/ros/health; echo
 ```
-预期（当前没接相机时）：`web=200`、`dash=200`；`stream=503`（没有 `/camera/color/image_raw`，正常）；STM32 已接线时 `/status` 里 `"serial_connected":true`、`"encoder_ok":true`，没接或没上电时为 `false`；`"ros_status":"degraded"`（缺相机/雷达/IMU，属预期）；健康接口 `"ready":true`、`"healthy":false`，`reason` 列出缺哪些设备。`degraded` 不代表服务坏了，`ready:true` 才是关键。
+预期（本机已接 Astra Pro）：`web=200`、`dash=200`、`stream=200`（没接相机的机器是 `503`，也正常）；STM32 已接线时 `/status` 里 `"serial_connected":true`、`"encoder_ok":true`，没接或没上电时为 `false`；`"ros_status":"degraded"`（缺相机/雷达/IMU，属预期）；健康接口 `"ready":true`、`"healthy":false`，`reason` 列出缺哪些设备。`degraded` 不代表服务坏了，`ready:true` 才是关键。
 
 ### 3.4 整机开关机
 **上电**：先接好相机、雷达、STM32 串口再上电（避免热插拔 USB）；等约 2～3 分钟（实机 `systemd-analyze`：kernel 7s + userspace 2min19s，主要在等网络）；服务自动启动，按 §3.3 验证。没起来时：
@@ -272,7 +706,7 @@ ssh -t ubuntu@192.168.3.26 \
   'sudo bash -lc "export EDGE_SERVER_CONFIG=/opt/edge_server/config/deploy.yaml && \
                   source /opt/ros/humble/setup.bash && \
                   source /opt/edge_server/install/setup.bash && \
-                  ros2 launch /opt/edge_server/deploy/edge_server.launch.py"'
+                  ros2 launch edge_server edge_server_deploy.launch.py"'
 ```
 `Ctrl-C` 结束；调试完记得 `sudo systemctl start edge_server` 交还给 systemd。不想用 sudo：把 `deploy.yaml` 的 `web.port` 临时改成 8081 再跑，别提交这个改动。在 Pi 上用 zsh 交互查看环境：
 ```zsh
@@ -290,10 +724,10 @@ ssh-copy-id ubuntu@192.168.3.26
 ```
 之后 rsync/ssh 不再反复输入密码。发布前先在本地跑测试：
 ```bash
-cd /mnt/f/CODE/rush-mog/software/edge_server
+cd <repo>/software/edge_server        # 开发机 ~/workspace/projects/rush-mog；WSL /mnt/f/CODE/rush-mog
 PYTHONPATH=.:$PYTHONPATH python3 -m pytest -q tests
 ```
-当前基线：`179 passed`。
+当前基线：`180 passed`（2026-11-21，开发机 x86_64 / Python 3.10 / ROS Humble）。
 
 ### 4.2 同步 → 构建 → 重启
 在 WSL 下执行：
@@ -339,12 +773,11 @@ ssh $PI 'sudo journalctl -u edge_server -n 50 --no-pager'
 |---|---|---|---|---|
 | 节点 Python 逻辑 | `edge_server` | `edge_server` | 是 | 最常见 |
 | `web/` 页面/JS/CSS | `edge_server` | `edge_server` | 建议重启 | 构建会把 web 装到 install；浏览器强刷 |
-| `launch/`、`config/robot.yaml` | `edge_server` | `edge_server` | 是 | 运行配置仍以远程 `deploy.yaml` 为准 |
+| `launch/`（含 `edge_server_deploy.launch.py`）、`config/robot.yaml` | `edge_server` | `edge_server` | 是 | 部署 launch 随构建装进 install；运行配置仍以远程 `deploy.yaml` 为准 |
 | `package.xml` / `setup.py` / 入口点 | `edge_server` | `custom_msgs edge_server` 或清理后全量 | 是 | 入口点变化必须重装 |
 | `custom_msgs` | `custom_msgs` + `edge_server` | 两者都构建 | 是 | 所有使用该消息的进程都需重启 |
 | 只改远程 `config/deploy.yaml` | 不需要 rsync | 不需要 | 是 | 直接编辑远端配置（§4.5） |
-| 改 `deploy/edge_server.launch.py` | 单独复制 | 不需要 | 是 | 文件在 `/opt/edge_server/deploy/` |
-| 改 `/etc/systemd/system/edge_server.service` | 单独复制 | 不需要 | `daemon-reload` + restart | 注意文件在 `/etc` |
+| 改 `software/tools/systemd/edge_server.service` | 单独复制 | 不需要 | `daemon-reload` + restart | 单元在 `/etc`，不在 rsync 范围（§4.5） |
 
 ### 4.5 特殊改动
 **只改远程运行配置：**
@@ -353,12 +786,11 @@ ssh ubuntu@192.168.3.26
 sudoedit /opt/edge_server/config/deploy.yaml
 sudo systemctl restart edge_server
 ```
-**改部署 launch：**
-```bash
-scp /path/to/edge_server.launch.py \
-  ubuntu@192.168.3.26:/opt/edge_server/deploy/edge_server.launch.py
-ssh ubuntu@192.168.3.26 'sudo systemctl restart edge_server'
-```
+**改部署 launch：** 现在它就是普通源码（`software/edge_server/launch/edge_server_deploy.launch.py`），
+按 §4.2 同步 + `colcon build --packages-select edge_server` + restart 即可，**不再单独 scp**。
+
+> 历史提示：旧部署把 launch 放在 `/opt/edge_server/deploy/edge_server.launch.py` 并手工复制。
+> 如果目标机单元还是旧路径（`ExecStart` 里带 `/opt/edge_server/deploy/`），按 §4.5 的单元安装步骤换成本仓库模板一次即可。
 **改 systemd 单元：**
 ```bash
 scp /path/to/edge_server.service ubuntu@192.168.3.26:/tmp/edge_server.service
@@ -368,7 +800,7 @@ ssh ubuntu@192.168.3.26 '
   sudo systemctl restart edge_server
 '
 ```
-**`src` 被误删 / 构建报 `Package 'edge_server' not found`：** 按 §4.2 重新同步并构建即可。`--delete` 只清理目标目录内部，不会碰 `config/`、`deploy/`、`install/`；注意在 `/opt/edge_server` 下执行 build。
+**`src` 被误删 / 构建报 `Package 'edge_server' not found`：** 按 §4.2 重新同步并构建即可。`--delete` 只清理目标目录内部，不会碰 `config/`、`install/`；注意在 `/opt/edge_server` 下执行 build。
 
 ### 4.6 回滚
 发布前保留上一版源码（**放在 colcon 工作区之外**，否则会被当成重名包）：
@@ -705,28 +1137,118 @@ curl -s http://127.0.0.1:8090/ros/health/devices/lidar | python3 -m json.tool
 再在 `edge_server/core/lidar.py` 增加对应协议解析（`lidar.protocol` 扩展）。
 
 ### 6.6 Astra Pro 深度相机
-驱动 `ros-humble-orbbec-camera`（已安装）；udev `/etc/udev/rules.d/99-obsensor-libusb.rules`（已从 `/opt/ros/humble/share/orbbec_camera/udev/` 复制）。
-```bash
-# 不建议经 Hub；插 Pi 4 USB3 口，Astra Pro 是 USB2.0 设备
-lsusb | grep -i 2bc5          # 应看到 Orbbec/Astra（2bc5:0403 等）
 
+> **先认型号再选驱动。** 初代 **Astra Pro**（`2bc5:0403` + `2bc5:0501`）必须用 legacy
+> `astra_camera`（OpenNI2 + libuvc）；新版 `ros-humble-orbbec-camera`（Orbbec SDK 2.x）
+> 驱动不了它，会报 `Device response size(0) < response header size(10), propertyId: 1000`
+> 并每 11 秒 reset 一次。Astra Pro Plus / Astra 2 / Gemini 系列才用 `orbbec_camera`。
+> 两个驱动可以共存，`astra.launch.py` 按已安装包自动选（legacy 优先）。
+
+**1) 认设备**
+
+```bash
+lsusb | grep 2bc5
+# Bus 001 Device 006: ID 2bc5:0403 Orbbec ... Astra Pro           <- 深度/IR，厂商私有接口（无内核驱动）
+# Bus 001 Device 005: ID 2bc5:0501 Orbbec ... Astra Pro HD Camera <- 彩色，UVC（uvcvideo 接管）
+```
+
+**2) 装依赖 + 编译 legacy 驱动**
+
+```bash
+sudo apt-get install -y libuvc-dev libgflags-dev \
+  ros-humble-image-geometry ros-humble-image-transport ros-humble-tf2-eigen \
+  ros-humble-rclcpp-components ros-humble-camera-info-manager
+
+cd /opt/edge_server/src
+git clone https://github.com/orbbec/ros2_astra_camera.git
+cd /opt/edge_server && bash -lc 'source /opt/ros/humble/setup.bash && \
+  colcon build --packages-select astra_camera_msgs astra_camera \
+  --cmake-args -DCMAKE_BUILD_TYPE=Release'
+```
+
+实测版本 `f7e71d9`（2023-11-08）：x86_64 编译约 70 s，Pi 4B 约 4–6 分钟。源码放
+`/opt/edge_server/src/ros2_astra_camera`（rsync 只覆盖 `src/edge_server`，不会动它）。
+
+**3) udev（建 `/dev/astra_pro` 并给 0666）**
+
+```bash
+# 装了 orbbec_camera 时用它自带规则（同时覆盖新机型）
+sudo cp /opt/ros/humble/share/orbbec_camera/udev/99-obsensor-libusb.rules /etc/udev/rules.d/
+# 只有 legacy 源码时用它的规则（内容对 0403 等价）
+# sudo cp /opt/edge_server/src/ros2_astra_camera/astra_camera/scripts/56-orbbec-usb.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+ls -l /dev/astra_pro            # 期望 -> bus/usb/001/00x，且 0666
+```
+
+**4) 启动与默认参数**
+
+```bash
 ros2 launch edge_server astra.launch.py
-# 话题：/camera/color/image_raw、/camera/depth/image_raw、
-#       /camera/color/camera_info、/camera/depth/camera_info
+# 也可随整车 bringup：ros2 launch edge_server robot_bringup.launch.py start_camera:=true
 ```
-`astra.launch.py` 默认：`depth_registration:=true`（深度对齐彩色，bbox 可直接采深度）；`enable_point_cloud:=false`（Pi 4B 省 CPU/带宽）；640×480@10Hz；发布 `base_link → camera_link` 静态 TF，默认 `x=0.08,y=0,z=0.22`。
 
-Edge 侧：`edge.camera.topic`/`perception.image_topic` 已切到 `/camera/color/image_raw`；`perception.depth_topic` 为 `/camera/depth/image_raw`，`prefer_depth: true`；`target_detector_node` 用深度 bbox 中心区域中值优先测距，深度不可用再回退激光/bbox 高度；health `depth_camera` 监控深度话题，dashboard 增加「深度相机」卡片；`robot_bringup.launch.py start_camera:=true` 可随整车启动。
+`astra.launch.py` 默认：`color 640×480@15`、`depth 640×480@15`、`depth_registration:=true`、
+`enable_point_cloud:=false`、`enable_ir:=false`，并发布 `base_link → camera_link` 静态 TF
+（默认 `x=0.08, y=0, z=0.22`，按实车安装位置改 `tf_*`）。
 
-验收：
+> **帧率硬约束（踩过）**：这块相机的彩色流在 640×480 只支持 **30 / 15 fps**（MJPG、YUYV 都一样）。
+> 传 `color_fps:=10` 会让 libuvc 返回 `Invalid mode`，随后驱动对已置空的句柄解引用，
+> **直接 `exit code -11` 段错误**——不是驱动坏了，是模式非法。
+
+> **深度配准**：legacy 驱动的 `depth_registration:=true` 是**硬件就地配准**——OpenNI 把深度流
+> 对齐到彩色后仍发布在 `/camera/depth/image_raw`，**不会**另开 `depth_registered` 话题。
+> 因此 bbox 中心可以直接在同一像素坐标取深度。
+
+**5) 常驻：systemd**
+
 ```bash
-ros2 topic hz /camera/color/image_raw   # ≈10 Hz
-ros2 topic hz /camera/depth/image_raw   # ≈10 Hz
-ros2 topic echo /camera/depth/image_raw --once --field encoding   # 16UC1/32FC1
-ros2 topic echo /camera/depth/camera_info --once
-ros2 run tf2_ros tf2_echo base_link camera_link
+sed 's/^User=.*/User=ubuntu/; s/^Group=.*/Group=ubuntu/' \
+  software/tools/systemd/rush-mog-camera.service | \
+  sudo tee /etc/systemd/system/rush-mog-camera.service > /dev/null
+sudo systemctl daemon-reload && sudo systemctl enable --now rush-mog-camera
 ```
-现状与可选服务：本机尚未插 Astra Pro（`lsusb` 没有 `2bc5`），驱动未启动。已安装并 enable 可选的 `rush-mog-camera.service`（`ConditionPathExists=/dev/astra_pro`）：相机插上且 Orbbec udev 规则生效后，重启或 `sudo systemctl start rush-mog-camera` 即启动；模板 `software/tools/systemd/rush-mog-camera.service`；手动调试仍推荐 `ros2 launch edge_server astra.launch.py`。若 Orbbec 驱动无法识别老款 Astra Pro，先确认 `lsusb`/`ros2 topic list`；仍不行则换 Astra Pro Plus/Gemini 2/D435i，Edge 侧话题/深度分支不用改。
+（本机把 `ubuntu` 换成 `eagle`。）`ConditionPathExists=/dev/astra_pro`：没插相机时静默跳过，
+拔掉再插上只需 `sudo systemctl restart rush-mog-camera`。
+
+**6) 验收（2026-11-21 实测）**
+
+```bash
+systemctl is-active rush-mog-camera                        # active
+ros2 topic hz /camera/color/image_raw                     # ≈15 Hz
+ros2 topic hz /camera/depth/image_raw                     # ≈27 Hz（设备按支持集协商）
+ros2 topic echo /camera/depth/image_raw --once --field encoding   # 16UC1（单位 mm）
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/stream   # 200
+curl -s http://127.0.0.1/api/modules/ros/health | python3 -c \
+  "import json,sys;[print(d['id'],d['status']) for d in json.load(sys.stdin)['devices'] if 'camera' in d['id']]"
+# camera ok / depth_camera ok
+```
+
+**7) 页面取流**
+
+- 首页 `http://<host>/`：**点画面才开始推流**，状态从 `Click picture to start` → `Connecting...` → 画面；
+  再点一次停止（省带宽）。走 `http://<host>:8080/stream`。
+- Dashboard `http://<host>/dashboard.html`：进页面自动连「视频监控」面板，加载成功显示 `LIVE`，
+  失败显示「等待相机」并每 8 s 重试。
+- `:80/stream` 只是 302 到 `:8080/stream`；MJPEG 不占 80，网页/控制不受影响。
+
+**8) 排错**
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| `Device response size(0) < response header size(10), propertyId: 1000`，每 11 s reset | 用 `orbbec_camera` 驱动初代 `0403` | 按本节步骤 2 装 legacy `astra_camera` |
+| `set uvc ctrl error Invalid mode` 后 `process has died ... exit code -11` | 彩色分辨率/帧率非法（如 10 fps） | `color_fps:=30` 或 `15` |
+| `attempt to claim already-claimed interface` | uvcvideo 占着彩色接口 | legacy 驱动一般能自动 detach；仍失败时 `echo -n 1-3.1:1.0 > /sys/bus/usb/drivers/uvcvideo/unbind`（接口名用 `ls /sys/bus/usb/devices/*:1.0` 查） |
+| 只有彩色或只有深度 | USB2 带宽不足、经 Hub、与 webcam 抢带宽 | 直插主机 USB 口；降 `depth_fps`；别和 UVC 摄像头共用 Hub |
+| `/stream` 503 | 没有 `/camera/color/image_raw` | `ros2 topic hz` → `journalctl -u rush-mog-camera`；再查 health `camera` |
+| 拔插后不恢复 | USB 复位后节点还抱着旧句柄 | `sudo systemctl restart rush-mog-camera` |
+
+**9) Edge 侧配置**
+
+`edge.camera.topic` 与 `perception.image_topic` 为 `/camera/color/image_raw`；
+`perception.depth_topic` 为 `/camera/depth/image_raw`、`depth_scale: 0.001`（mm→m）、`prefer_depth: true`。
+`target_detector_node` 先用深度 bbox 中心区域中值测距，深度不可用时回退激光/bbox 高度。
+health 的 `camera`/`depth_camera` 在接上相机后已设为 `required: true`：相机掉线会让整体健康变成
+`error`；只想报警不阻断时改回 `false`。
 
 ### 6.7 悬崖传感器（STM32 PB3/PB4）
 悬崖传感器接在 STM32 的 PB3/PB4，由 `body_control` 固件本地做 10ms 采样、30ms 消抖，并在触发时封锁运动。Edge 侧要看到状态，STM32 必须上报悬崖掩码：
@@ -942,6 +1464,9 @@ sudo systemctl start edge_server
 | `ros2 topic hz /scan` 无数据 | `/dev/rush_lidar` 不存在、波特率/协议不对或节点未启动 | `ls -l /dev/rush_lidar`；`ros2 topic echo /lidar/status`；检查 `lidar.port/baud` 和 `dtoverlay=uart4` |
 | `/lidar/status` 的 `crc_errors` 持续增加 | 波特率不对、线缆干扰或协议不是 LD19 | 确认 D6 说明书波特率（230400/921600）、共地、TX/RX 交叉、缩短线缆 |
 | 没有 `/camera/color/image_raw` 或 `/camera/depth/image_raw` | Astra 未插好、USB 供电/带宽不足、驱动未启动 | `lsusb \| grep 2bc5`；`ros2 launch edge_server astra.launch.py`；插 USB3 口、不经 Hub、降分辨率/帧率 |
+| `Device response size(0) < response header size(10), propertyId: 1000`，每 11 s reset | 用 `orbbec_camera`（新 SDK）驱动初代 Astra Pro（2bc5:0403） | 编译 legacy `astra_camera`，见 §6.6 |
+| `set uvc ctrl error Invalid mode` 后 `exit code -11` | 彩色模式非法（640×480 只支持 30/15 fps） | `color_fps:=30` 或 `15`，见 §6.6 |
+| 拔插相机后 `/stream` 一直 503 | USB 复位后驱动抱着旧句柄 | `sudo systemctl restart rush-mog-camera` |
 | `/camera/depth/image_raw` 有图但目标测距明显偏 | 深度未对齐到彩色/外参不对 | `depth_registration:=true`；检查 `base_link→camera_link` TF；必要时 `prefer_depth:=false` |
 | dashboard 悬崖卡片一直“无遥测” | STM32 固件还是 8 字段 `$B`，没有 cliff_mask | 重新编译/烧录 `body_control`；`ros2 topic echo /base/status --once` 应看到 9 个字段 |
 | 悬崖卡片左右状态反了/一直 CLIFF | 模块 DO 空闲电平与 `CLIFF_*_TRIGGER_LEVEL` 相反，或 PB3/PB4 悬空 | 调模块电位器；按实际改 `cliff_sensor.h` 触发宏；确认共地 |
@@ -961,6 +1486,13 @@ sudo systemctl start edge_server
 | 服务反复重启 | 配置 YAML 写错/端口被占 | `journalctl -u edge_server -n 100` |
 | 日志时间比北京时间慢 8 小时 | Pi 时区是 UTC | `sudo timedatectl set-timezone Asia/Shanghai`（可选） |
 | 网页/接口全部超时 | 服务没起或 Pi 掉线 | `ping`、`systemctl status`、`journalctl -b` |
+| `Unit edge_server.service has a bad unit file setting` / `Assignment outside of section` / `Service has no ExecStart=` | 单元文件被写残：只剩 `Environment=` 行，没有 `[Unit]`/`[Service]`/`ExecStart` | 按 §2.6 重新安装模板（`sed 's/^User=.*/User=<user>/' 模板 \| sudo tee ...`），再 `daemon-reload` |
+| `is-enabled` 是 `static`、`enable` 报无 `[Install]` | 同上：单元缺少 `[Install] WantedBy=` | 重装单元后 `systemctl enable edge_server` |
+| `status=203/EXEC` 或 `ros2: No such file or directory` | `ExecStart` 没走 `bash -lc`，或 ROS 不在 `PATH` | 用模板里的 `ExecStart`（`bash -lc` + 两个 `source`） |
+| 节点起来但 80 报 `Permission denied`、`bound: False` | 单元缺 `AmbientCapabilities=CAP_NET_BIND_SERVICE`，或前台运行时没 sudo | 重装单元；前台调试临时改 `web.port: 8081`（§3.7） |
+| `ROS_LOG_DIR`/`ROS_HOME` 报 Read-only / Permission denied | `/var/log/edge_server/ros`、`/var/lib/edge_server/ros` 没建或属主不对 | `sudo install -d -o <user> -g <user> /var/...`（§2.6 第 1 步） |
+| 开机没有 `/run/user/1000`，蓝牙/音频相关全失败 | 没执行 `loginctl enable-linger <user>` | `sudo loginctl enable-linger <user>`，`systemctl restart edge_server` |
+| 服务 5 秒一次反复重启 | `Restart=on-failure` 生效，配置/YAML 或端口有错 | `journalctl -u edge_server -n 100`；修好后 `systemctl reset-failed edge_server` 再 start |
 
 ## 8. 速查表
 ### 8.1 路径与端口
@@ -969,8 +1501,8 @@ sudo systemctl start edge_server
 | 源码（Pi） | `/opt/edge_server/src/edge_server`、`/opt/edge_server/src/custom_msgs` |
 | 构建产物 | `/opt/edge_server/install/`（不要手改） |
 | 运行配置 | `/opt/edge_server/config/deploy.yaml`（`EDGE_SERVER_CONFIG`） |
-| 部署 launch | `/opt/edge_server/deploy/edge_server.launch.py` |
-| systemd unit | `/etc/systemd/system/edge_server.service` |
+| 部署 launch | `/opt/edge_server/install/edge_server/share/edge_server/launch/edge_server_deploy.launch.py`（源自 `launch/edge_server_deploy.launch.py`） |
+| systemd unit | `/etc/systemd/system/edge_server.service`（模板 `software/tools/systemd/edge_server.service`） |
 | 应用日志 | `journalctl -u edge_server` |
 | ROS 日志 | `/var/log/edge_server/ros/` |
 | ROS home | `/var/lib/edge_server/ros/` |
@@ -986,8 +1518,11 @@ sudo systemctl start edge_server
 | 雷达设备 | `/dev/rush_lidar`（UART4 GPIO8/9） |
 | 雷达状态 | `ros2 topic echo /lidar/status --once` |
 | 悬崖状态 | `ros2 topic echo /body/cliff_status --once` |
-| Astra USB 规则 | `/etc/udev/rules.d/99-obsensor-libusb.rules` |
-| Astra 启动 | `ros2 launch edge_server astra.launch.py` |
+| Astra USB 规则 | `/etc/udev/rules.d/99-obsensor-libusb.rules`（或 legacy 的 `56-orbbec-usb.rules`） |
+| Astra 驱动源码 | `/opt/edge_server/src/ros2_astra_camera`（legacy，初代 Astra Pro 必须） |
+| 相机设备 | `/dev/astra_pro`（2bc5:0403，深度/IR；彩色是 2bc5:0501 UVC） |
+| 相机服务 | `rush-mog-camera.service`（`ConditionPathExists=/dev/astra_pro`） |
+| Astra 启动 | `ros2 launch edge_server astra.launch.py`（自动选 legacy/orbbec 驱动） |
 | WirePlumber 音频规则 | `/home/ubuntu/.config/wireplumber/bluetooth.lua.d/51-rush-mog.lua` |
 | RTKit 授权 | `/etc/polkit-1/localauthority/50-local.d/50-rush-mog-rtkit.pkla` |
 | WiFi 省电关闭 | `/etc/systemd/system/wifi-powersave-off.service` |

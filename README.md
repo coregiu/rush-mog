@@ -4,6 +4,8 @@
 
 [中文版](README_cn.md)
 
+![](images/rush-mog.png)
+
 Rush Mog is an intelligent omnidirectional-wheel car inspired by the Unimog and controlled by VLA (Vision-Language-Action). Built on a Raspberry Pi + depth camera + STM32F103 + L298N + IMU sensor + LiDAR + robotic arm + VLA inference, it supports three control modes — a phone-based Wi-Fi PS2 emulator, voice control, and VLA intelligent control — together with robotic-arm operation. It also provides action programming, allowing users to define combined action commands.
 
 ## Features
@@ -20,7 +22,7 @@ Build a 2D occupancy grid with a 2D LiDAR + wheel encoders + ICM-20948, and loca
 Use the VLA model to control vehicle movement: search for, lock onto, and track target objects. Use the robotic arm to grasp, transfer, and place objects within a designated area, implementing object transport. Transport paths can be planned or learned automatically.
 
 #### (5) Digital Twin Monitoring and Configuration
-Open `http://192.168.4.1/dashboard.html` (or tap **RUSH-MOG TWIN** on the controller page) to see an in-vehicle digital twin with EDGE / ROS / CENTER module status, per-device health (camera, LiDAR, IMU, microphone, speaker, arm, base, battery), and runtime parameter editing. ROS 2 and CENTER report to `192.168.4.1`; the page only talks to the Raspberry Pi Edge Server, which proxies module APIs.
+Open `http://${edge_server}/dashboard.html` (or tap **RUSH-MOG TWIN** on the controller page) to see an in-vehicle digital twin with EDGE / ROS / CENTER module status, per-device health (camera, LiDAR, IMU, microphone, speaker, arm, base, battery), and runtime parameter editing. ROS 2 and CENTER report to `${edge_server}`; the page only talks to the Raspberry Pi Edge Server, which proxies module APIs.
 
 
 ## Design Overview
@@ -73,9 +75,6 @@ For details, see: [Software Design Notes and Code](software/README.md).
 ## How to Use the Controller
 ![](software/edge_server/ps2.png)
 
-After starting the car, connect your phone to the RUSH-MOG Wi-Fi network provided by the Pi Edge Server. Open your phone's browser at 192.168.4.1 to load the PS2 controller page and operate the car.
+After starting the car, connect your phone to the RUSH-MOG Wi-Fi network provided by the Pi Edge Server. Open your phone's browser at ${edge_server} to load the PS2 controller page and operate the car.
 
 
-## Final Product Showcase
-
-![](images/AGO.png)

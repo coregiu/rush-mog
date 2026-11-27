@@ -1229,7 +1229,7 @@ ROS 参数 config_file  >  环境变量 EDGE_SERVER_CONFIG（兼容旧 CENTER_SE
 ```text
 /etc/systemd/system/edge_server.service
   Environment=EDGE_SERVER_CONFIG=/opt/edge_server/config/deploy.yaml
-  ExecStart=bash -lc '... ros2 launch /opt/edge_server/deploy/edge_server.launch.py'
+  ExecStart=bash -lc '... ros2 launch edge_server edge_server_deploy.launch.py'
 ```
 
 ### 9.2 配置文件

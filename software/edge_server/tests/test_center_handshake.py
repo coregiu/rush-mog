@@ -65,7 +65,7 @@ def handshake_payload(**overrides):
         "version": "0.2.0",
         "status": "ok",
         "summary": "ready=True backend=smolvla device=cuda",
-        "ip": "192.168.4.50",  # Edge 必须忽略它，以 TCP 对端地址为准
+        "ip": "192.168.3.25",  # Edge 必须忽略它，以 TCP 对端地址为准
         "port": 8000,
         "scheme": "http",
         "health_port": 8000,

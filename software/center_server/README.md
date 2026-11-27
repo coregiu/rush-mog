@@ -1,8 +1,8 @@
 # Center Server — SmolVLA HTTP 推理服务
 
-> 版本：0.2.0  
-> 运行环境：Python 3.10+；真实模型建议 NVIDIA GPU（CPU 可跑但延迟高）  
-> 接口：HTTP/JSON，`POST /v1/infer`、`GET/POST /v1/params`、`GET/POST /v1/handshake`  
+> 版本：0.2.0
+> 运行环境：Python 3.10+；真实模型建议 NVIDIA GPU（CPU 可跑但延迟高）
+> 接口：HTTP/JSON，`POST /v1/infer`、`GET/POST /v1/params`、`GET/POST /v1/handshake`
 > **现场部署**：Center `192.168.3.25:8000`（Windows）⇄ Edge `192.168.3.26:80`（树莓派），
 > 完整部署/增量构建/发布/运维见 §9。
 
@@ -178,15 +178,15 @@ python -m center_server --config config.yaml --check
 {
   "handshake": {
     "enabled": true,
-    "target": "http://192.168.4.1/api/center/handshake",
+    "target": "http://${edge_server}/api/center/handshake",
     "connected": true,
     "attempts": 3,
     "successes": 3,
     "failures": 0,
     "last_error": "",
     "last_ok_at": "2026-11-15T05:20:10+00:00",
-    "last_response": {"ok": true, "ip": "192.168.4.50", "port": 8000,
-                      "infer_url": "http://192.168.4.50:8000/v1/infer"}
+    "last_response": {"ok": true, "ip": "192.168.3.25", "port": 8000,
+                      "infer_url": "http://192.168.3.25:8000/v1/infer"}
   }
 }
 ```
@@ -202,7 +202,7 @@ Center Server 在 HTTP 端口绑定成功后，由后台线程向 Edge 发送：
   "version": "0.2.0",
   "status": "ok",
   "summary": "ready=True backend=smolvla device=cuda model=lerobot/smolvla_base",
-  "ip": "192.168.4.50",
+  "ip": "192.168.3.25",
   "port": 8000,
   "scheme": "http",
   "health_port": 8000, "health_path": "/v1/health",
@@ -226,7 +226,7 @@ Center Server 在 HTTP 端口绑定成功后，由后台线程向 Edge 发送：
 ```bash
 curl -s -X POST http://127.0.0.1:8000/v1/handshake | python3 -m json.tool
 # Edge 侧确认
-curl -s http://192.168.4.1/api/center | python3 -m json.tool
+curl -s http://${edge_server}/api/center | python3 -m json.tool
 ```
 
 ### 4.1.1 参数：`GET/POST /v1/params`
@@ -471,7 +471,7 @@ SmolVLA 输出动作块；服务按 `action.mode` 解释：
 | `action.normalized` | true | 模型输出是否归一化 |
 | `action.max_linear_x` 等 | 0.5/0.4/1.0 | 速度限幅 |
 | `handshake.enabled` | true | 是否向 Edge 握手（`edge_url` 为空时亦不发送） |
-| `handshake.edge_url` | 空（生产配置示例 `http://192.168.4.1`） | Edge Server 基地址 |
+| `handshake.edge_url` | 空（生产配置示例 `http://${edge_server}`） | Edge Server 基地址 |
 | `handshake.path` | `/api/center/handshake` | 握手指令路径（兼容旧版可改 `/api/modules/report`） |
 | `handshake.interval_sec` | 10 s | 成功后的心跳间隔 |
 | `handshake.retry_sec` / `max_retry_sec` | 2 s / 30 s | 失败指数退避 |
@@ -678,10 +678,10 @@ ssh ubuntu@192.168.3.26 'systemctl is-active edge_server; journalctl -u edge_ser
       fallback_to_rules: true
 ```
 
-> 当前 deploy launch 只启动 `edge_server_node`/`health_monitor_node` 等最小集；
-> 需要真实远程 VLA 闭环时，再把 `vla_inference_node` 加入
-> `/opt/edge_server/deploy/edge_server.launch.py`，并确保 `/center/synced_data`
-> 有数据源。只验证握手/健康时不需要。
+> 当前 deploy launch（`software/edge_server/launch/edge_server_deploy.launch.py`）只启动
+> `edge_server_node` + `health_monitor_node` 这两个节点；需要真实远程 VLA 闭环时，
+> 把 `vla_inference_node` 加进该 launch，并确保 `/center/synced_data` 有数据源。
+> 只验证握手/健康时不需要。
 
 #### 9.3.2 Center Server（Windows）
 
@@ -1050,7 +1050,8 @@ curl -s -X POST http://127.0.0.1:8000/v1/infer \
 7. **握手注册表在内存**：Edge 重启后需等待下一次 heartbeat（默认 ≤10s）才能
    重新发现；不落盘、不支持多 Center 同时注册（同 module 覆盖）。
 8. **Edge 最小部署未默认启动 `vla_inference_node`**：当前
-   `/opt/edge_server/deploy/edge_server.launch.py` 只跑 Web/健康/IMU 等；
+   `launch/edge_server_deploy.launch.py` 只跑 Web/健康两个节点（IMU、雷达等驱动
+   由 `robot_bringup` 或单独 launch 拉起）；
    启用远程 VLA 闭环需把该节点加入 launch 并提供 `/center/synced_data`。
 
 详细设计（模块、协议、错误处理、扩展点）见 [`DESIGN.md`](DESIGN.md)。

@@ -1,8 +1,22 @@
+# RUSH-MOG Astra Pro 深度相机驱动（RGB + 深度）
+#
+# 安装：
+#   sed 's/^User=.*/User=ubuntu/; s/^Group=.*/Group=ubuntu/' rush-mog-camera.service \
+#     | sudo tee /etc/systemd/system/rush-mog-camera.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now rush-mog-camera
+#   （用户不是 ubuntu 时改 User= 与 Group= 两处）
+#
+# 驱动：初代 Astra Pro（2bc5:0403）必须用 legacy astra_camera；Astra Pro Plus /
+#       Gemini 等新机型用 orbbec_camera。launch/astra.launch.py 自动选择，
+#       安装与排错见 docs/DEPLOY.md §6.6。
+#
+# 无相机时由 ConditionPathExists 静默跳过，不会反复重启。
+
 [Unit]
 Description=RUSH-MOG Astra Pro RGB/depth camera
 After=network-online.target
 Wants=network-online.target
-# Orbbec udev 规则为 Astra Pro 创建 /dev/astra_pro；没有相机时静默跳过
+# udev 规则（99-obsensor-libusb / 56-orbbec-usb）为 2bc5:0403 创建该符号链接
 ConditionPathExists=/dev/astra_pro
 
 [Service]
